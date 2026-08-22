@@ -1,4 +1,16 @@
-import { SendHorizontal } from 'lucide-react-native';
+/**
+ * The message bar.
+ *
+ * Two flush cells with no gap and no radius: a recessed field and, hard against
+ * it, the SEND block. The 2px rule across the top is what separates the bar
+ * from the log — there is no shadow and no blur in this direction.
+ *
+ * SEND is accent only while pressing it would actually send something. Idle it
+ * *loses the red* and drops to a bordered surface cell, which is the same
+ * signal the sync ladder uses: red means the thing is live, its absence means
+ * it is not. It never turns amber.
+ */
+
 import { useCallback, useMemo, useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -10,22 +22,33 @@ import {
   View,
   type NativeSyntheticEvent,
   type TextInputContentSizeChangeEventData,
+  type TextStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useSendMessage, type ChatScope } from '@/features/chat/queries';
-import { Colors, Radius, Space, TOUCH_TARGET, Type } from '@/lib/theme';
+import { Rule, Space, Type, tracking } from '@/lib/theme';
+import { useColors } from '@/lib/theme-context';
 
 /** Matches the CHECK constraint on messages.body — reject before the round-trip. */
 const MAX_LENGTH = 2000;
 /** A counter that is always on is noise; it only matters once you are near the wall. */
 const COUNTER_FROM = 1900;
 
-const LINE_HEIGHT = Type.body.lineHeight;
-const INPUT_PADDING_Y = 10;
-const MIN_INPUT_HEIGHT = TOUCH_TARGET;
+const BODY = Type.body(16);
+const INPUT_PADDING_Y = 13;
+/** The artboard's bar height, and comfortably over the 44px floor. */
+const MIN_INPUT_HEIGHT = BODY.lineHeight + INPUT_PADDING_Y * 2;
 /** Four lines, then the field scrolls instead of eating the whole screen. */
-const MAX_INPUT_HEIGHT = LINE_HEIGHT * 4 + INPUT_PADDING_Y * 2;
+const MAX_INPUT_HEIGHT = BODY.lineHeight * 4 + INPUT_PADDING_Y * 2;
+/** The artboard's SEND cell. */
+const SEND_WIDTH = 56;
+
+/** `Type.readout` hands back a readonly fontVariant tuple; TextStyle wants a mutable one. */
+const readout = (size: number): TextStyle => ({
+  ...Type.readout(size),
+  fontVariant: ['tabular-nums'],
+});
 
 export type ChatComposerProps = ChatScope & {
   placeholder?: string;
@@ -49,6 +72,7 @@ export function ChatComposer({
   keyboardOffset = 0,
   bottomInset,
 }: ChatComposerProps) {
+  const C = useColors();
   const insets = useSafeAreaInsets();
   const scope = useMemo<ChatScope>(() => ({ loungeId, roomId: roomId ?? null }), [loungeId, roomId]);
   const send = useSendMessage(scope);
@@ -91,28 +115,36 @@ export function ChatComposer({
       */
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={keyboardOffset}>
-      <View style={[styles.bar, { paddingBottom: (bottomInset ?? insets.bottom) + Space.sm }]}>
-        <View style={styles.field}>
+      <View
+        style={[
+          styles.bar,
+          {
+            backgroundColor: C.bg,
+            borderTopColor: C.rule,
+            paddingBottom: bottomInset ?? insets.bottom,
+          },
+        ]}>
+        <View style={[styles.field, { backgroundColor: C.bgRecessed }]}>
           <TextInput
             value={value}
             onChangeText={setValue}
             onContentSizeChange={onContentSizeChange}
             placeholder={placeholder}
-            placeholderTextColor={Colors.faint}
+            placeholderTextColor={C.ink3}
             multiline
             maxLength={MAX_LENGTH}
             // A multiline field already treats Return as a newline; sending is
             // the button's job alone, so submitBehavior stays at its default.
             textAlignVertical="top"
-            selectionColor={Colors.primary}
+            selectionColor={C.live}
             accessibilityLabel="Message"
-            style={[styles.input, { height }]}
+            style={[styles.input, { color: C.ink, height }]}
           />
 
           {value.length >= COUNTER_FROM ? (
             <Text
               accessibilityLiveRegion="polite"
-              style={[styles.counter, remaining <= 0 && styles.counterMaxed]}>
+              style={[styles.counter, { color: remaining <= 0 ? C.danger : C.ink3 }]}>
               {remaining}
             </Text>
           ) : null}
@@ -126,16 +158,11 @@ export function ChatComposer({
           onPress={onSend}
           style={({ pressed }) => [
             styles.send,
-            canSend ? styles.sendReady : styles.sendIdle,
-            pressed && canSend && styles.sendPressed,
+            canSend
+              ? { backgroundColor: pressed ? C.liveText : C.live }
+              : { backgroundColor: C.surface, borderLeftWidth: Rule.hair, borderLeftColor: C.rule },
           ]}>
-          {/*
-            The one legitimate accent on this bar: the glyph goes live only when
-            pressing it will actually send. Disabled it drops to Colors.faint,
-            which is exactly what faint is for — a control that is not offering
-            itself yet, not readable copy.
-          */}
-          <SendHorizontal size={20} color={canSend ? Colors.accent : Colors.faint} strokeWidth={1.6} />
+          <Text style={[styles.sendLabel, { color: canSend ? C.onLive : C.ink3 }]}>SEND</Text>
         </Pressable>
       </View>
     </KeyboardAvoidingView>
@@ -145,67 +172,37 @@ export function ChatComposer({
 const styles = StyleSheet.create({
   bar: {
     flexDirection: 'row',
+    // The field grows upward; SEND stays anchored to the bottom edge.
     alignItems: 'flex-end',
-    gap: Space.sm,
-    paddingHorizontal: Space.lg,
-    paddingTop: Space.sm,
-    // One step up from the ground, hairline-separated from the log above it, so
-    // the composer reads as a fixed edge rather than as more scrollable page.
-    backgroundColor: Colors.surface,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Colors.border,
+    // 2px, because this is a boundary between two major regions of the screen.
+    borderTopWidth: Rule.major,
   },
   field: {
     flex: 1,
     justifyContent: 'center',
-    // Glass on the raised bar — it tints with the room instead of stacking
-    // another opaque grey block on an already opaque one.
-    backgroundColor: Colors.glass,
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: Colors.border,
     paddingHorizontal: Space.md,
   },
   input: {
-    ...Type.body,
-    color: Colors.text,
+    ...BODY,
     paddingVertical: INPUT_PADDING_Y,
-    // The field must never be shorter than the send button beside it.
+    // The field must never be shorter than the SEND cell beside it.
     minHeight: MIN_INPUT_HEIGHT,
     maxHeight: MAX_INPUT_HEIGHT,
   },
   counter: {
-    // A remaining-character count measures. Mono.
-    ...Type.mono,
-    color: Colors.muted,
+    // A remaining-character count measures. Tabular figures.
+    ...readout(11),
     alignSelf: 'flex-end',
-    paddingBottom: Space.xs,
-  },
-  counterMaxed: {
-    color: Colors.danger,
+    paddingBottom: Space.sm,
   },
   send: {
-    width: TOUCH_TARGET,
-    height: TOUCH_TARGET,
-    borderRadius: Radius.pill,
-    borderWidth: 1,
+    width: SEND_WIDTH,
+    minHeight: MIN_INPUT_HEIGHT,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  /*
-    The fill stays glass in both states and only the ring and the glyph change:
-    a solid accent disc here would out-shout the live pips in the log above,
-    which are the thing accent is actually reserved for.
-  */
-  sendReady: {
-    backgroundColor: Colors.glassStrong,
-    borderColor: Colors.accent,
-  },
-  sendIdle: {
-    backgroundColor: Colors.surfaceRaised,
-    borderColor: Colors.border,
-  },
-  sendPressed: {
-    opacity: 0.85,
+  sendLabel: {
+    ...Type.heading(11),
+    letterSpacing: tracking(11, 0.06),
   },
 });

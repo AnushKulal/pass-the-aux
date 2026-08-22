@@ -1,9 +1,10 @@
-import { ChevronLeft } from 'lucide-react-native';
-import type { ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ArrowLeft } from 'lucide-react-native';
+import { memo, useMemo, useState, type ReactNode } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Colors, Space, TOUCH_TARGET, Type } from '@/lib/theme';
+import { useColors } from '@/lib/theme-context';
+import { GRID, PointerEvents, Rule, Space, TOUCH_TARGET, Type } from '@/lib/theme';
 
 export type ScreenProps = {
   children: ReactNode;
@@ -12,13 +13,19 @@ export type ScreenProps = {
   padded?: boolean;
   right?: ReactNode;
   onBack?: () => void;
+  /**
+   * Overlay the 25px modular grid the whole design is set on. Decorative and
+   * barely visible (`grid` is 4.5% ink) — it belongs on the surfaces that are
+   * mostly artwork, like the Session stage, not on every list.
+   */
+  grid?: boolean;
 };
 
 /**
  * Every route's outer shell.
  *
  * Bottom inset is deliberately not consumed here: screens sit under the tab bar
- * or a mini player, both of which own their own bottom padding. A screen that
+ * or the docked bar, both of which own their own bottom padding. A screen that
  * genuinely reaches the bottom edge should apply useSafeAreaInsets itself.
  */
 export function Screen({
@@ -28,25 +35,35 @@ export function Screen({
   padded = true,
   right,
   onBack,
+  grid = false,
 }: ScreenProps) {
+  const C = useColors();
   const hasHeader = Boolean(title || onBack || right);
 
   return (
-    <SafeAreaView edges={['top', 'left', 'right']} style={styles.root}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={[styles.root, { backgroundColor: C.bg }]}>
+      {grid ? <GridOverlay color={C.grid} /> : null}
+
       {hasHeader ? (
-        <View style={[styles.constrain, styles.header, padded && styles.gutter]}>
+        <View
+          style={[
+            styles.constrain,
+            styles.header,
+            { borderBottomColor: C.rule },
+            padded && styles.gutter,
+          ]}>
           {onBack ? (
             <Pressable
               onPress={onBack}
               accessibilityRole="button"
               accessibilityLabel="Go back"
               style={({ pressed }) => [styles.back, pressed && styles.backPressed]}>
-              <ChevronLeft size={24} strokeWidth={1.6} color={Colors.text} />
+              <ArrowLeft size={20} strokeWidth={2} color={C.ink} />
             </Pressable>
           ) : null}
 
           {title ? (
-            <Text numberOfLines={1} style={styles.title}>
+            <Text numberOfLines={1} style={[styles.title, { color: C.ink }]}>
               {title}
             </Text>
           ) : (
@@ -72,17 +89,64 @@ export function Screen({
   );
 }
 
+/**
+ * The 25px grid, drawn as lines rather than a repeating background — React
+ * Native has no `background-image`, so the pitch is laid out by hand.
+ *
+ * It measures itself instead of taking a size prop so it can sit behind a
+ * screen of any height, and it is memoised because the line count only changes
+ * when the window does. Always decorative: untouchable and hidden from screen
+ * readers.
+ */
+const GridOverlay = memo(function GridOverlay({ color }: { color: string }) {
+  const [size, setSize] = useState({ w: 0, h: 0 });
+
+  const onLayout = (e: LayoutChangeEvent) => {
+    const { width, height } = e.nativeEvent.layout;
+    setSize((prev) => (prev.w === width && prev.h === height ? prev : { w: width, h: height }));
+  };
+
+  const columns = useMemo(
+    () => Array.from({ length: Math.ceil(size.w / GRID) }, (_, i) => i * GRID),
+    [size.w],
+  );
+  const rows = useMemo(
+    () => Array.from({ length: Math.ceil(size.h / GRID) }, (_, i) => i * GRID),
+    [size.h],
+  );
+
+  return (
+    <View
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      onLayout={onLayout}
+      style={[StyleSheet.absoluteFill, PointerEvents.none]}>
+      {columns.map((x) => (
+        <View
+          key={`c${x}`}
+          style={[styles.gridLine, { left: x, top: 0, bottom: 0, width: Rule.hair, backgroundColor: color }]}
+        />
+      ))}
+      {rows.map((y) => (
+        <View
+          key={`r${y}`}
+          style={[styles.gridLine, { top: y, left: 0, right: 0, height: Rule.hair, backgroundColor: color }]}
+        />
+      ))}
+    </View>
+  );
+});
+
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: Colors.bg,
   },
   flex: {
     flex: 1,
   },
   /**
    * react-native-web has no phone to constrain it, so an unbounded column
-   * stretches to the full 1440px window and the line length becomes unreadable.
+   * stretches to the full window and the line length becomes unreadable.
    */
   constrain: {
     width: '100%',
@@ -96,26 +160,23 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: TOUCH_TARGET,
-    paddingTop: Space.lg,
-    // The chevron already carries its own 44px box, so the title sits close to
-    // it rather than a full step away.
-    gap: Space.xs,
+    minHeight: 54,
+    gap: Space.md,
+    borderBottomWidth: Rule.hair,
   },
   back: {
     width: TOUCH_TARGET,
     height: TOUCH_TARGET,
     alignItems: 'center',
     justifyContent: 'center',
-    // Pulls the optical centre of the chevron back onto the gutter line.
+    // Pulls the optical centre of the arrow back onto the gutter line.
     marginLeft: -Space.md,
   },
   backPressed: {
     opacity: 0.6,
   },
   title: {
-    ...Type.title,
-    color: Colors.text,
+    ...Type.display(22),
     flex: 1,
   },
   spacer: {
@@ -129,5 +190,8 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     paddingBottom: Space.xxl,
+  },
+  gridLine: {
+    position: 'absolute',
   },
 });

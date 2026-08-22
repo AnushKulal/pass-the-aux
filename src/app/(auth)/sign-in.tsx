@@ -1,16 +1,28 @@
 import { makeRedirectUri } from 'expo-auth-session';
 import { Redirect } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import { Globe, Music } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  type KeyboardTypeOptions,
+  type TextInputProps,
+} from 'react-native';
+import Animated, { FadeInDown, useReducedMotion } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 
-import { AuxButton, GlassCard, SheetTabs, TextField, useToast } from '@/components/ui';
+import { useToast } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
-import { Bloom, Colors, PointerEvents, Space, Type } from '@/lib/theme';
+import { Duration, Fonts, Rule, Space, Type, tracking } from '@/lib/theme';
+import { useColors } from '@/lib/theme-context';
 
 // Hands the redirect URL back to `openAuthSessionAsync` and closes the popup.
 // No-op on native, required on web.
@@ -18,10 +30,11 @@ WebBrowser.maybeCompleteAuthSession();
 
 type Mode = 'signin' | 'signup';
 
-const MODES = [
-  { key: 'signin', label: 'Sign in' },
-  { key: 'signup', label: 'Create account' },
-];
+/** The screen gutter. Everything full-bleed measures out from this. */
+const GUTTER = 26;
+/** Control heights, straight off the artboard. */
+const CELL = 46;
+const BUTTON = 52;
 
 /** Deliberately loose. The confirmation email is the real validator. */
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -29,6 +42,8 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD = 8;
 
 export default function SignInScreen() {
+  const C = useColors();
+  const reduced = useReducedMotion();
   const toast = useToast();
   const { session, pendingUsernameClaim, beginUsernameClaim, finishUsernameClaim } = useAuth();
 
@@ -48,8 +63,8 @@ export default function SignInScreen() {
         ? undefined
         : 'Enter your password.';
 
-  const changeMode = useCallback((next: string) => {
-    setMode(next === 'signup' ? 'signup' : 'signin');
+  const changeMode = useCallback((next: Mode) => {
+    setMode(next);
     // Rules differ between the two modes, so a message written for the other
     // one is worse than no message.
     setSubmitted(false);
@@ -141,26 +156,12 @@ export default function SignInScreen() {
   // somehow lands back here mid-claim.
   if (session && pendingUsernameClaim) return <Redirect href="/(auth)/claim-username" />;
 
-  return (
-    <SafeAreaView style={styles.root} edges={['top', 'bottom', 'left', 'right']}>
-      {/*
-        Signature 1, dialled right down. No artwork has been loaded this early
-        in the app, so the bloom only has to keep the ground from reading as
-        flat black behind the wordmark.
-      */}
-      <View style={[styles.bloom, PointerEvents.none]}>
-        <Svg width="100%" height="100%">
-          <Defs>
-            <RadialGradient id="signInBloom" cx="50%" cy="14%" rx="62%" ry="86%">
-              <Stop offset="0" stopColor={Bloom.a} stopOpacity={0.22} />
-              <Stop offset="0.45" stopColor={Bloom.b} stopOpacity={0.13} />
-              <Stop offset="0.78" stopColor={Colors.bg} stopOpacity={0} />
-            </RadialGradient>
-          </Defs>
-          <Rect x="0" y="0" width="100%" height="100%" fill="url(#signInBloom)" />
-        </Svg>
-      </View>
+  const primaryLabel = mode === 'signup' ? 'CREATE ACCOUNT' : 'SIGN IN';
 
+  return (
+    <SafeAreaView
+      edges={['top', 'bottom', 'left', 'right']}
+      style={[styles.root, { backgroundColor: C.bg }]}>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -168,27 +169,59 @@ export default function SignInScreen() {
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
-          <View style={styles.brand}>
-            <Text style={styles.wordmark}>aux</Text>
-            <Text style={styles.tagline}>Pass the aux.</Text>
-          </View>
-
-          {/* Elastic rather than a centred column: the wordmark holds the top
-              and the credentials rise to meet the keyboard. */}
-          <View style={styles.gap} />
-
-          <View style={styles.block}>
+          <Animated.View
+            style={styles.column}
+            entering={
+              reduced
+                ? undefined
+                : FadeInDown.duration(Duration.enter).withInitialValues({
+                    opacity: 0,
+                    transform: [{ translateY: 8 }],
+                  })
+            }>
             {/*
-              Segmented, per the artboard: a pill track with 44px word-label
-              segments. The underline variant would set "Create account" as an
-              11.5px mono readout and underline it in accent, and neither is
-              right — this is readable copy, and picking a form mode is not live.
+              The wordmark and the rule that goes through it. The rule is
+              absolutely positioned on this full-width block rather than on the
+              padded text, which is how it bleeds off both edges without
+              relying on overflow behaviour that differs across platforms.
             */}
-            <SheetTabs tabs={MODES} active={mode} onChange={changeMode} variant="segmented" />
+            <View style={styles.brand}>
+              <View style={styles.brandInner}>
+                <Text style={[styles.wordmark, { color: C.ink }]}>AUX</Text>
+                <Text style={[styles.tagline, { color: C.ink2 }]}>PASS THE AUX.</Text>
+                <Text style={[styles.pitch, { color: C.ink2 }]}>
+                  Everyone plays the song on their own account. The server only says{' '}
+                  <Text style={{ color: C.ink }}>this track, starting now.</Text>
+                </Text>
+              </View>
+              {/* Last, so it paints over the glyphs rather than behind them. */}
+              <View style={[styles.strike, { backgroundColor: C.live }]} />
+            </View>
 
-            <View style={styles.form}>
-              <TextField
-                label="Email"
+            <View style={styles.gap} />
+
+            {/* Segmented, per the artboard: 46px cells, active cell an accent
+                fill. The two modes are the only thing this screen branches on,
+                so the control states it flatly. */}
+            <View
+              accessibilityRole="tablist"
+              style={[styles.segment, { borderColor: C.rule3 }]}>
+              <SegmentCell
+                label="SIGN IN"
+                selected={mode === 'signin'}
+                onPress={() => changeMode('signin')}
+              />
+              <SegmentCell
+                label="CREATE ACCOUNT"
+                selected={mode === 'signup'}
+                onPress={() => changeMode('signup')}
+                divided
+              />
+            </View>
+
+            <View style={styles.fields}>
+              <Field
+                label="EMAIL"
                 value={email}
                 onChangeText={setEmail}
                 placeholder="you@example.com"
@@ -197,12 +230,13 @@ export default function SignInScreen() {
                 keyboardType="email-address"
                 error={submitted ? emailProblem : undefined}
               />
-
-              <TextField
-                label="Password"
+              <Field
+                label="PASSWORD"
                 value={password}
                 onChangeText={setPassword}
-                placeholder={mode === 'signup' ? `At least ${MIN_PASSWORD} characters` : 'Your password'}
+                placeholder={
+                  mode === 'signup' ? `At least ${MIN_PASSWORD} characters` : 'Your password'
+                }
                 secureTextEntry
                 autoCapitalize="none"
                 autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
@@ -210,55 +244,172 @@ export default function SignInScreen() {
               />
             </View>
 
-            {/* Deliberately the primary fill and never the accent: signing in
-                is not a live state. */}
-            <AuxButton
-              label={mode === 'signup' ? 'Create account' : 'Sign in'}
+            {/* The one accent fill on this screen. Getting in is the live act. */}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={mode === 'signup' ? 'Create account' : 'Sign in'}
+              accessibilityState={{ busy: busy === 'email', disabled: busy !== null }}
+              disabled={busy !== null}
               onPress={() => {
                 void submit();
               }}
-              fullWidth
-              loading={busy === 'email'}
-              disabled={busy !== null && busy !== 'email'}
-            />
-          </View>
+              style={({ pressed }) => [
+                styles.primary,
+                {
+                  backgroundColor: pressed ? C.liveText : C.live,
+                  opacity: busy !== null && busy !== 'email' ? 0.55 : 1,
+                },
+              ]}>
+              {busy === 'email' ? (
+                <ActivityIndicator size="small" color={C.onLive} />
+              ) : (
+                <Text style={[styles.primaryLabel, { color: C.onLive }]}>{primaryLabel}</Text>
+              )}
+            </Pressable>
 
-          <View style={styles.block}>
-            <View style={styles.divider}>
-              <View style={styles.rule} />
-              <Text style={styles.dividerLabel}>or</Text>
-              <View style={styles.rule} />
-            </View>
-
-            <AuxButton
-              label="Continue with Google"
-              icon={Globe}
-              variant="ghost"
-              fullWidth
+            {/* Bordered, not filled: there is no second brand colour in this
+                direction, so non-accent actions are outlines. */}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Continue with Google"
+              accessibilityState={{ busy: busy === 'google', disabled: busy !== null }}
+              disabled={busy !== null}
               onPress={() => {
                 void continueWithGoogle();
               }}
-              loading={busy === 'google'}
-              disabled={busy !== null && busy !== 'google'}
-            />
-          </View>
+              style={({ pressed }) => [
+                styles.secondary,
+                {
+                  borderColor: C.rule3,
+                  backgroundColor: pressed ? C.surface : 'transparent',
+                  opacity: busy !== null && busy !== 'google' ? 0.55 : 1,
+                },
+              ]}>
+              {busy === 'google' ? (
+                <ActivityIndicator size="small" color={C.ink} />
+              ) : (
+                <Text style={[styles.secondaryLabel, { color: C.ink }]}>Continue with Google</Text>
+              )}
+            </Pressable>
 
-          <View style={styles.gap} />
-
-          <GlassCard>
-            <View style={styles.noteHead}>
-              <Music size={18} color={Colors.muted} strokeWidth={1.6} />
-              <Text style={styles.noteTitle}>Spotify is not a sign-in method</Text>
-            </View>
-            <Text style={styles.noteText}>
-              Aux plays through YouTube out of the box, so you never need a Spotify account. If you
-              have Premium, you can link it later from Settings, Connections to play in Spotify
-              instead.
+            {/* Below a 2px rule, the honest note. */}
+            <View style={[styles.noteRule, { backgroundColor: C.rule }]} />
+            <Text style={[styles.note, { color: C.ink2 }]}>
+              No Spotify needed. Aux plays through YouTube by default — link Premium later from
+              Settings if you have it.
             </Text>
-          </GlassCard>
+          </Animated.View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
+  );
+}
+
+/* ------------------------------------------------------------------- parts */
+
+function SegmentCell({
+  label,
+  selected,
+  onPress,
+  divided = false,
+}: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+  divided?: boolean;
+}) {
+  const C = useColors();
+
+  return (
+    <Pressable
+      accessibilityRole="tab"
+      accessibilityState={{ selected }}
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.segmentCell,
+        divided && { borderLeftWidth: Rule.hair, borderLeftColor: C.rule3 },
+        {
+          backgroundColor: selected
+            ? C.live
+            : pressed
+              ? C.surface
+              : 'transparent',
+        },
+      ]}>
+      <Text
+        numberOfLines={1}
+        style={[
+          selected ? styles.segmentLabelOn : styles.segmentLabelOff,
+          { color: selected ? C.onLive : C.ink2 },
+        ]}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function Field({
+  label,
+  value,
+  onChangeText,
+  placeholder,
+  error,
+  secureTextEntry = false,
+  autoCapitalize = 'sentences',
+  autoComplete,
+  keyboardType,
+}: {
+  label: string;
+  value: string;
+  onChangeText: (v: string) => void;
+  placeholder?: string;
+  error?: string;
+  secureTextEntry?: boolean;
+  autoCapitalize?: 'none' | 'sentences';
+  autoComplete?: string;
+  keyboardType?: KeyboardTypeOptions;
+}) {
+  const C = useColors();
+  const [focused, setFocused] = useState(false);
+
+  return (
+    <View>
+      <Text style={[styles.fieldLabel, { color: C.ink3 }]}>{label}</Text>
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        placeholder={placeholder}
+        placeholderTextColor={C.ink3}
+        secureTextEntry={secureTextEntry}
+        autoCapitalize={autoCapitalize}
+        autoCorrect={!secureTextEntry}
+        keyboardType={keyboardType}
+        // The public prop is a plain string; RN wants its own union. Narrowed
+        // here so callers are not forced to import RN types.
+        autoComplete={autoComplete as TextInputProps['autoComplete']}
+        accessibilityLabel={label}
+        selectionColor={C.live}
+        style={[
+          styles.input,
+          {
+            backgroundColor: C.surface,
+            color: C.ink,
+            // Border width never changes, only its colour — a thicker focus
+            // ring would shift the text by a pixel on every focus. Error
+            // outranks focus so the reason is never hidden.
+            borderColor: error ? C.danger : focused ? C.ink : C.rule2,
+          },
+        ]}
+      />
+      {error ? (
+        <Text accessibilityLiveRegion="polite" style={[styles.fieldError, { color: C.danger }]}>
+          {error}
+        </Text>
+      ) : null}
+    </View>
   );
 }
 
@@ -327,80 +478,139 @@ function authMessage(caught: unknown): string {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: Colors.bg,
   },
   flex: {
     flex: 1,
   },
-  bloom: {
+  content: {
+    flexGrow: 1,
+  },
+  column: {
+    flex: 1,
+    width: '100%',
+    maxWidth: 720,
+    alignSelf: 'center',
+    paddingTop: Space.xxl,
+    paddingBottom: Space.huge,
+  },
+  /**
+   * Deliberately unpadded: an absolutely positioned child takes its insets from
+   * the parent's PADDING edge, so the strike rule can only bleed to the screen
+   * edges if the gutter lives on an inner view instead.
+   */
+  brand: {
+    position: 'relative',
+  },
+  brandInner: {
+    paddingHorizontal: GUTTER,
+  },
+  wordmark: {
+    ...Type.display(88),
+    // 0.82 rather than the ramp's 1.06 — a three-letter wordmark wants to sit
+    // on its own cap height, not in a line box.
+    lineHeight: 72,
+    letterSpacing: tracking(88, -0.045),
+  },
+  /** 2px accent, struck through the wordmark and off both edges. */
+  strike: {
     position: 'absolute',
     left: 0,
     right: 0,
-    top: 0,
-    height: 366,
-  },
-  content: {
-    flexGrow: 1,
-    width: '100%',
-    maxWidth: 480,
-    alignSelf: 'center',
-    paddingHorizontal: Space.xl,
-    paddingTop: Space.xxl,
-    paddingBottom: Space.xl,
-    gap: Space.lg,
-  },
-  brand: {
-    alignItems: 'center',
-    gap: Space.sm,
-  },
-  wordmark: {
-    ...Type.hero,
-    color: Colors.text,
-    letterSpacing: 0.4,
+    top: 52,
+    height: Rule.major,
   },
   tagline: {
-    ...Type.body,
-    color: Colors.muted,
+    ...Type.label(12),
+    letterSpacing: tracking(12, 0.22),
+    paddingTop: 10,
+  },
+  pitch: {
+    ...Type.body(16),
+    maxWidth: 300,
+    marginTop: Space.xl,
   },
   /** Collapses first when the keyboard takes the bottom half of the screen. */
   gap: {
     flexGrow: 1,
     flexShrink: 1,
-    minHeight: Space.sm,
+    minHeight: Space.xl,
   },
-  block: {
-    gap: Space.md,
-  },
-  form: {
-    gap: Space.md,
-  },
-  divider: {
+  segment: {
     flexDirection: 'row',
-    alignItems: 'center',
+    marginHorizontal: GUTTER,
+    marginBottom: 18,
+    borderWidth: Rule.hair,
+  },
+  segmentCell: {
+    flex: 1,
+    minHeight: CELL,
+    justifyContent: 'center',
+    paddingHorizontal: Space.md,
+  },
+  segmentLabelOn: {
+    ...Type.heading(11),
+    letterSpacing: tracking(11, 0.1),
+  },
+  segmentLabelOff: {
+    ...Type.label(11),
+    letterSpacing: tracking(11, 0.1),
+  },
+  fields: {
+    paddingHorizontal: GUTTER,
     gap: Space.md,
   },
-  rule: {
-    flex: 1,
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: Colors.border,
+  fieldLabel: {
+    ...Type.label(11),
+    letterSpacing: tracking(11, 0.12),
+    marginBottom: 6,
   },
-  dividerLabel: {
-    ...Type.label,
-    color: Colors.muted,
+  input: {
+    height: CELL,
+    paddingHorizontal: Space.md,
+    paddingVertical: 0,
+    borderWidth: Rule.hair,
+    fontFamily: Fonts.regular,
+    fontSize: 16,
   },
-  noteHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space.sm,
+  fieldError: {
+    ...Type.label(11),
+    letterSpacing: tracking(11, 0.09),
+    marginTop: 6,
   },
-  noteTitle: {
-    ...Type.bodyStrong,
-    color: Colors.text,
-    flex: 1,
+  primary: {
+    marginTop: Space.xl,
+    marginHorizontal: GUTTER,
+    height: BUTTON,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    paddingHorizontal: Space.lg,
   },
-  noteText: {
-    ...Type.body,
-    color: Colors.muted,
-    marginTop: Space.xs,
+  primaryLabel: {
+    ...Type.heading(13),
+    letterSpacing: tracking(13, 0.1),
+  },
+  secondary: {
+    marginTop: 10,
+    marginHorizontal: GUTTER,
+    height: BUTTON,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    paddingHorizontal: Space.lg,
+    borderWidth: Rule.hair,
+  },
+  secondaryLabel: {
+    fontFamily: Fonts.semibold,
+    fontSize: 13,
+    letterSpacing: tracking(13, 0.06),
+  },
+  noteRule: {
+    height: Rule.major,
+    marginTop: 22,
+    marginHorizontal: GUTTER,
+  },
+  note: {
+    ...Type.body(16),
+    marginTop: 14,
+    marginHorizontal: GUTTER,
   },
 });

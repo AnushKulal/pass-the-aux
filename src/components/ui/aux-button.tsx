@@ -1,12 +1,58 @@
 import * as Haptics from 'expo-haptics';
 import type { LucideIcon } from 'lucide-react-native';
-import { useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text } from 'react-native';
-import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, {
+  interpolateColor,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 
-import { Colors, Duration, PointerEvents, Radius, Space, TOUCH_TARGET, Type } from '@/lib/theme';
+import { useColors } from '@/lib/theme-context';
+import { Duration, Fonts, Radius, Rule, Space, tracking, Type, type Palette } from '@/lib/theme';
 
-export type AuxButtonVariant = 'primary' | 'accent' | 'ghost' | 'danger';
+/**
+ * Patchbay has four button shapes, all with square corners and a left-aligned
+ * label:
+ *
+ * - `live`        — accent fill, `onLive` label. The reserved colour: Join,
+ *                   Play, Go live, Take the aux, Start a Session.
+ * - `liveOutline` — 1px accent border, `liveText` label. The accent's quieter
+ *                   register (START A SESSION, FIND A LOUNGE, BACK TO THE FEED).
+ * - `bordered`    — 1px `rule3` on nothing, ink label. Every non-accent action.
+ * - `ghost`       — no border at all, ink2 label.
+ * - `danger`      — destructive fill.
+ *
+ * The old names are still accepted so no call site had to change: `accent` is
+ * `live` and `primary` is `bordered` — there is no filled non-accent button in
+ * this direction, because a second fill would compete with the one colour that
+ * means live.
+ */
+export type AuxButtonVariant =
+  | 'live'
+  | 'liveOutline'
+  | 'bordered'
+  | 'ghost'
+  | 'danger'
+  /** @deprecated alias for `live`. */
+  | 'accent'
+  /** @deprecated alias for `bordered`. */
+  | 'primary';
+
+type ResolvedVariant = 'live' | 'liveOutline' | 'bordered' | 'ghost' | 'danger';
+
+const ALIASES: Record<AuxButtonVariant, ResolvedVariant> = {
+  live: 'live',
+  liveOutline: 'liveOutline',
+  bordered: 'bordered',
+  ghost: 'ghost',
+  danger: 'danger',
+  accent: 'live',
+  primary: 'bordered',
+};
+
 export type AuxButtonSize = 'sm' | 'md' | 'lg';
 
 export type AuxButtonProps = {
@@ -21,66 +67,127 @@ export type AuxButtonProps = {
 };
 
 /**
- * Pressed-state washes. Bright fills get darkened by the ground colour, dark
- * fills get lifted with white — the artboard's PRESSED cell is a flat
- * rgba(14,10,22,.20) sheet over the label, not a scale or an opacity drop.
+ * Reanimated's colour interpolation needs a real colour at both ends; the
+ * string 'transparent' is not one everywhere, so unfilled variants start from an
+ * explicit zero-alpha black.
  */
-const PRESS_LIGHTEN = 'rgba(255, 255, 255, 0.18)';
-const PRESS_DARKEN = 'rgba(14, 10, 22, 0.20)';
+const CLEAR = 'rgba(0,0,0,0)';
 
-const VARIANTS: Record<
-  AuxButtonVariant,
-  { bg: string; fg: string; border: string; press: string }
-> = {
-  /*
-    Signal Afterglow's non-live fill: the bloom's violet, darkened until
-    Colors.text clears 4.5:1 on it (7.7:1 measured). Primary actions belong to
-    the atmosphere rather than competing with the one colour that means "live".
-  */
-  primary: { bg: Colors.primary, fg: Colors.text, border: 'transparent', press: PRESS_LIGHTEN },
-  /*
-    Accent and danger are both bright fills. Colors.text on either falls below
-    4.5:1 (aqua ~1.4:1, rose ~3.6:1), so both take the near-black ground as their
-    label — 12.4:1 and 5.2:1 respectively. Do not "fix" these back to white.
-
-    `accent` is the reserved colour: Play, Join, Go on aux, Start a Session. A
-    plain confirm or a decorative CTA must use `primary`.
-  */
-  accent: { bg: Colors.accent, fg: Colors.bg, border: 'transparent', press: PRESS_DARKEN },
-  danger: { bg: Colors.danger, fg: Colors.bg, border: 'transparent', press: PRESS_DARKEN },
-  /* Ghost carries the brighter hairline so it reads as an outline, not a divider. */
-  ghost: { bg: 'transparent', fg: Colors.text, border: Colors.borderBright, press: PRESS_LIGHTEN },
+type Skin = {
+  bg: string;
+  bgPress: string;
+  fg: string;
+  border: string;
+  borderPress: string;
+  /** Accent labels are uppercase and widely tracked; prose labels are not. */
+  shout: boolean;
 };
 
+function skinFor(v: ResolvedVariant, C: Palette): Skin {
+  switch (v) {
+    case 'live':
+      // Pressed goes *brighter*, not darker — `liveText` is the same hue lifted.
+      return {
+        bg: C.live,
+        bgPress: C.liveText,
+        fg: C.onLive,
+        border: CLEAR,
+        borderPress: CLEAR,
+        shout: true,
+      };
+    case 'liveOutline':
+      return {
+        bg: CLEAR,
+        bgPress: C.liveWash,
+        fg: C.liveText,
+        border: C.live,
+        borderPress: C.live,
+        shout: true,
+      };
+    case 'danger':
+      return {
+        bg: CLEAR,
+        bgPress: C.dangerWash,
+        fg: C.danger,
+        border: C.dangerBorder,
+        borderPress: C.danger,
+        shout: true,
+      };
+    case 'ghost':
+      return {
+        bg: CLEAR,
+        bgPress: C.surface,
+        fg: C.ink2,
+        border: CLEAR,
+        borderPress: CLEAR,
+        shout: false,
+      };
+    case 'bordered':
+    default:
+      return {
+        bg: CLEAR,
+        bgPress: C.surface2,
+        fg: C.ink,
+        border: C.rule3,
+        borderPress: C.ink,
+        shout: false,
+      };
+  }
+}
+
+/**
+ * Two heights only — 46 for a control that sits inside a row or a header, 52 for
+ * a screen's primary action. `lg` is kept as an alias of `md` so the old
+ * three-size call sites still compile.
+ */
 const SIZES: Record<
   AuxButtonSize,
-  { minHeight: number; paddingHorizontal: number; gap: number; icon: number }
+  { minHeight: number; paddingHorizontal: number; gap: number; icon: number; font: number }
 > = {
-  // Heights and gutters come straight off the artboard's button matrix:
-  // sm 44 / 16, md 52 / 24, lg 58 / 32.
-  sm: { minHeight: TOUCH_TARGET, paddingHorizontal: Space.lg, gap: Space.sm, icon: 16 },
-  md: { minHeight: 52, paddingHorizontal: Space.xxl, gap: Space.sm, icon: 18 },
-  lg: { minHeight: 58, paddingHorizontal: Space.xxxl, gap: Space.md, icon: 20 },
+  sm: { minHeight: 46, paddingHorizontal: Space.lg, gap: Space.sm, icon: 15, font: 11 },
+  md: { minHeight: 52, paddingHorizontal: Space.lg, gap: Space.sm, icon: 18, font: 13 },
+  lg: { minHeight: 52, paddingHorizontal: Space.xl, gap: Space.md, icon: 20, font: 13 },
 };
 
 export function AuxButton({
   label,
   onPress,
-  variant = 'primary',
+  variant = 'bordered',
   size = 'md',
   icon: Icon,
   loading = false,
   disabled = false,
   fullWidth = false,
 }: AuxButtonProps) {
-  const v = VARIANTS[variant];
+  const C = useColors();
+  const skin = skinFor(ALIASES[variant] ?? 'bordered', C);
   const s = SIZES[size];
   const blocked = disabled || loading;
 
-  // Background wash instead of a scale transform: scaling a button nudges the
-  // rows around it on Android and makes long labels reflow mid-press.
+  /*
+    Colour eases rather than the box scaling: scaling a button nudges the rows
+    around it on Android and makes long labels reflow mid-press.
+
+    The held flag is React state driving the shared value from an effect rather
+    than a write straight out of the press handler — the compiler treats a shared
+    value as immutable outside an effect, and one extra render per press is not
+    a cost worth arguing with it over.
+  */
+  const [pressed, setPressed] = useState(false);
+  const reduced = useReducedMotion();
   const press = useSharedValue(0);
-  const wash = useAnimatedStyle(() => ({ opacity: press.value }));
+
+  useEffect(() => {
+    press.value = withTiming(pressed ? 1 : 0, { duration: reduced ? 0 : Duration.press });
+  }, [pressed, reduced, press]);
+
+  const animated = useAnimatedStyle(() => ({
+    backgroundColor: interpolateColor(press.value, [0, 1], [skin.bg, skin.bgPress]),
+    borderColor: interpolateColor(press.value, [0, 1], [skin.border, skin.borderPress]),
+  }));
+
+  const onPressIn = useCallback(() => setPressed(true), [setPressed]);
+  const onPressOut = useCallback(() => setPressed(false), [setPressed]);
 
   const handlePress = useCallback(() => {
     // expo-haptics is a no-op stub on web, but calling it there still costs a
@@ -91,68 +198,75 @@ export function AuxButton({
     onPress();
   }, [onPress]);
 
+  const labelStyle = skin.shout
+    ? {
+        ...Type.heading(s.font),
+        // The accent labels in the prototype run wider than the heading default.
+        letterSpacing: tracking(s.font, 0.1),
+        textTransform: 'uppercase' as const,
+      }
+    : {
+        fontFamily: Fonts.semibold,
+        fontSize: s.font,
+        lineHeight: Math.round(s.font * 1.25),
+        letterSpacing: tracking(s.font, 0.06),
+      };
+
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ disabled: blocked, busy: loading }}
-      disabled={blocked}
-      onPress={handlePress}
-      onPressIn={() => {
-        press.value = withTiming(1, { duration: Duration.fast });
-      }}
-      onPressOut={() => {
-        press.value = withTiming(0, { duration: Duration.base });
-      }}
+    <Animated.View
       style={[
         styles.base,
-        {
-          minHeight: s.minHeight,
-          paddingHorizontal: s.paddingHorizontal,
-          gap: s.gap,
-          backgroundColor: v.bg,
-          borderColor: v.border,
-        },
+        animated,
+        { minHeight: s.minHeight },
         fullWidth && styles.fullWidth,
         blocked && styles.blocked,
       ]}>
-      <Animated.View
-        style={[StyleSheet.absoluteFill, { backgroundColor: v.press }, wash, PointerEvents.none]}
-      />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        accessibilityState={{ disabled: blocked, busy: loading }}
+        disabled={blocked}
+        onPress={handlePress}
+        onPressIn={onPressIn}
+        onPressOut={onPressOut}
+        style={[
+          styles.hit,
+          { minHeight: s.minHeight, paddingHorizontal: s.paddingHorizontal, gap: s.gap },
+        ]}>
+        {loading ? (
+          <ActivityIndicator size="small" color={skin.fg} />
+        ) : Icon ? (
+          <Icon size={s.icon} strokeWidth={2} color={skin.fg} />
+        ) : null}
 
-      {loading ? (
-        <ActivityIndicator size="small" color={v.fg} />
-      ) : Icon ? (
-        <Icon size={s.icon} color={v.fg} />
-      ) : null}
-
-      <Text numberOfLines={1} style={[styles.label, { color: v.fg }]}>
-        {label}
-      </Text>
-    </Pressable>
+        <Text numberOfLines={1} style={[labelStyle, { color: skin.fg }]}>
+          {label}
+        </Text>
+      </Pressable>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
   base: {
+    borderRadius: Radius,
+    // Held at 1 on every variant so swapping variants never changes layout.
+    borderWidth: Rule.hair,
+    alignSelf: 'flex-start',
+  },
+  hit: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: Radius.pill,
-    // Held at 1 on every variant so swapping to `ghost` never changes layout.
-    borderWidth: 1,
-    overflow: 'hidden',
-    alignSelf: 'flex-start',
+    // Labels are flush left, the way every button in the prototype sets them —
+    // the gutter, not the centre line, is what this design aligns to.
+    justifyContent: 'flex-start',
   },
   fullWidth: {
     alignSelf: 'stretch',
     width: '100%',
   },
+  /** The disabled cell in the prototype is the live cell at 55%. */
   blocked: {
-    opacity: 0.45,
-  },
-  label: {
-    ...Type.bodyStrong,
-    textAlign: 'center',
+    opacity: 0.55,
   },
 });

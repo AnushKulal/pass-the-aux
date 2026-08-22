@@ -5,7 +5,6 @@
 export { BLURHASH_SURFACE } from '@/components/ui/blurhash';
 
 export { Avatar, type AvatarProps } from '@/components/ui/avatar';
-export { Bloom, type BloomProps } from '@/components/ui/bloom';
 export {
   AuxButton,
   type AuxButtonProps,
@@ -13,9 +12,20 @@ export {
   type AuxButtonVariant,
 } from '@/components/ui/aux-button';
 export { EmptyState, type EmptyStateProps } from '@/components/ui/empty-state';
-export { GlassCard, type GlassCardProps } from '@/components/ui/glass-card';
+export {
+  GlassCard,
+  Panel,
+  type GlassCardProps,
+  type PanelProps,
+} from '@/components/ui/glass-card';
 export { LivePulse, type LivePulseProps } from '@/components/ui/live-pulse';
 export { ProgressBar, type ProgressBarProps } from '@/components/ui/progress-bar';
+/*
+  `Rule` is also the name of the weight table in '@/lib/theme'. A file that wants
+  both should import one of them aliased — `import { Rule as RuleWeight } from
+  '@/lib/theme'` — or use the `Divider` alias exported here.
+*/
+export { Divider, Rule, type RuleProps, type RuleWeightName } from '@/components/ui/rule';
 export { Screen, type ScreenProps } from '@/components/ui/screen';
 export {
   SheetTabs,

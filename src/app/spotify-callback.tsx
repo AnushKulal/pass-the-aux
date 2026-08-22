@@ -1,19 +1,20 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import { X } from 'lucide-react-native';
-import { useEffect, useState } from 'react';
-import { Platform, StyleSheet, Text, View } from 'react-native';
-import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
+import { useEffect, useMemo, useState } from 'react';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated, {
+  Easing,
+  FadeInDown,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from 'react-native-reanimated';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { AuxButton, Screen } from '@/components/ui';
-import { Bloom, Colors, PointerEvents, Space, Type } from '@/lib/theme';
-
-/** Colors.warn and Colors.danger held back to ring and wash weights. */
-const WARN_RING = 'rgba(232, 177, 92, 0.16)';
-const WARN_RING_INNER = 'rgba(232, 177, 92, 0.30)';
-const WARN_GLOW = 'rgba(232, 177, 92, 0.22)';
-const DANGER_WASH = 'rgba(242, 101, 126, 0.07)';
-const DANGER_EDGE = 'rgba(242, 101, 126, 0.26)';
+import { Duration, Rule, Space, Type, tracking } from '@/lib/theme';
+import { useColors } from '@/lib/theme-context';
 
 /**
  * Where Spotify sends the browser back on web: `<origin>/spotify-callback`,
@@ -31,39 +32,43 @@ const DANGER_EDGE = 'rgba(242, 101, 126, 0.26)';
  * deep link itself.
  */
 export default function SpotifyCallbackScreen() {
+  const C = useColors();
+  const reduced = useReducedMotion();
+
   const params = useLocalSearchParams<{ code?: string; state?: string; error?: string }>();
   const code = typeof params.code === 'string' ? params.code : null;
   const state = typeof params.state === 'string' ? params.state : null;
   const denial = typeof params.error === 'string' ? params.error : null;
 
-  const [failure, setFailure] = useState<string | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+
+  /*
+    Derived during render rather than pushed into state from an effect: the
+    verdict is a pure function of the callback URL, and running it through
+    setState would render the "connecting" frame first and then replace it.
+  */
+  const failure = useMemo<string | null>(() => {
+    if (Platform.OS !== 'web') return null;
+    // Spotify's own refusals, worded exactly as the hook words them so the two
+    // entry points into this flow never disagree.
+    if (denial) {
+      return denial === 'access_denied'
+        ? 'Spotify access was declined.'
+        : `Spotify returned an error: ${denial}`;
+    }
+    if (!code) return 'Spotify did not return an authorization code.';
+    // No state to echo means the opening tab could never verify this callback,
+    // so there is nothing here worth handing over.
+    if (!state) return 'Spotify sign-in could not be verified. Please try again.';
+    return null;
+  }, [code, denial, state]);
 
   useEffect(() => {
     if (Platform.OS !== 'web') {
       router.replace('/settings/connections');
       return;
     }
-
-    // Spotify's own refusals, worded exactly as the hook words them so the two
-    // entry points into this flow never disagree.
-    if (denial) {
-      setFailure(
-        denial === 'access_denied'
-          ? 'Spotify access was declined.'
-          : `Spotify returned an error: ${denial}`
-      );
-      return;
-    }
-    if (!code) {
-      setFailure('Spotify did not return an authorization code.');
-      return;
-    }
-    // No state to echo means the opening tab could never verify this callback,
-    // so there is nothing here worth handing over.
-    if (!state) {
-      setFailure('Spotify sign-in could not be verified. Please try again.');
-      return;
-    }
+    if (failure) return;
 
     try {
       WebBrowser.maybeCompleteAuthSession();
@@ -80,136 +85,153 @@ export default function SpotifyCallbackScreen() {
     // effect runs the handoff has usually already happened and been cleaned
     // up — a "no session in progress" result here means done, not failed.
     router.replace('/settings/connections');
-  }, [code, denial, state]);
+  }, [failure]);
+
+  // The readout is the only thing on the screen that changes, and a handshake
+  // with no elapsed time on it reads as frozen.
+  useEffect(() => {
+    if (failure) return;
+    const timer = setInterval(() => setElapsed((n) => n + 1), 1000);
+    return () => clearInterval(timer);
+  }, [failure]);
 
   return (
-    <Screen>
-      {/* Two seconds of screen, and almost nothing on it but the atmosphere. */}
-      <View style={[styles.bloom, PointerEvents.none]}>
-        <Svg width="100%" height="100%">
-          <Defs>
-            <RadialGradient id="callbackBloom" cx="50%" cy="50%" rx="62%" ry="52%">
-              <Stop offset="0" stopColor={Bloom.a} stopOpacity={0.18} />
-              <Stop offset="0.45" stopColor={Bloom.b} stopOpacity={0.1} />
-              <Stop offset="0.78" stopColor={Colors.bg} stopOpacity={0} />
-            </RadialGradient>
-          </Defs>
-          <Rect x="0" y="0" width="100%" height="100%" fill="url(#callbackBloom)" />
-        </Svg>
-      </View>
-
-      <View style={styles.center}>
+    <SafeAreaView
+      edges={['top', 'bottom', 'left', 'right']}
+      style={[styles.root, { backgroundColor: C.bg }]}>
+      <Animated.View
+        style={styles.center}
+        entering={
+          reduced
+            ? undefined
+            : FadeInDown.duration(Duration.enter).withInitialValues({
+                opacity: 0,
+                transform: [{ translateY: 8 }],
+              })
+        }>
         {failure ? (
-          <View style={styles.status}>
-            <View style={styles.failEmblem}>
-              <X size={30} color={Colors.danger} strokeWidth={1.6} />
-            </View>
-            <View style={styles.copy}>
-              <Text style={styles.title}>Could not connect Spotify</Text>
-              <Text style={styles.body}>{failure}</Text>
-            </View>
-            <AuxButton label="Try again" onPress={() => router.replace('/settings/connections')} />
-          </View>
+          <>
+            <Text style={[styles.kicker, { color: C.ink3 }]}>SPOTIFY</Text>
+            <Text style={[styles.title, { color: C.ink }]}>Could not connect Spotify</Text>
+            <View style={[styles.majorRule, { backgroundColor: C.dangerBorder }]} />
+            <Text style={[styles.body, { color: C.ink2 }]}>{failure}</Text>
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Try again"
+              onPress={() => router.replace('/settings/connections')}
+              style={({ pressed }) => [
+                styles.action,
+                { borderColor: C.rule3, backgroundColor: pressed ? C.surface : 'transparent' },
+              ]}>
+              <Text style={[styles.actionLabel, { color: C.ink }]}>TRY AGAIN</Text>
+            </Pressable>
+          </>
         ) : (
-          <View style={styles.status}>
-            {/*
-              Warn, not accent: a handshake in progress is "adjusting", and the
-              accent has to keep meaning live. Static rings rather than a spinner
-              so nothing loops behind a reduced-motion preference.
-            */}
-            <View style={styles.ringOuter}>
-              <View style={styles.ringInner}>
-                <View style={styles.glow}>
-                  <View style={styles.dot} />
-                </View>
-              </View>
+          <>
+            <Text style={[styles.kicker, { color: C.ink3 }]}>CONNECTING…</Text>
+            <Text style={[styles.title, { color: C.ink }]}>Connecting Spotify</Text>
+            <View style={[styles.majorRule, { backgroundColor: C.rule }]} />
+
+            {/* The prototype's handshake row: a pulsing accent square, the
+                sentence, and an elapsed readout in tabular figures. */}
+            <View style={[styles.status, { borderColor: C.rule }]}>
+              <PulseMark color={C.live} reduced={reduced} />
+              <Text style={[styles.statusText, { color: C.ink2 }]}>
+                Handing your sign-in back to Aux…
+              </Text>
+              <Text style={[styles.readout, { color: C.ink3 }]}>{clock(elapsed)}</Text>
             </View>
-            <View style={styles.copy}>
-              <Text style={styles.title}>Connecting Spotify…</Text>
-              <Text style={styles.body}>Handing your sign-in back to Aux.</Text>
-            </View>
-          </View>
+          </>
         )}
-      </View>
-    </Screen>
+      </Animated.View>
+    </SafeAreaView>
   );
 }
 
+/** 8px accent square, breathing at 1s. Static under reduced motion. */
+function PulseMark({ color, reduced }: { color: string; reduced: boolean }) {
+  const pulse = useSharedValue(1);
+
+  useEffect(() => {
+    if (reduced) {
+      pulse.value = 1;
+      return;
+    }
+    pulse.value = withRepeat(
+      withTiming(0.25, { duration: 1000, easing: Easing.inOut(Easing.quad) }),
+      -1,
+      true
+    );
+  }, [pulse, reduced]);
+
+  const animated = useAnimatedStyle(() => ({ opacity: pulse.value }));
+
+  return <Animated.View style={[styles.mark, { backgroundColor: color }, animated]} />;
+}
+
+function clock(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
 const styles = StyleSheet.create({
-  bloom: {
-    position: 'absolute',
-    // Out past the screen gutter so the glow reaches the edges rather than
-    // stopping on the same line the content does.
-    left: -Space.lg,
-    right: -Space.lg,
-    top: 0,
-    bottom: 0,
+  root: {
+    flex: 1,
   },
   center: {
     flex: 1,
     justifyContent: 'center',
-    paddingHorizontal: Space.md,
+    paddingHorizontal: Space.lg,
   },
-  status: {
-    alignItems: 'center',
-    gap: Space.xxl,
-  },
-  ringOuter: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    borderWidth: 1,
-    borderColor: WARN_RING,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ringInner: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
-    borderWidth: 1,
-    borderColor: WARN_RING_INNER,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  /** Stacked translucency stands in for the blur RN has no filter for. */
-  glow: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: WARN_GLOW,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: Colors.warn,
-  },
-  failEmblem: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    backgroundColor: DANGER_WASH,
-    borderWidth: 1,
-    borderColor: DANGER_EDGE,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  copy: {
-    alignItems: 'center',
-    gap: Space.sm,
-    maxWidth: 290,
+  kicker: {
+    ...Type.label(11),
+    letterSpacing: tracking(11, 0.12),
   },
   title: {
-    ...Type.title,
-    color: Colors.text,
-    textAlign: 'center',
+    ...Type.display(26),
+    letterSpacing: tracking(26, -0.025),
+    marginTop: Space.sm,
+  },
+  majorRule: {
+    height: Rule.major,
+    marginTop: 14,
+    marginBottom: Space.lg,
   },
   body: {
-    ...Type.body,
-    color: Colors.muted,
-    textAlign: 'center',
+    ...Type.body(16),
+    maxWidth: 340,
+  },
+  status: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.md,
+    borderWidth: Rule.hair,
+    padding: Space.md,
+  },
+  mark: {
+    width: 8,
+    height: 8,
+  },
+  statusText: {
+    ...Type.body(14),
+    flex: 1,
+  },
+  readout: {
+    ...Type.readout(12),
+    fontVariant: ['tabular-nums' as const],
+  },
+  action: {
+    marginTop: Space.xl,
+    alignSelf: 'flex-start',
+    justifyContent: 'center',
+    minHeight: 46,
+    paddingHorizontal: Space.lg,
+    borderWidth: Rule.hair,
+  },
+  actionLabel: {
+    ...Type.heading(11),
+    letterSpacing: tracking(11, 0.1),
   },
 });

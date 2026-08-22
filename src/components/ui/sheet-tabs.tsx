@@ -1,20 +1,24 @@
 import * as Haptics from 'expo-haptics';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { Colors, Radius, Space, TOUCH_TARGET, Type } from '@/lib/theme';
+import { useColors } from '@/lib/theme-context';
+import { Radius, Rule, Space, TOUCH_TARGET, Type } from '@/lib/theme';
 
 export type SheetTab = { key: string; label: string };
 
 /**
- * Two presentations, both drawn in the artboards:
+ * Two presentations, both drawn in the prototype:
  *
- * - `underline` — the lounge's SESSIONS/n · CHAT/48 rule. Mono readout,
- *   uppercased, 1px ink underline on the active tab. Labels here must be
- *   measurements (a section plus its count), which is the only reason 11.5px is
- *   allowed; pass word labels and you have put readable copy under the floor.
- * - `segmented` — the pill control SignIn and CreateLounge use for word labels
- *   ("Sign in" / "Create account", "Public" / "Private"). Readable copy must not
- *   be rendered at mono size, so word-label call sites need this one.
+ * - `segmented` — SIGN IN / CREATE ACCOUNT, PUBLIC / INVITE ONLY. One bordered
+ *   box of 46px cells butted against each other, divided by a 1px rule, with the
+ *   active cell painted in the accent. The cells are flush by design: this is a
+ *   single control, and the 8px-between-targets rule is about neighbouring
+ *   controls, not about the segments inside one.
+ * - `underline` — SESSIONS / CHAT / MEMBERS on a lounge. 44px cells, the active
+ *   one carrying a 2px accent underline.
+ *
+ * The accent is spent here on purpose: in this app the selected tab is what you
+ * are currently *in*, which is the same claim the red makes everywhere else.
  */
 export type SheetTabsVariant = 'underline' | 'segmented';
 
@@ -25,15 +29,21 @@ export type SheetTabsProps = {
   variant?: SheetTabsVariant;
 };
 
-/** Tab strip for the room sheet (Queue / Chat) and the auth / visibility pickers. */
+const SEGMENT_HEIGHT = 46;
+
 export function SheetTabs({ tabs, active, onChange, variant = 'underline' }: SheetTabsProps) {
+  const C = useColors();
   const segmented = variant === 'segmented';
 
   return (
     <View
       accessibilityRole="tablist"
-      style={segmented ? styles.segTrack : styles.underlineTrack}>
-      {tabs.map((tab) => {
+      style={
+        segmented
+          ? [styles.segTrack, { borderColor: C.rule2 }]
+          : [styles.underlineTrack, { borderBottomColor: C.rule }]
+      }>
+      {tabs.map((tab, i) => {
         const selected = tab.key === active;
 
         const press = () => {
@@ -52,10 +62,20 @@ export function SheetTabs({ tabs, active, onChange, variant = 'underline' }: She
               accessibilityState={{ selected }}
               accessibilityLabel={tab.label}
               onPress={press}
-              style={[styles.segTab, selected && styles.segTabActive]}>
+              style={[
+                styles.segTab,
+                {
+                  backgroundColor: selected ? C.live : 'transparent',
+                  // The divider lives on every cell but the first, so the box
+                  // reads as one control cut into parts rather than as a row of
+                  // separate buttons.
+                  borderLeftWidth: i === 0 ? 0 : Rule.hair,
+                  borderLeftColor: C.rule3,
+                },
+              ]}>
               <Text
                 numberOfLines={1}
-                style={[styles.segLabel, selected ? styles.inkLabel : styles.mutedLabel]}>
+                style={[styles.label, { color: selected ? C.onLive : C.ink2 }]}>
                 {tab.label}
               </Text>
             </Pressable>
@@ -72,12 +92,15 @@ export function SheetTabs({ tabs, active, onChange, variant = 'underline' }: She
             style={styles.underlineTab}>
             {/*
               The rule lives on a wrapper rather than on the Text: Android drops
-              bottom borders applied directly to text nodes.
+              bottom borders applied directly to text nodes. Its width is held at
+              2 on both states so selecting a tab never moves the baseline.
             */}
-            <View style={[styles.rule, selected && styles.ruleActive]}>
-              <Text
-                numberOfLines={1}
-                style={[styles.monoLabel, selected ? styles.inkLabel : styles.mutedLabel]}>
+            <View
+              style={[
+                styles.underline,
+                { borderBottomColor: selected ? C.live : 'transparent' },
+              ]}>
+              <Text numberOfLines={1} style={[styles.label, { color: selected ? C.ink : C.ink2 }]}>
                 {tab.label}
               </Text>
             </View>
@@ -89,75 +112,43 @@ export function SheetTabs({ tabs, active, onChange, variant = 'underline' }: She
 }
 
 const styles = StyleSheet.create({
-  underlineTrack: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    gap: Space.xxl,
-    paddingTop: Space.lg,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
-  },
-  underlineTab: {
-    minHeight: TOUCH_TARGET,
-    justifyContent: 'center',
-  },
-  rule: {
-    alignSelf: 'flex-start',
-    paddingBottom: Space.sm,
-    borderBottomWidth: 1,
-    // Held at 1 on both states so selecting a tab never moves the baseline.
-    borderBottomColor: 'transparent',
-  },
-  ruleActive: {
-    /*
-      Ink, not accent. LoungeDetail.dc.html sets this underline to INK
-      (`chatUnderline: tab === 'chat' ? INK : 'transparent'`) precisely because
-      a selected tab is a passive state. The Session screen draws its own rule
-      in accent because there the line is the playhead continuing under the
-      list — that one is in room/[id].tsx and is not this component.
-    */
-    borderBottomColor: Colors.text,
-  },
-  monoLabel: {
-    ...Type.mono,
+  label: {
+    ...Type.heading(13),
     textTransform: 'uppercase',
   },
 
   segTrack: {
     flexDirection: 'row',
     alignItems: 'stretch',
-    // 8px between adjacent hit areas, per the touch-target spacing rule — the
-    // segments are not allowed to butt up against each other.
-    gap: Space.sm,
-    padding: Space.xs,
-    backgroundColor: Colors.glass,
-    borderRadius: Radius.pill,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    borderRadius: Radius,
+    borderWidth: Rule.hair,
   },
   segTab: {
     flex: 1,
-    minHeight: TOUCH_TARGET,
-    alignItems: 'center',
+    minHeight: SEGMENT_HEIGHT,
+    // Flush left, like every other label in this design.
+    alignItems: 'flex-start',
     justifyContent: 'center',
     paddingHorizontal: Space.md,
-    borderRadius: Radius.pill,
-    borderWidth: 1,
-    borderColor: 'transparent',
-  },
-  segTabActive: {
-    // Glass, not accent: a selected tab is a passive state, not a live one.
-    backgroundColor: Colors.glassStrong,
-    borderColor: Colors.borderBright,
-  },
-  segLabel: {
-    ...Type.bodyStrong,
   },
 
-  inkLabel: {
-    color: Colors.text,
+  underlineTrack: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: Space.xxl,
+    borderBottomWidth: Rule.hair,
   },
-  mutedLabel: {
-    color: Colors.muted,
+  underlineTab: {
+    minHeight: TOUCH_TARGET,
+    justifyContent: 'center',
+  },
+  underline: {
+    alignSelf: 'stretch',
+    justifyContent: 'center',
+    flex: 1,
+    borderBottomWidth: Rule.major,
+    // Pulled down so the 2px accent covers the track's hairline instead of
+    // stacking on top of it and reading as a 3px line.
+    marginBottom: -Rule.hair,
   },
 });

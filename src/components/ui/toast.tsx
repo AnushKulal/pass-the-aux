@@ -13,7 +13,18 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInUp, FadeOutUp, useReducedMotion } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Colors, Duration, PointerEvents, Radius, shadow, Space, TOUCH_TARGET, Type, ZIndex } from '@/lib/theme';
+import { useColors } from '@/lib/theme-context';
+import {
+  Duration,
+  PointerEvents,
+  Radius,
+  Rule,
+  Space,
+  TOUCH_TARGET,
+  Type,
+  ZIndex,
+  type Palette,
+} from '@/lib/theme';
 
 export type ToastVariant = 'info' | 'error' | 'success';
 
@@ -27,16 +38,28 @@ const VISIBLE_MS = 3200;
 /** Older toasts stay in state (their timers own them) but only these render. */
 const MAX_VISIBLE = 3;
 
-const ACCENTS: Record<ToastVariant, { color: string; icon: LucideIcon; role: string }> = {
-  info: { color: Colors.muted, icon: Info, role: 'Notice' },
-  error: { color: Colors.danger, icon: CircleAlert, role: 'Error' },
-  /*
-    Success is ink, not Colors.accent. A completed action is not a live one, and
-    spending the reserved colour on a tick is exactly what makes a Feed stop
-    being scannable.
-  */
-  success: { color: Colors.text, icon: CircleCheck, role: 'Success' },
+const ICONS: Record<ToastVariant, LucideIcon> = {
+  info: Info,
+  error: CircleAlert,
+  success: CircleCheck,
 };
+
+const ROLES: Record<ToastVariant, string> = {
+  info: 'Notice',
+  error: 'Error',
+  success: 'Success',
+};
+
+/*
+  Success is ink, not the accent. A completed action is not a live one, and
+  spending the reserved colour on a tick is exactly what makes a Feed stop being
+  scannable. Only a genuine failure gets its own hue.
+*/
+function tintFor(variant: ToastVariant, C: Palette): string {
+  if (variant === 'error') return C.danger;
+  if (variant === 'success') return C.ink;
+  return C.ink2;
+}
 
 const ToastContext = createContext<ToastApi | null>(null);
 
@@ -94,8 +117,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={api}>
       {children}
 
-      <View
-        style={[styles.layer, { paddingTop: insets.top + Space.sm }, PointerEvents.boxNone]}>
+      <View style={[styles.layer, { paddingTop: insets.top + Space.sm }, PointerEvents.boxNone]}>
         {visible.map((item) => (
           <ToastRow key={item.id} item={item} reduced={reduced} onDismiss={dismiss} />
         ))}
@@ -104,6 +126,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * A flat plate: `surface2` ground, one 1px `rule2` border, square corners. It
+ * reads as a panel that has slid in over the page, which is all the separation
+ * this direction allows — there is no shadow to lift it off.
+ */
 function ToastRow({
   item,
   reduced,
@@ -113,28 +140,29 @@ function ToastRow({
   reduced: boolean;
   onDismiss: (id: number) => void;
 }) {
-  const accent = ACCENTS[item.variant];
-  const Icon = accent.icon;
+  const C = useColors();
+  const Icon = ICONS[item.variant];
+  const tint = tintFor(item.variant, C);
 
   return (
     <Animated.View
-      entering={reduced ? undefined : FadeInUp.duration(Duration.base)}
-      exiting={reduced ? undefined : FadeOutUp.duration(Duration.fast)}
+      entering={reduced ? undefined : FadeInUp.duration(Duration.enter)}
+      exiting={reduced ? undefined : FadeOutUp.duration(Duration.press)}
       style={styles.rowWrap}>
       <Pressable
         accessibilityRole="alert"
-        accessibilityLabel={`${accent.role}. ${item.message}`}
+        accessibilityLabel={`${ROLES[item.variant]}. ${item.message}`}
         accessibilityHint="Double tap to dismiss"
         accessibilityLiveRegion="polite"
         onPress={() => onDismiss(item.id)}
-        style={styles.row}>
-        <Icon size={20} color={accent.color} />
+        style={[styles.row, { backgroundColor: C.surface2, borderColor: C.rule2 }]}>
         {/*
-          The tint lives on the icon, not the fill: a solid Colors.danger or
-          Colors.accent panel cannot carry Colors.text at 4.5:1, and a toast that
-          cannot be read is worse than no toast.
+          The tint lives on the icon, not the fill: a solid danger panel cannot
+          carry ink at 4.5:1, and a toast that cannot be read is worse than no
+          toast at all.
         */}
-        <Text style={styles.message}>{item.message}</Text>
+        <Icon size={20} strokeWidth={2} color={tint} />
+        <Text style={[styles.message, { color: C.ink }]}>{item.message}</Text>
       </Pressable>
     </Animated.View>
   );
@@ -163,15 +191,11 @@ const styles = StyleSheet.create({
     minHeight: TOUCH_TARGET,
     paddingVertical: Space.md,
     paddingHorizontal: Space.lg,
-    backgroundColor: Colors.surfaceRaised,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    ...shadow('lg'),
+    borderRadius: Radius,
+    borderWidth: Rule.hair,
   },
   message: {
-    ...Type.body,
-    color: Colors.text,
+    ...Type.body(16),
     flex: 1,
   },
 });

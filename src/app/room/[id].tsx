@@ -1,60 +1,70 @@
 /**
- * The Session. This is the party.
+ * The Session. This is the party, and it is the screen the whole direction
+ * exists for.
  *
  * Structural rule that must not be broken: `<YouTubePlayerHost />` is mounted
- * exactly once, here, and stays mounted for as long as the room is open — even
- * when the active provider is Spotify. A listener whose Spotify device dies
- * mid-Session falls back to YouTube by re-pointing the adapter, and a remount
- * at that moment would mean a black WebView booting from scratch instead of
- * audio resuming in the next second.
+ * exactly once, here, and stays mounted for as long as the Session is open —
+ * even when the active provider is Spotify. A listener whose Spotify device
+ * dies mid-Session falls back to YouTube by re-pointing the adapter, and a
+ * remount at that moment would mean a black WebView booting from scratch
+ * instead of audio resuming in the next second.
  *
- * This screen owns the two screen-wide signature layers of the direction — the
- * bloom bleeding off the top edge, and the 25px hairline grid — so that every
- * panel below them sits *over* the atmosphere and tints against it. It draws
- * its own shell rather than using `Screen`, because both layers have to run
- * behind the header and out to the physical edges, and because the Session
- * header is a mono lounge name and a live count, not a serif screen title.
+ * The layout is four fixed bands and one scroller:
+ *
+ *   44px  top bar        back · name + lounge · a tappable N/M LOCKED readout
+ *   44px  view toggle    NOW PLAYING / SYNC ORBIT
+ *   flex  the scroller   owned by ParticipantStrip or SyncOrbit — ONE list on
+ *                        this screen, with the player as its header, so the
+ *                        roster stays virtualised and nothing nests
+ *   44px  grabber        <MODE> · SWIPE UP FOR MORE
+ *   58px  dock           MIC · QUEUE/N · CHAT · SHARE · LEAVE
+ *
+ * Separation between those bands is a 2px rule and a ground step. There is no
+ * bloom, no blur, no shadow and no rounded corner anywhere in here.
+ *
+ * SCOPE OF THIS PASS: music mode only. The mode switcher is real and the other
+ * three modes render a labelled "not built yet" state rather than a broken
+ * screen — movie needs a media source on the room timeline, screen share needs
+ * peer-to-peer signalling, and games need three tables that do not exist. All
+ * four are listed under Schema gaps in the handoff.
  */
 
 import { router, useLocalSearchParams } from 'expo-router';
-import { ChevronDown, ChevronLeft, ChevronUp, Plus, Radio } from 'lucide-react-native';
 import {
-  memo,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from 'react';
+  ArrowLeft,
+  Film,
+  Gamepad2,
+  List,
+  LogOut,
+  MessageCircle,
+  Mic,
+  MicOff,
+  MonitorUp,
+  Music,
+  Radio,
+  type LucideIcon,
+} from 'lucide-react-native';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   BackHandler,
+  Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
-  useWindowDimensions,
-  type ViewStyle,
 } from 'react-native';
-import Animated, {
-  Easing,
-  cancelAnimation,
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withRepeat,
-  withTiming,
-} from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AddTrackSheet } from '@/components/room/add-track-sheet';
-import { NowPlaying } from '@/components/room/now-playing';
-import { ParticipantStrip } from '@/components/room/participant-strip';
+import { ModularGrid, NowPlaying } from '@/components/room/now-playing';
+import { ParticipantStrip, SyncOrbit } from '@/components/room/participant-strip';
 import { QueueList } from '@/components/room/queue-list';
 import { TransportControls } from '@/components/room/transport-controls';
-import { EmptyState, LivePulse, Skeleton, useToast } from '@/components/ui';
-import { RoomChat, useMessages } from '@/features/chat';
+import { driftRung, formatClock, initialFor, readout } from '@/components/room/drift';
+import { EmptyState, useToast } from '@/components/ui';
+import { RoomChat } from '@/features/chat';
 import {
   useLounge,
   useQueue,
@@ -63,67 +73,34 @@ import {
   useTransport,
 } from '@/features/rooms/queries';
 import { useRoomSync } from '@/features/rooms/use-room-sync';
-import {
-  Bloom,
-  Colors,
-  PointerEvents,
-  Radius,
-  Space,
-  TOUCH_TARGET,
-  Type,
-} from '@/lib/theme';
+import { PointerEvents, Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
+import { useColors } from '@/lib/theme-context';
+import { expectedPositionMs } from '@/playback/sync-controller';
 import { usePlayback } from '@/playback/store';
 import { YouTubePlayerHost } from '@/playback/youtube-player-host';
 
-/** How long the "Requested" latch holds before the guest may ask again. */
+/** How long the "Requested" latch holds before a passenger may ask again. */
 const REQUEST_COOLDOWN_MS = 60_000;
+/** The −15 cell. */
+const SEEK_BACK_MS = 15_000;
 
-/** The artboard's gutter. Wider than the app default — the Session breathes. */
-const GUTTER = Space.xl;
+const GUTTER = Space.md;
+const DOCK_HEIGHT = 58;
 
-// ------------------------------------------------------------------ the grid
+type SessionMode = 'music' | 'movie' | 'screen' | 'game';
+type SessionView = 'now' | 'orbit';
+type SheetName = 'queue' | 'chat' | 'drawer' | null;
 
-/** Signature element 3: a 25px hairline grid, on Session and Feed only. */
-const GRID_STEP = 25;
-
-// ----------------------------------------------------------------- the bloom
-
-/**
- * Signature element 1. React Native has no blur filter and no radial gradient,
- * so the soft falloff is faked with concentric translucent circles — siblings,
- * not children, because nested opacity multiplies and would extinguish the
- * stack. Accumulated alpha at the centre lands at ~0.41, which is the artboard's
- * `rgba(199,127,168,.40)` core.
- *
- * Bloom colours are decorative by contract. They never carry meaning; they are
- * why every Session looks slightly different.
- */
-const BLOOM_HEIGHT = 420;
-
-const BLOOM_STOPS: readonly { size: number; color: string; opacity: number }[] = [
-  { size: 460, color: Bloom.c, opacity: 0.05 },
-  { size: 400, color: Bloom.c, opacity: 0.06 },
-  { size: 344, color: Bloom.b, opacity: 0.07 },
-  { size: 288, color: Bloom.b, opacity: 0.08 },
-  { size: 232, color: Bloom.a, opacity: 0.08 },
-  { size: 176, color: Bloom.a, opacity: 0.09 },
-  { size: 120, color: Bloom.a, opacity: 0.1 },
-];
-
-/** Built once at module scope so a re-render never reallocates 7 style objects. */
-const BLOOM_LAYER_STYLES: ViewStyle[] = BLOOM_STOPS.map((stop) => ({
-  position: 'absolute',
-  top: (BLOOM_HEIGHT - stop.size) / 2,
-  left: '50%',
-  marginLeft: -stop.size / 2,
-  width: stop.size,
-  height: stop.size,
-  borderRadius: stop.size / 2,
-  backgroundColor: stop.color,
-  opacity: stop.opacity,
-}));
+const MODE_LABEL: Record<SessionMode, string> = {
+  music: 'Music',
+  movie: 'Movie night',
+  screen: 'Screen share',
+  game: 'Game table',
+};
 
 export default function RoomScreen() {
+  const C = useColors();
+
   // Required-property shape, not optional: expo-router constrains the generic to
   // Record<string, string | string[]>, which an optional field does not satisfy.
   // The runtime guard still stands — a malformed deep link has no id.
@@ -145,9 +122,11 @@ export default function RoomScreen() {
   const playbackError = usePlayback((state) => state.error);
   const provider = usePlayback((state) => state.adapter?.provider ?? null);
 
-  const [tab, setTab] = useState<'queue' | 'chat'>('queue');
-  const [expanded, setExpanded] = useState(false);
+  const [mode, setMode] = useState<SessionMode>('music');
+  const [view, setView] = useState<SessionView>('now');
+  const [sheet, setSheet] = useState<SheetName>(null);
   const [addVisible, setAddVisible] = useState(false);
+  const [micOn, setMicOn] = useState(false);
   const [requestSent, setRequestSent] = useState(false);
   const requestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -159,8 +138,8 @@ export default function RoomScreen() {
   );
 
   /**
-   * Android hardware back. The expanded list is a layer the user opened, so it
-   * is what back should close — falling straight out of the Session would be a
+   * Android hardware back. A sheet is a layer the user opened, so it is what
+   * back should close — falling straight out of the Session would be a
    * surprise, and it would stop the music for them.
    */
   useEffect(() => {
@@ -169,20 +148,30 @@ export default function RoomScreen() {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       // The add-track modal owns its own back handling via onRequestClose.
       if (addVisible) return false;
-      if (expanded) {
-        setExpanded(false);
+      if (sheet) {
+        setSheet(null);
         return true;
       }
       return false;
     });
 
     return () => subscription.remove();
-  }, [addVisible, expanded]);
+  }, [addVisible, sheet]);
 
   const queueLength = queue.data?.length ?? 0;
-  const participantCount = participants.data?.length ?? 0;
-  const hostName =
-    participants.data?.find((person) => person.userId === room?.host_id)?.displayName ?? null;
+  const roster = participants.data ?? [];
+  const listenerCount = roster.length;
+  const hostName = roster.find((person) => person.userId === room?.host_id)?.displayName ?? null;
+
+  /**
+   * `N/M LOCKED`. The viewer's own row is the only real measurement, so it is
+   * counted from the drift ladder; everyone else is counted from the
+   * `is_synced` boolean the backend actually publishes. Two sources, one
+   * number, and neither of them invented.
+   */
+  const lockedCount = roster.filter((person) =>
+    person.userId === userId ? driftRung(driftMs) === 'locked' : person.isSynced
+  ).length;
 
   const handlePlayPause = useCallback(() => {
     if (!room) return;
@@ -212,16 +201,17 @@ export default function RoomScreen() {
     [transport]
   );
 
-  /** There is no previous track in a forward-only queue; this restarts this one. */
-  const handleRestart = useCallback(() => {
-    transport.seek.mutate(0);
-  }, [transport]);
+  /** The −15 cell, computed off the room's own arithmetic rather than the player. */
+  const handleSeekBack = useCallback(() => {
+    if (!timeline) return;
+    transport.seek.mutate(Math.max(0, expectedPositionMs(timeline) - SEEK_BACK_MS));
+  }, [timeline, transport]);
 
   const handleRequestAux = useCallback(() => {
     requestAux.mutate(undefined, {
       onSuccess: () => {
         setRequestSent(true);
-        toast.show('Asked for the aux in chat', 'success');
+        toast.show('Asked for the aux in the Session chat', 'success');
         requestTimer.current = setTimeout(() => setRequestSent(false), REQUEST_COOLDOWN_MS);
       },
       onError: (mutationError) => {
@@ -238,44 +228,61 @@ export default function RoomScreen() {
     else router.replace('/');
   }, []);
 
-  const openAdd = useCallback(() => setAddVisible(true), []);
+  const openAdd = useCallback(() => {
+    setSheet(null);
+    setAddVisible(true);
+  }, []);
   const closeAdd = useCallback(() => setAddVisible(false), []);
+  const closeSheet = useCallback(() => setSheet(null), []);
 
-  /**
-   * Chat gets the screen when you switch to it — a message log in the ~140px the
-   * fixed layout leaves over is not a chat, it is a peephole. The chevron still
-   * overrides in both directions.
-   */
-  const showQueue = useCallback(() => {
-    setTab('queue');
-    setExpanded(false);
+  const showNow = useCallback(() => setView('now'), []);
+  const showOrbit = useCallback(() => setView('orbit'), []);
+
+  const handleMic = useCallback(() => {
+    setMicOn((on) => {
+      if (!on) toast.show('Voice is not live yet — nothing is being transmitted.', 'info');
+      return !on;
+    });
+  }, [toast]);
+
+  const handleShare = useCallback(() => {
+    toast.show('Screen share needs peer-to-peer signalling, which is not built yet.', 'info');
+  }, [toast]);
+
+  const handleMode = useCallback((next: SessionMode) => {
+    setMode(next);
+    setSheet(null);
+    setView('now');
   }, []);
 
-  const showChat = useCallback(() => {
-    setTab('chat');
-    setExpanded(true);
-  }, []);
-
-  const toggleExpanded = useCallback(() => setExpanded((value) => !value), []);
+  const handleBackToMusic = useCallback(() => handleMode('music'), [handleMode]);
 
   /**
    * Created once per render but always at the same position in the tree, in
-   * both the expanded and compact layouts, so React reconciles rather than
-   * remounts it. See the file header.
+   * every view and every mode, so React reconciles rather than remounts it. See
+   * the file header — remounting this stops the music.
+   *
+   * `visible` false does not unmount it: the host parks itself at 1×1 with zero
+   * opacity and keeps playing. That is what makes it safe to leave the artwork
+   * surface for the sync orbit, or for a mode that has no artwork at all.
    */
+  const stageVisible = provider === 'youtube' && mode === 'music' && view === 'now';
   const media = useMemo(
-    () => <YouTubePlayerHost visible={provider === 'youtube' && !expanded} />,
-    [provider, expanded]
+    () => <YouTubePlayerHost visible={stageVisible} />,
+    [stageVisible]
   );
 
   if (error && !room) {
     return (
       <Shell>
-        <Header
-          name={lounge.data?.name ?? 'Session'}
-          count={0}
+        <TopBar
+          name="Session"
+          lounge={lounge.data?.name ?? null}
+          lockedCount={0}
+          listenerCount={0}
           onBack={handleBack}
-          showCount={false}
+          onOpenDiagnostics={showOrbit}
+          showReadout={false}
         />
         <View style={styles.gutter}>
           <EmptyState
@@ -288,291 +295,596 @@ export default function RoomScreen() {
     );
   }
 
-  return (
-    <Shell>
-      <Header
-        name={lounge.data?.name ?? room?.name ?? 'Session'}
-        count={participantCount}
-        onBack={handleBack}
-        showCount
+  const player = (
+    <>
+      <NowPlaying
+        media={media}
+        showMedia={stageVisible}
+        compact={false}
+        track={track}
+        timeline={timeline}
+        isLoading={isLoading}
+        driftMs={driftMs}
+        onResync={resync}
+        onSeek={isHost ? handleSeek : undefined}
+        errorMessage={playbackError?.message ?? null}
+        onAuxName={hostName}
+        providerLabel={provider === 'spotify' ? 'Spotify' : provider === 'youtube' ? 'YouTube' : null}
+        rttMs={null}
       />
 
+      <TransportControls
+        isHost={isHost}
+        isPlaying={room?.is_playing === true}
+        canPlay={Boolean(room?.track_id) || queueLength > 0}
+        canSkip={Boolean(room?.track_id) || queueLength > 0}
+        isBusy={transport.isBusy}
+        onPlayPause={handlePlayPause}
+        onSkip={handleSkip}
+        onRequestAux={handleRequestAux}
+        requestSent={requestSent}
+        hostName={hostName}
+        onSeekBack={isHost ? handleSeekBack : undefined}
+      />
+    </>
+  );
+
+  return (
+    <Shell>
+      <TopBar
+        name={room?.name ?? 'Session'}
+        lounge={lounge.data?.name ?? null}
+        lockedCount={lockedCount}
+        listenerCount={listenerCount}
+        onBack={handleBack}
+        onOpenDiagnostics={showOrbit}
+        showReadout
+      />
+
+      {mode === 'music' ? (
+        <View style={[styles.toggle, { borderBottomColor: C.rule }]}>
+          <ToggleCell label="Now playing" active={view === 'now'} onPress={showNow} first />
+          <ToggleCell label="Sync orbit" active={view === 'orbit'} onPress={showOrbit} />
+        </View>
+      ) : null}
+
       <View style={styles.body}>
-        <View style={styles.stageSlot}>
-          <NowPlaying
-            media={media}
-            showMedia={provider === 'youtube' && !expanded}
-            compact={expanded}
+        {/*
+          BOTH views stay mounted. The player — and with it the YouTube WebView
+          that is actually making the sound — lives in the drift chart's list
+          header, so unmounting this layer to show the orbit would stop the
+          music mid-song for this listener. The inactive layer goes offstage at
+          1×1 with zero opacity instead, which is the same trick the player host
+          uses on itself, and the orbit's ticker is starved by handing it a null
+          timeline so a hidden view costs nothing per frame.
+        */}
+        <Layer active={mode === 'music' && view === 'now'}>
+          <ParticipantStrip
+            roomId={roomId}
+            hostId={room?.host_id ?? null}
+            currentUserId={userId}
+            header={player}
+            contentBottomInset={Space.md}
+          />
+        </Layer>
+
+        <Layer active={mode === 'music' && view === 'orbit'}>
+          <SyncOrbit
+            roomId={roomId}
+            hostId={room?.host_id ?? null}
+            currentUserId={userId}
             track={track}
-            timeline={timeline}
-            isLoading={isLoading}
-            driftMs={driftMs}
-            onResync={resync}
-            onSeek={isHost ? handleSeek : undefined}
-            errorMessage={playbackError?.message ?? null}
-            onAuxName={hostName}
+            timeline={mode === 'music' && view === 'orbit' ? timeline : null}
+            contentBottomInset={Space.md}
           />
-        </View>
+        </Layer>
 
-        <View style={styles.transportSlot}>
-          <TransportControls
-            isHost={isHost}
-            isPlaying={room?.is_playing === true}
-            canPlay={Boolean(room?.track_id) || queueLength > 0}
-            canSkip={Boolean(room?.track_id) || queueLength > 0}
-            isBusy={transport.isBusy}
-            onPlayPause={handlePlayPause}
-            onSkip={handleSkip}
-            onRequestAux={handleRequestAux}
-            requestSent={requestSent}
-            hostName={hostName}
-            onRestart={isHost ? handleRestart : undefined}
-          />
-        </View>
+        {mode === 'music' ? null : (
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <NotBuiltYet mode={mode} onBackToMusic={handleBackToMusic} />
+          </ScrollView>
+        )}
+      </View>
 
-        {expanded ? null : (
-          <View style={styles.peopleSlot}>
-            <ParticipantStrip
-              roomId={roomId}
-              hostId={room?.host_id ?? null}
-              currentUserId={userId}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${MODE_LABEL[mode]}. Open Session controls`}
+        onPress={() => setSheet('drawer')}
+        style={({ pressed }) => [
+          styles.grabber,
+          { borderTopColor: C.live },
+          pressed ? { backgroundColor: C.surface } : null,
+        ]}>
+        <View style={[styles.grabberBar, { backgroundColor: C.ink3 }]} />
+        <Text style={[styles.grabberLabel, { color: C.ink3 }]}>
+          {`${MODE_LABEL[mode]} · Swipe up for more`}
+        </Text>
+      </Pressable>
+
+      <View
+        style={[
+          styles.dock,
+          { borderTopColor: C.rule, backgroundColor: C.surface, paddingBottom: insets.bottom },
+        ]}>
+        <DockCell
+          icon={micOn ? Mic : MicOff}
+          label={micOn ? 'Mic on' : 'Mic off'}
+          tint={micOn ? C.liveText : C.ink2}
+          onPress={handleMic}
+          first
+        />
+        <DockCell
+          icon={List}
+          label={`Queue/${queueLength}`}
+          tint={C.ink2}
+          onPress={() => setSheet('queue')}
+        />
+        <DockCell
+          icon={MessageCircle}
+          label="Chat"
+          tint={C.ink2}
+          onPress={() => setSheet('chat')}
+        />
+        <DockCell icon={MonitorUp} label="Share" tint={C.ink2} onPress={handleShare} />
+        <DockCell icon={LogOut} label="Leave" tint={C.danger} onPress={handleBack} />
+      </View>
+
+      <Sheet
+        visible={sheet === 'queue'}
+        title="The queue"
+        subtitle="Anyone in the Session can add"
+        onClose={closeSheet}>
+        <QueueList
+          roomId={roomId}
+          isHost={isHost}
+          currentUserId={userId}
+          onAddTrack={openAdd}
+          header={
+            <NowPlayingStrip
+              title={track?.title ?? null}
+              positionMs={timeline ? expectedPositionMs(timeline) : 0}
+              durationMs={track?.duration_ms ?? 0}
             />
+          }
+        />
+      </Sheet>
+
+      <Sheet
+        visible={sheet === 'chat'}
+        title="Session chat"
+        subtitle="Separate from the lounge — ends with the Session"
+        onClose={closeSheet}>
+        {room ? (
+          <RoomChat roomId={room.id} loungeId={room.lounge_id} bottomInset={0} />
+        ) : (
+          <View style={styles.gutter}>
+            <EmptyState icon={MessageCircle} title="Not in the Session yet" />
           </View>
         )}
+      </Sheet>
 
-        <View style={styles.tabsRow}>
-          <MonoTab label={`Queue/${queueLength}`} active={tab === 'queue'} onPress={showQueue} />
-          <ChatTab
-            loungeId={room?.lounge_id ?? null}
-            roomId={room?.id ?? null}
-            active={tab === 'chat'}
-            onPress={showChat}
+      <Sheet
+        visible={sheet === 'drawer'}
+        title="Change the lobby"
+        subtitle="Everyone comes with you. The queue is kept."
+        onClose={closeSheet}>
+        <View>
+          <ModeOption
+            icon={Music}
+            name="Music"
+            description="A shared queue, synced to the fraction of a second."
+            current={mode === 'music'}
+            onPress={() => handleMode('music')}
           />
-
-          <View style={styles.tabsSpacer} />
-
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={expanded ? 'Show the player' : 'Give this list the screen'}
-            accessibilityState={{ expanded }}
-            onPress={toggleExpanded}
-            style={({ pressed }) => [styles.expandButton, pressed && styles.pressed]}>
-            {expanded ? (
-              <ChevronDown size={20} strokeWidth={1.6} color={Colors.muted} />
-            ) : (
-              <ChevronUp size={20} strokeWidth={1.6} color={Colors.muted} />
-            )}
-          </Pressable>
+          <ModeOption
+            icon={Film}
+            name="Movie night"
+            description="Same sync engine, longer timeline. Subtitles and audio tracks stay per-person."
+            current={mode === 'movie'}
+            onPress={() => handleMode('movie')}
+          />
+          <ModeOption
+            icon={MonitorUp}
+            name="Screen share"
+            description="One person shares, everyone else gets a View screen button."
+            current={mode === 'screen'}
+            onPress={() => handleMode('screen')}
+          />
+          <ModeOption
+            icon={Gamepad2}
+            name="Game table"
+            description="Board games with seats and spectators. The music keeps going."
+            current={mode === 'game'}
+            onPress={() => handleMode('game')}
+          />
+          <Text style={[styles.sheetNote, { color: C.ink3 }]}>
+            Only the person on aux can change the lobby. Everyone else follows the switch and keeps
+            their place. Music is the only mode this build can run — the other three need tables
+            that do not exist yet.
+          </Text>
         </View>
-
-        <View style={styles.listSlot}>
-          {tab === 'queue' ? (
-            <QueueList roomId={roomId} isHost={isHost} currentUserId={userId} onAddTrack={openAdd} />
-          ) : room ? (
-            <RoomChat roomId={room.id} loungeId={room.lounge_id} bottomInset={insets.bottom} />
-          ) : (
-            <View style={styles.chatSkeleton}>
-              <Skeleton width="80%" height={44} radius={Radius.md} />
-              <Skeleton width="60%" height={44} radius={Radius.md} />
-              <Skeleton width="72%" height={44} radius={Radius.md} />
-            </View>
-          )}
-        </View>
-
-        {tab === 'queue' ? (
-          <View style={[styles.addSlot, { paddingBottom: insets.bottom + Space.lg }]}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Add a track to the queue"
-              onPress={openAdd}
-              style={({ pressed }) => [styles.addPill, pressed && styles.pressed]}>
-              <Plus size={17} strokeWidth={1.8} color={Colors.accent} />
-              <Text style={styles.addLabel}>Add to queue</Text>
-            </Pressable>
-          </View>
-        ) : null}
-      </View>
+      </Sheet>
 
       <AddTrackSheet roomId={roomId} visible={addVisible} onClose={closeAdd} />
     </Shell>
   );
 }
 
-// ------------------------------------------------------------------- shell
+// -------------------------------------------------------------------- layers
 
-/** Ground, bloom, grid, safe area. Everything else sits on top of these four. */
-function Shell({ children }: { children: ReactNode }) {
+/**
+ * One of the mutually exclusive views. The inactive one is not unmounted — see
+ * the body comment — it is pushed to 1×1 with zero opacity, taken out of the
+ * layout, and hidden from assistive tech and from touches.
+ */
+function Layer({ active, children }: { active: boolean; children: ReactNode }) {
   return (
-    <View style={styles.root}>
-      <BloomLayer />
-      <GridLayer />
+    <View
+      accessibilityElementsHidden={!active}
+      importantForAccessibility={active ? 'auto' : 'no-hide-descendants'}
+      style={[
+        active ? styles.layerActive : styles.layerOffstage,
+        active ? PointerEvents.auto : PointerEvents.none,
+      ]}>
+      {children}
+    </View>
+  );
+}
+
+// -------------------------------------------------------------------- shell
+
+/** Ground and safe area. Flat: no atmosphere layers in this direction. */
+function Shell({ children }: { children: ReactNode }) {
+  const C = useColors();
+
+  return (
+    <View style={[styles.root, { backgroundColor: C.bg }]}>
       <SafeAreaView edges={['top', 'left', 'right']} style={styles.safe}>
+        {/*
+          react-native-web has no phone to constrain it, so an unbounded column
+          stretches to the full window width and the line length is unreadable.
+        */}
         <View style={styles.constrain}>{children}</View>
       </SafeAreaView>
     </View>
   );
 }
 
-const BloomLayer = memo(function BloomLayer() {
-  const reduced = useReducedMotion();
-  const breath = useSharedValue(0);
+// ------------------------------------------------------------------ top bar
 
-  useEffect(() => {
-    if (reduced) {
-      breath.value = 0;
-      return;
-    }
-    // 3.6s: ambient, like a room light, not a micro-interaction.
-    breath.value = withRepeat(
-      withTiming(1, { duration: 3600, easing: Easing.inOut(Easing.quad) }),
-      -1,
-      true
-    );
-    return () => cancelAnimation(breath);
-  }, [reduced, breath]);
-
-  const style = useAnimatedStyle(() => ({ opacity: 0.82 + breath.value * 0.18 }));
-
-  return (
-    <Animated.View
-      accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
-      style={[styles.bloom, style, PointerEvents.none]}>
-      {BLOOM_LAYER_STYLES.map((layer, index) => (
-        <View key={index} style={layer} />
-      ))}
-    </Animated.View>
-  );
-});
-
-const GridLayer = memo(function GridLayer() {
-  const { width, height } = useWindowDimensions();
-
-  const lines = useMemo(() => {
-    const columns = Math.ceil(width / GRID_STEP);
-    const rows = Math.ceil(height / GRID_STEP);
-    return {
-      columns: Array.from({ length: columns }, (_, index) => index * GRID_STEP),
-      rows: Array.from({ length: rows }, (_, index) => index * GRID_STEP),
-    };
-  }, [width, height]);
-
-  return (
-    <View
-      accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
-      style={[StyleSheet.absoluteFill, PointerEvents.none]}>
-      {lines.columns.map((left) => (
-        <View key={`c${left}`} style={[styles.gridColumn, { left }]} />
-      ))}
-      {lines.rows.map((top) => (
-        <View key={`r${top}`} style={[styles.gridRow, { top }]} />
-      ))}
-    </View>
-  );
-});
-
-// ------------------------------------------------------------------ header
-
-type HeaderProps = {
+type TopBarProps = {
   name: string;
-  count: number;
+  lounge: string | null;
+  lockedCount: number;
+  listenerCount: number;
   onBack: () => void;
-  showCount: boolean;
+  onOpenDiagnostics: () => void;
+  showReadout: boolean;
 };
 
-const Header = memo(function Header({ name, count, onBack, showCount }: HeaderProps) {
+const TopBar = memo(function TopBar({
+  name,
+  lounge,
+  lockedCount,
+  listenerCount,
+  onBack,
+  onOpenDiagnostics,
+  showReadout,
+}: TopBarProps) {
+  const C = useColors();
+
   return (
-    <View style={styles.header}>
+    <View style={[styles.topBar, { borderBottomColor: C.rule }]}>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Go back"
         onPress={onBack}
-        style={({ pressed }) => [styles.back, pressed && styles.pressed]}>
-        <ChevronLeft size={20} strokeWidth={1.6} color={Colors.muted} />
+        style={({ pressed }) => [
+          styles.back,
+          { borderRightColor: C.rule },
+          pressed ? { backgroundColor: C.surface } : null,
+        ]}>
+        <ArrowLeft size={20} strokeWidth={2} color={C.ink2} />
       </Pressable>
 
-      <Text numberOfLines={1} style={styles.loungeName}>
-        {name}
-      </Text>
+      <View style={styles.topMeta}>
+        <Text numberOfLines={1} style={[styles.sessionName, { color: C.ink }]}>
+          {name}
+        </Text>
+        <Text numberOfLines={1} style={[styles.loungeName, { color: C.ink3 }]}>
+          {lounge ?? 'Aux'}
+        </Text>
+      </View>
 
-      <View style={styles.tabsSpacer} />
-
-      {showCount ? <ListeningPill count={count} /> : null}
+      {showReadout ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${lockedCount} of ${listenerCount} locked, ${listenerCount} listening. Open the sync orbit.`}
+          onPress={onOpenDiagnostics}
+          style={({ pressed }) => [
+            styles.readout,
+            { borderLeftColor: C.rule },
+            pressed ? { backgroundColor: C.surface } : null,
+          ]}>
+          <Text style={[styles.readoutTop, { color: C.liveText }]}>
+            {`${lockedCount}/${listenerCount} locked`}
+          </Text>
+          <Text style={[styles.readoutBottom, { color: C.ink3 }]}>
+            {`${listenerCount} listening`}
+          </Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 });
 
-/**
- * `Colors.accent` earns its place here: the pill says this room is live and
- * joinable, which is the only thing the colour is allowed to mean.
- */
-const ListeningPill = memo(function ListeningPill({ count }: { count: number }) {
-  return (
-    <View
-      accessible
-      accessibilityLabel={`${count} ${count === 1 ? 'person' : 'people'} listening`}
-      style={styles.pill}>
-      <View style={[StyleSheet.absoluteFill, styles.pillFill, PointerEvents.none]} />
-      <LivePulse size={6} />
-      <Text style={styles.pillText}>{`${count} listening`}</Text>
-    </View>
-  );
-});
+// ------------------------------------------------------------------ toggle
 
-// -------------------------------------------------------------------- tabs
+type ToggleCellProps = { label: string; active: boolean; onPress: () => void; first?: boolean };
 
-type MonoTabProps = { label: string; active: boolean; onPress: () => void };
+const ToggleCell = memo(function ToggleCell({ label, active, onPress, first }: ToggleCellProps) {
+  const C = useColors();
 
-/**
- * Signature element 4 as an affordance: the tab label *is* the count, in mono,
- * and the active rule is the playhead line continued underneath it.
- */
-const MonoTab = memo(function MonoTab({ label, active, onPress }: MonoTabProps) {
   return (
     <Pressable
       accessibilityRole="tab"
       accessibilityState={{ selected: active }}
       accessibilityLabel={label}
       onPress={onPress}
-      style={({ pressed }) => [styles.tab, pressed && styles.pressed]}>
-      <Text style={[styles.tabLabel, active ? styles.tabLabelActive : null]}>{label}</Text>
-      <View style={[styles.tabRule, active ? styles.tabRuleActive : null]} />
+      style={[
+        styles.toggleCell,
+        first ? null : { borderLeftWidth: Rule.hair, borderLeftColor: C.rule },
+        active ? { backgroundColor: C.live } : null,
+      ]}>
+      <Text style={[styles.toggleLabel, { color: active ? C.onLive : C.ink2 }]}>{label}</Text>
     </Pressable>
   );
 });
 
-type ChatTabProps = {
-  loungeId: string | null;
-  roomId: string | null;
-  active: boolean;
+// -------------------------------------------------------------------- dock
+
+type DockCellProps = {
+  icon: LucideIcon;
+  label: string;
+  tint: string;
   onPress: () => void;
+  first?: boolean;
+};
+
+const DockCell = memo(function DockCell({ icon: Icon, label, tint, onPress, first }: DockCellProps) {
+  const C = useColors();
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.dockCell,
+        first ? null : { borderLeftWidth: Rule.hair, borderLeftColor: C.rule },
+        pressed ? { backgroundColor: C.surface2 } : null,
+      ]}>
+      <Icon size={19} strokeWidth={2} color={tint} />
+      <Text numberOfLines={1} style={[styles.dockLabel, { color: tint }]}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+});
+
+// ------------------------------------------------------------------ sheets
+
+type SheetProps = {
+  visible: boolean;
+  title: string;
+  subtitle?: string;
+  onClose: () => void;
+  children: ReactNode;
 };
 
 /**
- * The chat log is paginated, so the honest count is "how many we hold" — a `+`
- * marks the pages we have not fetched rather than quietly under-reporting.
+ * Bottom-anchored, 80% tall, 2px accent top rule. Zero radius: a sheet in this
+ * direction is a panel that slid up, not a card that floated in.
  */
-const ChatTab = memo(function ChatTab({ loungeId, roomId, active, onPress }: ChatTabProps) {
-  const { messages, hasNextPage } = useMessages({ loungeId: loungeId ?? '', roomId });
-  const count = messages.length;
-  const label = count === 0 ? 'Chat' : `Chat/${count}${hasNextPage ? '+' : ''}`;
+function Sheet({ visible, title, subtitle, onClose, children }: SheetProps) {
+  const C = useColors();
+  const insets = useSafeAreaInsets();
 
-  return <MonoTab label={label} active={active} onPress={onPress} />;
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent
+      statusBarTranslucent
+      onRequestClose={onClose}>
+      <View style={[styles.scrim, { backgroundColor: C.scrim }]}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+          onPress={onClose}
+          style={StyleSheet.absoluteFill}
+        />
+
+        <View
+          style={[
+            styles.sheet,
+            { backgroundColor: C.bg, borderTopColor: C.live, marginBottom: insets.bottom },
+          ]}>
+          <View style={[styles.sheetHead, { borderBottomColor: C.rule }]}>
+            <View style={styles.sheetHeadMeta}>
+              <Text numberOfLines={1} style={[styles.sheetTitle, { color: C.ink }]}>
+                {title}
+              </Text>
+              {subtitle ? (
+                <Text numberOfLines={2} style={[styles.sheetSubtitle, { color: C.ink3 }]}>
+                  {subtitle}
+                </Text>
+              ) : null}
+            </View>
+
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+              onPress={onClose}
+              style={styles.sheetClose}>
+              <Text style={[styles.sheetCloseLabel, { color: C.ink2 }]}>Close</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.sheetBody}>{children}</View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+type NowPlayingStripProps = {
+  title: string | null;
+  positionMs: number;
+  durationMs: number;
+};
+
+/** The queue sheet's header: what is playing right now, above what is next. */
+const NowPlayingStrip = memo(function NowPlayingStrip({
+  title,
+  positionMs,
+  durationMs,
+}: NowPlayingStripProps) {
+  const C = useColors();
+
+  // Red means playing. With no track there is nothing playing, so the strip
+  // loses the accent entirely rather than sitting there red over "0:00 / 0:00"
+  // — and the status line stops claiming it is playing.
+  const playing = title !== null;
+
+  return (
+    <View style={[styles.strip, { backgroundColor: C.surface, borderBottomColor: C.rule }]}>
+      <View style={[styles.stripTile, { backgroundColor: playing ? C.live : C.surface3 }]}>
+        <Text style={[styles.stripInitial, { color: playing ? C.onLive : C.ink3 }]}>
+          {initialFor(title)}
+        </Text>
+      </View>
+      <View style={styles.stripMeta}>
+        <Text numberOfLines={1} style={[styles.stripTitle, { color: C.ink }]}>
+          {title ?? 'Nothing playing'}
+        </Text>
+        <Text numberOfLines={1} style={[styles.stripStatus, { color: playing ? C.liveText : C.ink3 }]}>
+          {playing
+            ? `Playing · ${formatClock(positionMs)} / ${formatClock(durationMs)}`
+            : 'Add a track to start the Session'}
+        </Text>
+      </View>
+    </View>
+  );
+});
+
+type ModeOptionProps = {
+  icon: LucideIcon;
+  name: string;
+  description: string;
+  current: boolean;
+  onPress: () => void;
+};
+
+const ModeOption = memo(function ModeOption({
+  icon: Icon,
+  name,
+  description,
+  current,
+  onPress,
+}: ModeOptionProps) {
+  const C = useColors();
+
+  return (
+    <Pressable
+      accessibilityRole="radio"
+      accessibilityState={{ selected: current }}
+      accessibilityLabel={name}
+      accessibilityHint={description}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.modeOption,
+        { borderBottomColor: C.rule },
+        pressed ? { backgroundColor: C.surface } : null,
+      ]}>
+      <Icon size={22} strokeWidth={2} color={C.ink2} />
+      <View style={styles.modeMeta}>
+        <Text style={[styles.modeName, { color: C.ink }]}>{name}</Text>
+        <Text style={[styles.modeDescription, { color: C.ink2 }]}>{description}</Text>
+      </View>
+      {current ? (
+        <View style={[styles.currentChip, { backgroundColor: C.live }]}>
+          <Text style={[styles.currentChipLabel, { color: C.onLive }]}>Current</Text>
+        </View>
+      ) : null}
+    </Pressable>
+  );
+});
+
+// ----------------------------------------------------------- other modes
+
+const NOT_BUILT: Record<Exclude<SessionMode, 'music'>, string> = {
+  movie:
+    'Movie night needs a media source on the room timeline — there is no table for a film, and no subtitle or audio-track state to keep per person. The sync engine itself would carry it unchanged.',
+  screen:
+    'Screen share needs peer-to-peer signalling. Nothing about it goes through the backend by design, and none of that handshake exists yet.',
+  game:
+    'The game table needs three tables that are not in the schema: games, game seats and the seat-request queue. Seating people without them would be a screen full of guesses.',
+};
+
+/**
+ * A mode that is designed but not backed. It says which mode, that it is not
+ * built, and what it is waiting on — the same honesty the rest of this app
+ * applies to Spotify free accounts and missing lyrics.
+ */
+const NotBuiltYet = memo(function NotBuiltYet({
+  mode,
+  onBackToMusic,
+}: {
+  mode: Exclude<SessionMode, 'music'> | SessionMode;
+  onBackToMusic: () => void;
+}) {
+  const C = useColors();
+  if (mode === 'music') return null;
+
+  return (
+    <View>
+      <View style={[styles.modeWell, { backgroundColor: C.bgRecessed, borderBottomColor: C.rule }]}>
+        <ModularGrid />
+        <Text style={[styles.modeWellGlyph, { color: C.artwork }]}>{MODE_LABEL[mode][0]}</Text>
+        <View style={[styles.modeWellRule, { backgroundColor: C.liveMid }, PointerEvents.none]} />
+        <View style={[styles.modeWellChip, { backgroundColor: C.live }]}>
+          <Text style={[styles.modeWellChipLabel, { color: C.onLive }]}>{MODE_LABEL[mode]}</Text>
+        </View>
+      </View>
+
+      <View style={styles.modeBody}>
+        <Text style={[styles.modeHeadline, { color: C.ink }]}>Not built yet</Text>
+        <Text style={[styles.modeCopy, { color: C.ink2 }]}>{NOT_BUILT[mode]}</Text>
+
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Back to music"
+          onPress={onBackToMusic}
+          style={({ pressed }) => [
+            styles.backToMusic,
+            { borderColor: C.rule2 },
+            pressed ? { borderColor: C.live } : null,
+          ]}>
+          <Text style={[styles.backToMusicLabel, { color: C.ink }]}>Back to music</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
 });
 
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: Colors.bg,
   },
   safe: {
     flex: 1,
   },
-  /**
-   * react-native-web has no phone to constrain it, so an unbounded column
-   * stretches to the full window width and the line length becomes unreadable.
-   */
   constrain: {
     flex: 1,
     width: '100%',
@@ -582,179 +894,311 @@ const styles = StyleSheet.create({
   gutter: {
     paddingHorizontal: GUTTER,
   },
-
-  // ------------------------------------------------------------ atmosphere
-  bloom: {
-    position: 'absolute',
-    // Bleeds up off the top of the screen, as the artboard.
-    top: -110,
-    left: 0,
-    right: 0,
-    height: BLOOM_HEIGHT,
+  body: {
+    flex: 1,
+    minHeight: 0,
   },
-  gridColumn: {
+  layerActive: {
+    flex: 1,
+    minHeight: 0,
+  },
+  /** Mounted, running, effectively invisible, and out of the layout flow. */
+  layerOffstage: {
     position: 'absolute',
     top: 0,
-    bottom: 0,
-    width: 1,
-    backgroundColor: Colors.grid,
-  },
-  gridRow: {
-    position: 'absolute',
     left: 0,
-    right: 0,
+    width: 1,
     height: 1,
-    backgroundColor: Colors.grid,
+    opacity: 0,
+    overflow: 'hidden',
   },
 
-  // ---------------------------------------------------------------- header
-  header: {
+  // ------------------------------------------------------------- top bar
+  topBar: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space.sm + 2,
+    alignItems: 'stretch',
     minHeight: TOUCH_TARGET,
-    paddingTop: GUTTER,
-    paddingHorizontal: GUTTER,
+    borderBottomWidth: Rule.major,
   },
   back: {
     width: TOUCH_TARGET,
     height: TOUCH_TARGET,
+    flexGrow: 0,
+    flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    // Pulls the optical centre of the chevron back onto the gutter line.
-    marginLeft: -Space.md,
-    marginRight: -Space.md,
+    borderRightWidth: Rule.hair,
+  },
+  topMeta: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: 'center',
+    paddingHorizontal: Space.md - 2,
+  },
+  sessionName: {
+    ...Type.heading(12),
+    letterSpacing: tracking(12, 0.06),
+    textTransform: 'uppercase',
   },
   loungeName: {
-    ...Type.mono,
-    color: Colors.muted,
-    flexShrink: 1,
+    ...Type.label(10),
   },
-  pill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space.xs,
-    paddingLeft: Space.xs,
-    paddingRight: Space.md - 2,
-    paddingVertical: Space.xs + 1,
-    borderRadius: Radius.pill,
-    borderWidth: 1,
-    borderColor: Colors.accentDim,
-    overflow: 'hidden',
-  },
-  /** Accent at 14%, painted as its own layer so the label stays full strength. */
-  pillFill: {
-    backgroundColor: Colors.accent,
-    opacity: 0.14,
-  },
-  pillText: {
-    ...Type.monoLabel,
-    color: Colors.accent,
-  },
-
-  // ------------------------------------------------------------------ body
-  body: {
-    flex: 1,
-  },
-  /*
-    Vertical rhythm is the artboard's, pulled in one step at each seam: the
-    artboard is an 812px frame that reserves nothing for the status bar or the
-    home indicator, and on a real phone those two cost ~60px. Trimming the gaps
-    is cheaper than trimming the waveform or the participant list, which are the
-    two things this screen exists to show.
-  */
-  stageSlot: {
-    paddingHorizontal: GUTTER,
-    paddingTop: Space.lg,
-  },
-  transportSlot: {
-    paddingHorizontal: GUTTER,
-    paddingTop: Space.md,
-  },
-  peopleSlot: {
-    paddingHorizontal: GUTTER,
-    paddingTop: Space.xl,
-  },
-
-  // ------------------------------------------------------------------ tabs
-  tabsRow: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    gap: Space.xxl - 2,
-    marginTop: Space.lg,
-    paddingHorizontal: GUTTER,
-    borderTopWidth: 1,
-    borderTopColor: Colors.border,
-  },
-  tabsSpacer: {
-    flex: 1,
-  },
-  tab: {
+  readout: {
+    flexGrow: 0,
+    flexShrink: 0,
     minHeight: TOUCH_TARGET,
     justifyContent: 'center',
-    paddingTop: Space.md + 2,
+    paddingHorizontal: Space.md - 2,
+    borderLeftWidth: Rule.hair,
   },
-  tabLabel: {
-    ...Type.mono,
-    // Not Colors.faint: an inactive tab is still a control someone has to read.
-    color: Colors.muted,
+  readoutTop: {
+    ...readout(10),
+    letterSpacing: tracking(10, 0.09),
     textTransform: 'uppercase',
-    paddingBottom: Space.sm,
   },
-  tabLabelActive: {
-    color: Colors.text,
-  },
-  tabRule: {
-    height: 1,
-    backgroundColor: 'transparent',
-  },
-  /** The playhead, continued under whichever list you are looking at. */
-  tabRuleActive: {
-    backgroundColor: Colors.accent,
-  },
-  expandButton: {
-    width: TOUCH_TARGET,
-    height: TOUCH_TARGET,
-    alignSelf: 'center',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: -Space.md,
+  readoutBottom: {
+    ...Type.label(10),
+    letterSpacing: tracking(10, 0.09),
   },
 
-  // ------------------------------------------------------------------ list
-  /*
-    Basis 0 and grow 1: the list takes whatever the fixed blocks above it leave
-    over and scrolls inside that, so nothing on this screen can ever be pushed
-    off the bottom edge. The chevron in the tab row hands it the whole screen.
-  */
-  listSlot: {
-    flex: 1,
-    paddingHorizontal: GUTTER,
-  },
-  chatSkeleton: {
-    gap: Space.md,
-    paddingTop: Space.lg,
-  },
-  addSlot: {
-    paddingHorizontal: GUTTER,
-    paddingTop: Space.md,
-  },
-  addPill: {
-    minHeight: TOUCH_TARGET + 2,
+  // -------------------------------------------------------------- toggle
+  toggle: {
     flexDirection: 'row',
+    alignItems: 'stretch',
+    borderBottomWidth: Rule.hair,
+  },
+  toggleCell: {
+    flex: 1,
+    minHeight: TOUCH_TARGET,
+    justifyContent: 'center',
+    paddingHorizontal: Space.md,
+  },
+  toggleLabel: {
+    ...Type.heading(10),
+    letterSpacing: tracking(10, 0.1),
+    textTransform: 'uppercase',
+  },
+
+  // ------------------------------------------------------------- grabber
+  grabber: {
+    flexGrow: 0,
+    flexShrink: 0,
+    minHeight: TOUCH_TARGET,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: Space.sm + 1,
-    borderRadius: Radius.pill,
-    backgroundColor: Colors.glass,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    gap: Space.xs,
+    borderTopWidth: Rule.major,
   },
-  addLabel: {
-    ...Type.label,
-    color: Colors.text,
+  grabberBar: {
+    width: 40,
+    height: 3,
   },
-  pressed: {
-    opacity: 0.6,
+  grabberLabel: {
+    ...Type.heading(10),
+    letterSpacing: tracking(10, 0.13),
+    textTransform: 'uppercase',
+  },
+
+  // ---------------------------------------------------------------- dock
+  dock: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    borderTopWidth: Rule.hair,
+  },
+  dockCell: {
+    flex: 1,
+    minHeight: DOCK_HEIGHT,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingVertical: Space.sm,
+  },
+  dockLabel: {
+    ...Type.heading(10),
+    letterSpacing: tracking(10, 0.07),
+    textTransform: 'uppercase',
+  },
+
+  // -------------------------------------------------------------- sheets
+  scrim: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  sheet: {
+    maxHeight: '80%',
+    width: '100%',
+    maxWidth: 720,
+    alignSelf: 'center',
+    borderTopWidth: Rule.major,
+  },
+  sheetHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.md,
+    paddingHorizontal: GUTTER,
+    paddingTop: Space.md,
+    paddingBottom: Space.md - 2,
+    borderBottomWidth: Rule.major,
+  },
+  sheetHeadMeta: {
+    flex: 1,
+    minWidth: 0,
+  },
+  sheetTitle: {
+    ...Type.heading(15),
+    letterSpacing: tracking(15, 0.03),
+    textTransform: 'uppercase',
+  },
+  sheetSubtitle: {
+    ...Type.label(10),
+    letterSpacing: tracking(10, 0.09),
+    marginTop: 2,
+  },
+  sheetClose: {
+    minHeight: TOUCH_TARGET,
+    minWidth: TOUCH_TARGET,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    paddingHorizontal: Space.xs,
+  },
+  sheetCloseLabel: {
+    ...Type.heading(10),
+    letterSpacing: tracking(10, 0.1),
+    textTransform: 'uppercase',
+  },
+  sheetBody: {
+    flexShrink: 1,
+    minHeight: 0,
+  },
+  sheetNote: {
+    ...Type.body(16),
+    padding: GUTTER,
+    paddingBottom: Space.xl,
+  },
+
+  // ------------------------------------------------------- now-playing strip
+  strip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.sm + 2,
+    paddingHorizontal: GUTTER,
+    paddingVertical: Space.md - 2,
+    borderBottomWidth: Rule.hair,
+  },
+  stripTile: {
+    width: 34,
+    height: 34,
+    flexGrow: 0,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stripInitial: {
+    ...readout(15),
+  },
+  stripMeta: {
+    flex: 1,
+    minWidth: 0,
+  },
+  stripTitle: {
+    ...Type.heading(13),
+    letterSpacing: tracking(13, 0.02),
+  },
+  stripStatus: {
+    ...readout(10),
+    letterSpacing: tracking(10, 0.08),
+    textTransform: 'uppercase',
+  },
+
+  // ---------------------------------------------------------- mode picker
+  modeOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.md,
+    minHeight: 76,
+    paddingHorizontal: GUTTER,
+    paddingVertical: Space.md,
+    borderBottomWidth: Rule.hair,
+  },
+  modeMeta: {
+    flex: 1,
+    minWidth: 0,
+  },
+  modeName: {
+    ...Type.heading(15),
+    letterSpacing: tracking(15, 0.01),
+  },
+  modeDescription: {
+    ...Type.body(13),
+    marginTop: 2,
+  },
+  currentChip: {
+    flexGrow: 0,
+    flexShrink: 0,
+    paddingHorizontal: 7,
+    paddingVertical: Space.xs,
+  },
+  currentChipLabel: {
+    ...Type.heading(10),
+    letterSpacing: tracking(10, 0.09),
+    textTransform: 'uppercase',
+  },
+
+  // ----------------------------------------------------------- not built
+  modeWell: {
+    position: 'relative',
+    width: '100%',
+    aspectRatio: 16 / 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    borderBottomWidth: Rule.major,
+  },
+  modeWellGlyph: {
+    ...Type.display(72),
+  },
+  modeWellRule: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: '50%',
+    height: Rule.major,
+  },
+  modeWellChip: {
+    position: 'absolute',
+    right: Space.md - 2,
+    top: Space.md - 2,
+    paddingHorizontal: 7,
+    paddingVertical: Space.xs,
+  },
+  modeWellChipLabel: {
+    ...Type.heading(10),
+    letterSpacing: tracking(10, 0.09),
+    textTransform: 'uppercase',
+  },
+  modeBody: {
+    paddingHorizontal: GUTTER,
+    paddingTop: Space.lg - 2,
+  },
+  modeHeadline: {
+    ...Type.display(26),
+    lineHeight: 27,
+    letterSpacing: tracking(26, -0.03),
+  },
+  modeCopy: {
+    ...Type.body(16),
+    marginTop: Space.sm,
+  },
+  backToMusic: {
+    marginTop: Space.lg,
+    minHeight: 48,
+    justifyContent: 'center',
+    paddingHorizontal: Space.lg - 2,
+    borderWidth: Rule.hair,
+  },
+  backToMusicLabel: {
+    ...Type.heading(11),
+    letterSpacing: tracking(11, 0.1),
+    textTransform: 'uppercase',
   },
 });

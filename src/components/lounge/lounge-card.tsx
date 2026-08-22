@@ -1,9 +1,30 @@
-import { Check, ChevronRight, Globe, Lock, Users } from 'lucide-react-native';
-import { memo } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+/**
+ * A lounge row — Explore and the Lounges tab share it.
+ *
+ * Patchbay: a ruled band, never a card. A 56px tag well on the left, the name
+ * and its description in the middle, and a JOIN / OPEN cell cut off by a
+ * hairline on the right. The tag well is the same stand-in the artwork wells
+ * use, so a lounge with an icon and one without sit on the same grid.
+ *
+ * Red appears once: on the live count, and only when somebody is actually
+ * listening. `QUIET` is ink, `JOINED` is ink — neither is a live signal.
+ */
 
-import { Avatar, GlassCard, LivePulse, Skeleton } from '@/components/ui';
-import { Colors, Radius, Space, Type } from '@/lib/theme';
+import { Image } from 'expo-image';
+import { memo, useEffect, useRef } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withDelay,
+  withTiming,
+} from 'react-native-reanimated';
+
+import { Skeleton } from '@/components/ui';
+import { Duration, Rule, Space, Stagger, Type } from '@/lib/theme';
+import { useColors } from '@/lib/theme-context';
 
 export type LoungeCardProps = {
   name: string;
@@ -16,14 +37,39 @@ export type LoungeCardProps = {
   /** Drives the live treatment even when a Session is empty. */
   activeSessions?: number;
   isPublic?: boolean;
-  /** Shows the "Joined" badge — Explore only; the Lounges tab is all joined. */
+  /** Shows the "Joined" state — Explore only; the Lounges tab is all joined. */
   showJoined?: boolean;
   onPress: () => void;
+  /**
+   * Three-letter stand-in in the well. Derived from the name when absent, the
+   * same way the artwork wells derive their letter from the track title.
+   */
+  tag?: string;
+  /** Position in the list, for the 55ms entrance stagger. */
+  index?: number;
+  /** When given, the right cell becomes its own target and joins in place. */
+  onJoin?: () => void;
+  joining?: boolean;
 };
 
-const ICON_SIZE = 52;
-const META_ICON = 14;
-const ICON_STROKE = 1.6;
+const WELL = 56;
+const CTA = 62;
+const ROW_MIN_HEIGHT = 72;
+
+/** `THE BASEMENT` → `TBA`; `Dub` → `DUB`. Never longer than three characters. */
+function tagFor(name: string, explicit?: string): string {
+  if (explicit && explicit.trim()) return explicit.trim().toUpperCase().slice(0, 3);
+
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return '···';
+  if (words.length === 1) return words[0]!.slice(0, 3).toUpperCase();
+
+  return words
+    .slice(0, 3)
+    .map((word) => word[0] ?? '')
+    .join('')
+    .toUpperCase();
+}
 
 function pluralize(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`;
@@ -39,116 +85,162 @@ function LoungeCardBase({
   isPublic = true,
   showJoined = false,
   onPress,
+  tag,
+  index = 0,
+  onJoin,
+  joining = false,
 }: LoungeCardProps) {
+  const C = useColors();
+  const reduced = useReducedMotion();
+
   const isLive = activeSessions > 0;
   // An active Session with nobody in it yet is still worth surfacing — it is an
   // invitation. Only the wording changes.
-  const liveLabel = listeners > 0 ? `${listeners} listening` : 'Live now';
+  const liveLabel = listeners > 0 ? `${listeners} LISTENING` : 'LIVE NOW';
 
   const a11yParts = [
     name,
-    isLive ? liveLabel : null,
+    isLive ? liveLabel.toLowerCase() : null,
     memberCount !== undefined ? pluralize(memberCount, 'member', 'members') : null,
     showJoined ? 'Joined' : null,
     isPublic ? null : 'Private',
   ].filter(Boolean);
 
+  const cta = showJoined ? 'OPEN' : 'JOIN';
+
+  const enter = useSharedValue(reduced ? 1 : 0);
+  /** Read once at mount, so a refetch reordering the list does not replay it. */
+  const delay = useRef(index * Stagger.feed);
+
+  useEffect(() => {
+    if (reduced) {
+      enter.value = 1;
+      return;
+    }
+    enter.value = withDelay(
+      delay.current,
+      withTiming(1, { duration: Duration.enter, easing: Easing.bezier(0.2, 0.8, 0.2, 1) })
+    );
+  }, [enter, reduced]);
+
+  const entering = useAnimatedStyle(() => ({
+    opacity: enter.value,
+    transform: [{ translateY: (1 - enter.value) * 8 }],
+  }));
+
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={a11yParts.join(', ')}
-      accessibilityHint="Opens this lounge"
-      onPress={onPress}
-      style={({ pressed }) => [styles.pressable, pressed && styles.pressed]}>
-      <GlassCard>
-        <View style={styles.row}>
-          <Avatar name={name} uri={iconUrl} size={ICON_SIZE} live={isLive} />
+    <Animated.View style={entering}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={a11yParts.join(', ')}
+        accessibilityHint="Opens this lounge"
+        onPress={onPress}
+        style={({ pressed }) => [
+          styles.row,
+          { borderBottomColor: C.rule, backgroundColor: pressed ? C.surface : 'transparent' },
+        ]}>
+        <View style={[styles.well, { borderRightColor: C.rule, backgroundColor: C.bgRecessed }]}>
+          <Text style={[styles.tag, { color: C.ink3 }]}>{tagFor(name, tag)}</Text>
 
-          <View style={styles.body}>
-            <View style={styles.titleRow}>
-              <Text numberOfLines={1} style={styles.name}>
-                {name}
-              </Text>
+          {iconUrl ? (
+            <Image
+              source={{ uri: iconUrl }}
+              style={StyleSheet.absoluteFill}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              recyclingKey={name}
+              transition={Duration.press}
+              accessible={false}
+            />
+          ) : null}
+        </View>
 
-              {showJoined ? (
-                <View style={styles.joined}>
-                  <Check size={12} color={Colors.muted} strokeWidth={2.4} />
-                  <Text style={styles.joinedLabel}>Joined</Text>
-                </View>
-              ) : null}
-            </View>
+        <View style={styles.body}>
+          <Text numberOfLines={1} style={[styles.name, { color: C.ink }]}>
+            {name}
+          </Text>
 
-            {description ? (
-              <Text numberOfLines={2} style={styles.description}>
-                {description}
+          {description ? (
+            <Text numberOfLines={2} style={[styles.description, { color: C.ink2 }]}>
+              {description}
+            </Text>
+          ) : null}
+
+          <View style={styles.meta}>
+            {memberCount !== undefined ? (
+              <Text style={[styles.metaLabel, { color: C.ink3 }]}>
+                {pluralize(memberCount, 'MEMBER', 'MEMBERS')}
               </Text>
             ) : null}
 
-            <View style={styles.meta}>
-              {isLive ? (
-                <View style={styles.metaItem}>
-                  <LivePulse size={7} />
-                  <Text style={styles.live}>{liveLabel}</Text>
-                </View>
-              ) : null}
+            <Text style={[styles.metaLabel, { color: C.ink3 }]}>
+              {isPublic ? 'PUBLIC' : 'PRIVATE'}
+            </Text>
 
-              {memberCount !== undefined ? (
-                <View style={styles.metaItem}>
-                  <Users size={META_ICON} color={Colors.muted} strokeWidth={ICON_STROKE} />
-                  <Text style={styles.metaLabel}>
-                    {pluralize(memberCount, 'member', 'members')}
-                  </Text>
-                </View>
-              ) : null}
+            {isLive ? (
+              <Text style={[styles.live, { color: C.liveText }]}>{liveLabel}</Text>
+            ) : (
+              <Text style={[styles.metaLabel, { color: C.ink3 }]}>QUIET</Text>
+            )}
 
-              <View style={styles.metaItem}>
-                {isPublic ? (
-                  <Globe size={META_ICON} color={Colors.muted} strokeWidth={ICON_STROKE} />
-                ) : (
-                  <Lock size={META_ICON} color={Colors.muted} strokeWidth={ICON_STROKE} />
-                )}
-                <Text style={styles.metaLabel}>{isPublic ? 'Public' : 'Private'}</Text>
-              </View>
-            </View>
+            {showJoined ? (
+              <Text style={[styles.metaLabel, { color: C.ink3 }]}>JOINED</Text>
+            ) : null}
           </View>
-
-          {/* Muted rather than faint: faint sits under 3:1 on glass, which is
-              the floor for a graphic that carries meaning. */}
-          <ChevronRight size={20} color={Colors.muted} strokeWidth={ICON_STROKE} />
         </View>
-      </GlassCard>
-    </Pressable>
+
+        {onJoin ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={showJoined ? `Open ${name}` : `Join ${name}`}
+            disabled={joining}
+            onPress={onJoin}
+            style={({ pressed }) => [
+              styles.cta,
+              { borderLeftColor: C.rule, backgroundColor: pressed ? C.liveWash : 'transparent' },
+              joining && styles.ctaBusy,
+            ]}>
+            <Text style={[styles.ctaLabel, { color: C.liveText }]}>{joining ? '···' : cta}</Text>
+          </Pressable>
+        ) : (
+          <View style={[styles.cta, { borderLeftColor: C.rule }]}>
+            <Text style={[styles.ctaLabel, { color: C.liveText }]}>{cta}</Text>
+          </View>
+        )}
+      </Pressable>
+    </Animated.View>
   );
 }
 
 /**
  * Memoized: these render inside FlatLists that re-render on every realtime
- * lounge update, and the whole card is pure props.
+ * lounge update, and the whole row is pure props.
  */
 export const LoungeCard = memo(LoungeCardBase);
 
 /**
- * The card's loading twin. Lives here so its geometry cannot drift from the
- * real card's — a skeleton that resizes on load is worse than no skeleton.
+ * The row's loading twin. Lives here so its geometry cannot drift from the real
+ * row's — a skeleton that resizes on load is worse than no skeleton.
  */
 export function LoungeCardSkeleton() {
+  const C = useColors();
+
   return (
-    <GlassCard>
-      <View style={styles.row}>
-        <Skeleton width={ICON_SIZE} height={ICON_SIZE} radius={ICON_SIZE / 2} />
-        <View style={styles.skeletonBody}>
-          <Skeleton width="55%" height={18} />
-          <Skeleton width="85%" height={14} />
-          <Skeleton width="35%" height={14} />
-        </View>
+    <View style={[styles.row, { borderBottomColor: C.rule }]}>
+      <View style={[styles.well, { borderRightColor: C.rule, backgroundColor: C.bgRecessed }]} />
+      <View style={styles.body}>
+        <Skeleton width="52%" height={16} radius={0} />
+        <Skeleton width="86%" height={12} radius={0} style={styles.skeletonGap} />
+        <Skeleton width={110} height={10} radius={0} style={styles.skeletonGap} />
       </View>
-    </GlassCard>
+      <View style={[styles.cta, { borderLeftColor: C.rule }]} />
+    </View>
   );
 }
 
 export function LoungeListSkeleton({ count = 4 }: { count?: number }) {
   return (
-    <View style={styles.skeletonList}>
+    <View>
       {Array.from({ length: count }, (_, index) => (
         <LoungeCardSkeleton key={index} />
       ))}
@@ -157,86 +249,74 @@ export function LoungeListSkeleton({ count = 4 }: { count?: number }) {
 }
 
 const styles = StyleSheet.create({
-  pressable: {
-    // The card is the touch target and is far taller than 44pt already.
-    width: '100%',
-  },
-  pressed: {
-    opacity: 0.72,
-  },
   row: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space.md,
+    minHeight: ROW_MIN_HEIGHT,
+    borderBottomWidth: Rule.hair,
   },
+  well: {
+    width: WELL,
+    borderRightWidth: Rule.hair,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  tag: {
+    ...Type.heading(12),
+    letterSpacing: 12 * 0.06,
+  },
+
   body: {
     flex: 1,
-    gap: Space.xs,
-  },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space.sm,
+    minWidth: 0,
+    paddingVertical: 11,
+    paddingHorizontal: 10,
+    justifyContent: 'center',
   },
   name: {
-    ...Type.heading,
-    color: Colors.text,
-    flexShrink: 1,
+    ...Type.heading(14),
+    letterSpacing: 14 * 0.01,
   },
   /*
-    Glass, never accent: "Joined" is a state, not a live signal. Green in this
-    app means something is playing right now, and a filled badge next to a live
-    pulse would read as a second, competing status.
+    14px, not the prototype's 12: the handoff's own type scale puts Body at
+    14–16px, and this is the one line of real prose on the row.
   */
-  joined: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space.xs,
-    paddingHorizontal: Space.sm,
-    paddingVertical: 2,
-    borderRadius: Radius.pill,
-    backgroundColor: Colors.glass,
-    borderWidth: 1,
-    borderColor: Colors.borderBright,
-  },
-  joinedLabel: {
-    ...Type.caption,
-    color: Colors.muted,
-  },
   description: {
-    ...Type.body,
-    color: Colors.muted,
+    ...Type.body(14),
+    lineHeight: 20,
+    marginTop: 2,
   },
   meta: {
     flexDirection: 'row',
-    alignItems: 'center',
     flexWrap: 'wrap',
-    gap: Space.md,
-    marginTop: 2,
-  },
-  metaItem: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: Space.xs,
+    gap: Space.sm,
+    marginTop: 7,
   },
-  /*
-    Mono, because every one of these is a measurement: how many people are in
-    the room, how many are listening, what kind of room it is. Prose sets in
-    Figtree; anything you could count sets in Plex.
-  */
   metaLabel: {
-    ...Type.monoLabel,
-    color: Colors.muted,
+    ...Type.label(10),
+    letterSpacing: 10 * 0.09,
   },
   live: {
-    ...Type.monoLabel,
-    color: Colors.accent,
+    ...Type.label(10),
+    letterSpacing: 10 * 0.09,
   },
-  skeletonBody: {
-    flex: 1,
-    gap: Space.sm,
+
+  cta: {
+    width: CTA,
+    borderLeftWidth: Rule.hair,
+    justifyContent: 'center',
+    paddingHorizontal: 10,
   },
-  skeletonList: {
-    gap: Space.md,
+  ctaBusy: {
+    opacity: 0.55,
+  },
+  ctaLabel: {
+    ...Type.heading(11),
+    letterSpacing: 11 * 0.08,
+  },
+
+  skeletonGap: {
+    marginTop: Space.sm,
   },
 });

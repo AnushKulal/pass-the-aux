@@ -20,7 +20,8 @@ import {
   type ChatMessage,
   type ChatScope,
 } from '@/features/chat/queries';
-import { Colors, Space, Type } from '@/lib/theme';
+import { Radius, Rule, Space, Type } from '@/lib/theme';
+import { useColors } from '@/lib/theme-context';
 
 /** Messages closer together than this from one author render as one run. */
 const GROUP_WINDOW_MS = 5 * 60_000;
@@ -29,6 +30,8 @@ export type ChatListProps = ChatScope & {
   /** Copy for the empty state, which differs between a lounge and a Session. */
   emptyTitle?: string;
   emptyDescription?: string;
+  /** Forwarded to every row: avatars and names become profile targets. */
+  onOpenProfile?: (userId: string) => void;
 };
 
 type Decorated = {
@@ -99,7 +102,14 @@ function decorate(messages: ChatMessage[]): Decorated[] {
   });
 }
 
-export function ChatList({ loungeId, roomId, emptyTitle, emptyDescription }: ChatListProps) {
+export function ChatList({
+  loungeId,
+  roomId,
+  emptyTitle,
+  emptyDescription,
+  onOpenProfile,
+}: ChatListProps) {
+  const C = useColors();
   const scope = useMemo<ChatScope>(() => ({ loungeId, roomId: roomId ?? null }), [loungeId, roomId]);
 
   const viewerId = useViewerId();
@@ -126,9 +136,10 @@ export function ChatList({ loungeId, roomId, emptyTitle, emptyDescription }: Cha
         daySeparator={item.daySeparator}
         onLongPress={openActions}
         onToggleReaction={toggleReaction}
+        onOpenProfile={onOpenProfile}
       />
     ),
-    [openActions, toggleReaction],
+    [openActions, toggleReaction, onOpenProfile],
   );
 
   const closeActions = useCallback(() => setSelected(null), []);
@@ -177,17 +188,19 @@ export function ChatList({ loungeId, roomId, emptyTitle, emptyDescription }: Cha
         ListFooterComponent={
           isFetchingNextPage ? (
             <View style={styles.olderLoader}>
-              <ActivityIndicator size="small" color={Colors.muted} />
+              <ActivityIndicator size="small" color={C.ink3} />
             </View>
           ) : !hasNextPage ? (
             /*
-              The top of the log terminates in the same hairline language the
-              day separators use, so "the log ends here" and "a new day starts
-              here" read as one system rather than two unrelated captions.
+              The top of the log terminates in the same rule-plus-label figure
+              the day separators use, so "the log ends here" and "a new day
+              starts here" read as one system rather than two unrelated captions.
             */
             <View style={styles.logStartBlock}>
-              <View style={styles.logStartRule} />
-              <Text style={styles.logStart}>This is the beginning of the conversation.</Text>
+              <View style={[styles.logStartRule, { backgroundColor: C.rule }]} />
+              <Text style={[styles.logStart, { color: C.ink3 }]}>
+                This is the beginning of the conversation.
+              </Text>
             </View>
           ) : null
         }
@@ -223,7 +236,8 @@ export function ChatList({ loungeId, roomId, emptyTitle, emptyDescription }: Cha
 
 /**
  * First-load placeholder. Alternating widths and an occasional avatar read as
- * "messages are coming" rather than as a broken layout.
+ * "messages are coming" rather than as a broken layout. Square, like every
+ * other block in this direction.
  */
 function ChatSkeleton() {
   return (
@@ -231,11 +245,11 @@ function ChatSkeleton() {
       {[82, 54, 68, 40, 74, 60].map((width, index) => (
         <View key={width} style={styles.skeletonRow}>
           <View style={styles.skeletonGutter}>
-            {index % 2 === 0 ? <Skeleton width={36} height={36} radius={18} /> : null}
+            {index % 2 === 0 ? <Skeleton width={30} height={30} radius={Radius} /> : null}
           </View>
           <View style={styles.skeletonBody}>
-            {index % 2 === 0 ? <Skeleton width={104} height={12} radius={6} /> : null}
-            <Skeleton width={`${width}%`} height={14} radius={7} />
+            {index % 2 === 0 ? <Skeleton width={104} height={12} radius={Radius} /> : null}
+            <Skeleton width={`${width}%`} height={14} radius={Radius} />
           </View>
         </View>
       ))}
@@ -245,7 +259,7 @@ function ChatSkeleton() {
 
 const styles = StyleSheet.create({
   content: {
-    paddingVertical: Space.lg,
+    paddingVertical: Space.md,
   },
   emptyDock: {
     flex: 1,
@@ -256,27 +270,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   logStartBlock: {
-    paddingTop: Space.lg,
-    paddingBottom: Space.lg,
+    paddingVertical: Space.lg,
     gap: Space.md,
   },
   logStartRule: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: Colors.border,
-    marginHorizontal: Space.lg,
+    height: Rule.hair,
+    marginHorizontal: Space.md,
   },
   logStart: {
-    ...Type.caption,
-    // Readable copy, so `muted` — `faint` is under 4.5:1 and is for
-    // placeholders and hairlines only.
-    color: Colors.muted,
+    ...Type.body(12),
     textAlign: 'center',
     paddingHorizontal: Space.xl,
   },
   skeleton: {
     flex: 1,
     justifyContent: 'flex-end',
-    paddingHorizontal: Space.lg,
+    paddingHorizontal: Space.md,
     paddingBottom: Space.lg,
     gap: Space.lg,
   },
@@ -284,8 +293,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
   },
   skeletonGutter: {
-    width: 36 + Space.md,
-    paddingRight: Space.md,
+    width: 30 + 9,
+    paddingRight: 9,
   },
   skeletonBody: {
     flex: 1,

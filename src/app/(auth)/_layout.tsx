@@ -1,7 +1,7 @@
 import { Redirect, Stack, usePathname } from 'expo-router';
 
 import { useAuth } from '@/lib/auth';
-import { Colors } from '@/lib/theme';
+import { useColors } from '@/lib/theme-context';
 
 /**
  * The signed-out group, plus one exception.
@@ -13,6 +13,7 @@ import { Colors } from '@/lib/theme';
  */
 export default function AuthLayout() {
   const { session, loading, pendingUsernameClaim } = useAuth();
+  const C = useColors();
   const pathname = usePathname();
 
   const claiming = pathname.endsWith('claim-username');
@@ -28,7 +29,7 @@ export default function AuthLayout() {
     <Stack
       screenOptions={{
         headerShown: false,
-        contentStyle: { backgroundColor: Colors.bg },
+        contentStyle: { backgroundColor: C.bg },
         animation: 'slide_from_right',
       }}
     />

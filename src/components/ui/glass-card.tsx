@@ -1,62 +1,55 @@
-import { BlurView } from 'expo-blur';
 import type { ReactNode } from 'react';
 import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
-import { Colors, PointerEvents, Radius, Space } from '@/lib/theme';
+import { useColors } from '@/lib/theme-context';
+import { Radius, Rule, Space } from '@/lib/theme';
 
 export type GlassCardProps = {
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
+  /**
+   * @deprecated There is no blur in Patchbay. Accepted and ignored so the call
+   * sites that still pass it keep compiling.
+   */
   intensity?: number;
   padded?: boolean;
 };
 
-/**
- * Signature element #5 — the glass panel. Colors.glass fill, one hairline
- * border, Radius.lg, over the indigo-plum ground.
- *
- * Blur is treated as decoration, never as the thing that makes text readable —
- * see the opaque floor below. That floor also means a Bloom placed *behind* a
- * card cannot tint it; to get the artboard's lit-from-within panels, render
- * `<Bloom />` as the first child instead, exactly the way the artboard nests its
- * bloom div inside the Feed row. `overflow: hidden` clips it to the radius.
- */
-export function GlassCard({ children, style, intensity = 40, padded = true }: GlassCardProps) {
-  return (
-    <View style={[styles.root, style]}>
-      {/*
-        Opaque floor. expo-blur degrades to a nearly transparent view on web and
-        on Android (blurMethod defaults to 'none'), and glass-over-bg alone drops
-        body text under the 4.5:1 floor. Painting Colors.surface underneath keeps
-        contrast identical on every platform; the blur only adds depth on iOS.
-      */}
-      <View style={[StyleSheet.absoluteFill, styles.solid, PointerEvents.none]} />
-      <BlurView
-        tint="dark"
-        intensity={intensity}
-        style={[StyleSheet.absoluteFill, PointerEvents.none]}
-      />
-      <View style={[StyleSheet.absoluteFill, styles.tint, PointerEvents.none]} />
+export type PanelProps = GlassCardProps;
 
-      <View style={padded ? styles.padded : undefined}>{children}</View>
+/**
+ * A flat panel: `surface` ground, one 1px `rule2` border, square corners.
+ *
+ * This file used to hold the glass card. There is no glass in this direction —
+ * no blur, no tint, no shadow — and separation is done with the border and the
+ * step in ground colour instead. The name `GlassCard` survives only because
+ * twenty-odd call sites import it; `Panel` is the name to use in new code.
+ */
+export function GlassCard({ children, style, padded = true }: GlassCardProps) {
+  const C = useColors();
+
+  return (
+    <View
+      style={[
+        styles.root,
+        { backgroundColor: C.surface, borderColor: C.rule2 },
+        padded && styles.padded,
+        style,
+      ]}>
+      {children}
     </View>
   );
 }
 
+/** The name this component should be called by from here on. */
+export const Panel = GlassCard;
+
 const styles = StyleSheet.create({
   root: {
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    overflow: 'hidden',
-  },
-  solid: {
-    backgroundColor: Colors.surface,
-  },
-  tint: {
-    backgroundColor: Colors.glass,
+    borderRadius: Radius,
+    borderWidth: Rule.hair,
   },
   padded: {
-    padding: Space.lg,
+    padding: Space.md,
   },
 });

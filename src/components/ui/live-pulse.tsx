@@ -11,7 +11,8 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
-import { Colors, Radius } from '@/lib/theme';
+import { useColors } from '@/lib/theme-context';
+import { Radius } from '@/lib/theme';
 
 export type LivePulseProps = {
   size?: number;
@@ -22,12 +23,18 @@ export type LivePulseProps = {
 const HALO_SCALE = 2.6;
 
 /**
- * The dot inside a "LIVE" badge. Purely decorative — the badge's own text
- * carries the meaning, so this is hidden from screen readers.
+ * The square mark inside a LIVE badge.
+ *
+ * Purely decorative — the badge's own text carries the meaning — so it is
+ * hidden from screen readers. The expanding ghost behind it is a square too:
+ * there are no round corners anywhere in this direction, and a circle here
+ * would be the one soft edge on the screen.
  */
-export function LivePulse({ size = 8, color = Colors.accent }: LivePulseProps) {
+export function LivePulse({ size = 8, color }: LivePulseProps) {
+  const C = useColors();
   const reduced = useReducedMotion();
   const wave = useSharedValue(0);
+  const paint = color ?? C.live;
 
   useEffect(() => {
     if (reduced) {
@@ -57,16 +64,10 @@ export function LivePulse({ size = 8, color = Colors.accent }: LivePulseProps) {
       style={[styles.root, { width: box, height: box }]}>
       {reduced ? null : (
         <Animated.View
-          style={[
-            styles.halo,
-            { width: box, height: box, borderRadius: Radius.pill, backgroundColor: color },
-            halo,
-          ]}
+          style={[styles.halo, { width: box, height: box, backgroundColor: paint }, halo]}
         />
       )}
-      <View
-        style={{ width: size, height: size, borderRadius: Radius.pill, backgroundColor: color }}
-      />
+      <View style={{ width: size, height: size, borderRadius: Radius, backgroundColor: paint }} />
     </View>
   );
 }
@@ -78,5 +79,6 @@ const styles = StyleSheet.create({
   },
   halo: {
     position: 'absolute',
+    borderRadius: Radius,
   },
 });

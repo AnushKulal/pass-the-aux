@@ -1,39 +1,46 @@
 /**
  * What is playing next, and whose fault it is.
  *
- * "Anush added this" is not decoration — attribution is the social texture of a
- * shared queue. It is what turns a playlist into a room. The artboard folds it
- * into the subtitle rather than giving it its own line, so a row stays one
- * glance deep: position, art, what it is, how long it runs.
+ * "@anush added this" is not decoration — attribution is the social texture of
+ * a shared queue. It is what turns a playlist into a Session. The artboard
+ * folds it into the subtitle rather than giving it its own line, so a row stays
+ * one glance deep: position, art, what it is, how long it runs, who put it on.
+ *
+ * The artboard also draws a 44px BUMP control beside each row's remove. There
+ * is no reorder RPC — `queue_items.position` is written by `queue_append` and
+ * read by `room_advance`, and nothing in `supabase/migrations/` can move a row
+ * — so the control is not drawn rather than drawn dead. See the handoff note.
  */
 
 import { Image } from 'expo-image';
 import { ListMusic, X } from 'lucide-react-native';
-import { memo, useCallback } from 'react';
+import { memo, useCallback, type ReactNode } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View, type ListRenderItemInfo } from 'react-native';
 
-import { AuxButton, BLURHASH_SURFACE, EmptyState, Skeleton } from '@/components/ui';
+import { BLURHASH_SURFACE, EmptyState, Skeleton } from '@/components/ui';
 import { useQueue, useRemoveQueueItem, type QueueEntry } from '@/features/rooms/queries';
-import { Colors, Duration, Radius, Space, TOUCH_TARGET, Type } from '@/lib/theme';
+import { Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
+import { useColors } from '@/lib/theme-context';
 
-const ART_SIZE = 40;
+import { formatClock, initialFor, readout } from './drift';
+
+const GUTTER = Space.md;
+const WELL = 32;
 const SKELETON_ROWS = 4;
-/** Two mono digits plus air, so 01..99 never reflows the row. */
-const INDEX_WIDTH = 18;
+/** Two tabular digits plus air, so 01..99 never reflows the row. */
+const INDEX_WIDTH = 20;
 
 export type QueueListProps = {
   roomId: string | null;
   isHost: boolean;
   currentUserId: string | null;
   onAddTrack: () => void;
+  /** The now-playing strip the sheet puts above the queue. */
+  header?: ReactNode;
 };
 
-function formatDuration(ms: number): string {
-  const total = Math.max(0, Math.round(ms / 1000));
-  return `${Math.floor(total / 60)}:${(total % 60).toString().padStart(2, '0')}`;
-}
-
-export function QueueList({ roomId, isHost, currentUserId, onAddTrack }: QueueListProps) {
+export function QueueList({ roomId, isHost, currentUserId, onAddTrack, header }: QueueListProps) {
+  const C = useColors();
   const { data, isLoading } = useQueue(roomId);
   // `mutate` is stable; the useMutation result object is not, and depending on
   // it would hand every memoised row a fresh callback on each parent render.
@@ -62,14 +69,15 @@ export function QueueList({ roomId, isHost, currentUserId, onAddTrack }: QueueLi
 
   if (isLoading && !data) {
     return (
-      <View style={styles.skeletonWrap}>
+      <View>
+        {header}
         {Array.from({ length: SKELETON_ROWS }, (_, index) => (
-          <View key={index} style={styles.row}>
+          <View key={index} style={[styles.row, { borderBottomColor: C.ruleSoft }]}>
             <View style={styles.indexSpacer} />
-            <Skeleton width={ART_SIZE} height={ART_SIZE} radius={Radius.sm} />
+            <Skeleton width={WELL} height={WELL} radius={0} />
             <View style={styles.meta}>
-              <Skeleton width="70%" height={16} />
-              <Skeleton width="45%" height={12} />
+              <Skeleton width="70%" height={14} radius={0} />
+              <Skeleton width="45%" height={11} radius={0} />
             </View>
           </View>
         ))}
@@ -82,23 +90,28 @@ export function QueueList({ roomId, isHost, currentUserId, onAddTrack }: QueueLi
       data={data ?? []}
       renderItem={renderItem}
       keyExtractor={keyExtractor}
-      contentContainerStyle={styles.list}
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
+      ListHeaderComponent={header ? <>{header}</> : null}
       ListEmptyComponent={
         <EmptyState
           icon={ListMusic}
           title="Nothing queued"
           description="Whatever anyone adds plays next. Go first."
-          action={
-            /*
-              Primary, not accent: an empty queue is the one moment nothing is
-              playing, and the artboards draw empty-state CTAs without the live
-              colour ("Find a lounge" is a ghost pill, "Back to Home" is ink).
-            */
-            <AuxButton label="Add a track" onPress={onAddTrack} variant="primary" size="sm" />
-          }
         />
+      }
+      ListFooterComponent={
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Add a track to the queue"
+          onPress={onAddTrack}
+          style={({ pressed }) => [
+            styles.add,
+            { borderColor: C.live },
+            pressed ? { backgroundColor: C.liveWash } : null,
+          ]}>
+          <Text style={[styles.addLabel, { color: C.liveText }]}>+ Add a track</Text>
+        </Pressable>
       }
     />
   );
@@ -114,45 +127,51 @@ type QueueRowProps = {
 };
 
 const QueueRow = memo(function QueueRow({ entry, index, canRemove, onRemove }: QueueRowProps) {
+  const C = useColors();
   const { track } = entry;
 
   return (
-    <View style={styles.row}>
-      {/* A position is a measurement, so it is mono like every other number. */}
-      <Text style={styles.index}>{(index + 1).toString().padStart(2, '0')}</Text>
+    <View style={[styles.row, { borderBottomColor: C.ruleSoft }]}>
+      {/* A position is a measurement, so it is tabular like every other number. */}
+      <Text style={[styles.index, { color: C.ink3 }]}>
+        {(index + 1).toString().padStart(2, '0')}
+      </Text>
 
-      {track.artwork_url ? (
-        <Image
-          source={{ uri: track.artwork_url }}
-          style={styles.art}
-          contentFit="cover"
-          cachePolicy="memory-disk"
-          placeholder={{ blurhash: BLURHASH_SURFACE }}
-          transition={Duration.fast}
-          accessibilityIgnoresInvertColors
-        />
-      ) : (
-        <View style={[styles.art, styles.artFallback]} />
-      )}
-
-      <View style={styles.meta}>
-        <Text numberOfLines={1} style={styles.title}>
-          {track.title}
-        </Text>
-        <Text numberOfLines={1} style={styles.subtitle}>
-          {`${track.artist} · ${entry.addedByName} added`}
-        </Text>
+      <View style={[styles.well, { backgroundColor: C.bgRecessed, borderColor: C.rule }]}>
+        {track.artwork_url ? (
+          <Image
+            source={{ uri: track.artwork_url }}
+            style={StyleSheet.absoluteFill}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            placeholder={{ blurhash: BLURHASH_SURFACE }}
+            accessibilityIgnoresInvertColors
+          />
+        ) : (
+          <Text style={[styles.wellInitial, { color: C.ink3 }]}>{initialFor(track.title)}</Text>
+        )}
       </View>
 
-      <Text style={styles.length}>{formatDuration(track.duration_ms)}</Text>
+      <View style={styles.meta}>
+        <Text numberOfLines={1} style={[styles.title, { color: C.ink }]}>
+          {track.title}
+        </Text>
+        <Text numberOfLines={1} style={[styles.subtitle, { color: C.ink2 }]}>
+          {`${track.artist} · ${formatClock(track.duration_ms)} · @${entry.addedByName}`}
+        </Text>
+      </View>
 
       {canRemove ? (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Remove ${track.title} from the queue`}
           onPress={() => onRemove(entry.id)}
-          style={({ pressed }) => [styles.remove, pressed && styles.removePressed]}>
-          <X size={20} strokeWidth={1.6} color={Colors.muted} />
+          style={({ pressed }) => [
+            styles.control,
+            { borderColor: C.rule },
+            pressed ? { borderColor: C.danger } : null,
+          ]}>
+          <X size={18} strokeWidth={2} color={C.ink2} />
         </Pressable>
       ) : null}
     </View>
@@ -160,24 +179,17 @@ const QueueRow = memo(function QueueRow({ entry, index, canRemove, onRemove }: Q
 });
 
 const styles = StyleSheet.create({
-  list: {
-    paddingTop: Space.lg,
-    paddingBottom: Space.xxl,
-    gap: Space.md,
-  },
-  skeletonWrap: {
-    paddingTop: Space.lg,
-    gap: Space.md,
-  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Space.md,
-    minHeight: ART_SIZE + Space.md,
+    gap: Space.sm + 1,
+    minHeight: TOUCH_TARGET + Space.md,
+    paddingHorizontal: GUTTER,
+    paddingVertical: Space.sm + 1,
+    borderBottomWidth: Rule.hair,
   },
   index: {
-    ...Type.mono,
-    color: Colors.muted,
+    ...readout(11),
     width: INDEX_WIDTH,
     flexGrow: 0,
     flexShrink: 0,
@@ -188,44 +200,50 @@ const styles = StyleSheet.create({
     flexGrow: 0,
     flexShrink: 0,
   },
-  art: {
-    width: ART_SIZE,
-    height: ART_SIZE,
-    borderRadius: Radius.sm,
-    backgroundColor: Colors.surfaceRaised,
+  well: {
+    width: WELL,
+    height: WELL,
+    flexGrow: 0,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    borderWidth: Rule.hair,
   },
-  artFallback: {
-    backgroundColor: Colors.surfaceRaised,
+  wellInitial: {
+    ...readout(13),
   },
   meta: {
     flex: 1,
     minWidth: 0,
-    gap: 1,
   },
   title: {
-    ...Type.bodyStrong,
-    color: Colors.text,
+    ...Type.heading(14),
+    letterSpacing: tracking(14, 0.01),
   },
   subtitle: {
-    ...Type.caption,
-    color: Colors.muted,
+    ...Type.body(13),
   },
-  length: {
-    ...Type.mono,
-    color: Colors.muted,
-    flexGrow: 0,
-    flexShrink: 0,
-  },
-  remove: {
+  control: {
     width: TOUCH_TARGET,
     height: TOUCH_TARGET,
+    flexGrow: 0,
+    flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    // Keeps 8px of clear space between the row body and this target.
-    marginLeft: -Space.xs,
-    marginRight: -Space.md,
+    borderWidth: Rule.hair,
   },
-  removePressed: {
-    opacity: 0.6,
+  add: {
+    margin: Space.lg - 2,
+    marginBottom: Space.xl,
+    minHeight: 48,
+    justifyContent: 'center',
+    paddingHorizontal: Space.lg - 2,
+    borderWidth: Rule.hair,
+  },
+  addLabel: {
+    ...Type.heading(11),
+    letterSpacing: tracking(11, 0.1),
+    textTransform: 'uppercase',
   },
 });

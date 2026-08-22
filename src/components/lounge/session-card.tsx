@@ -1,9 +1,29 @@
-import { Headphones, Radio } from 'lucide-react-native';
-import { memo } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+/**
+ * A Session row inside a lounge.
+ *
+ * Patchbay, README §8: a 64px artwork well, a pulsing dot beside the Session
+ * name, `track — artist`, the `ON AUX` / listening readouts, and an `IN` cell
+ * cut off by a hairline. No card, no radius, no shadow — the row's edges are
+ * the 1px rules around it.
+ *
+ * The accent is earned here: a Session row only exists for a room you can walk
+ * into right now.
+ */
 
-import { GlassCard, LivePulse } from '@/components/ui';
-import { Colors, Radius, Space, Type } from '@/lib/theme';
+import { memo, useEffect } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated, {
+  Easing,
+  cancelAnimation,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from 'react-native-reanimated';
+
+import { Rule, Space, Type } from '@/lib/theme';
+import { useColors } from '@/lib/theme-context';
 
 export type SessionCardProps = {
   name: string;
@@ -14,17 +34,49 @@ export type SessionCardProps = {
   onPress: () => void;
 };
 
-const ICON_STROKE = 1.6;
-const BADGE = 44;
+const WELL = 64;
+const IN_CELL = 56;
+const DOT = 6;
 
-/*
-  SYSTEM.md's `--live-dim`. theme.ts exports `accentDim` as a solid tone, which
-  would paint a hard teal block; this badge needs the wash so the card's own
-  glass still reads through it. Derived from Colors.accent, and the only reason
-  it is spelled out here is that the token set has no translucent form of it.
-*/
-const LIVE_WASH = 'rgba(87, 226, 213, 0.14)';
-const LIVE_EDGE = 'rgba(87, 226, 213, 0.30)';
+/** Slow on purpose: an ambient "this is live" beat, not a micro-interaction. */
+const PULSE_MS = 1_600;
+
+function glyphFor(value: string): string {
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed[0]!.toUpperCase() : '·';
+}
+
+/**
+ * The live dot. A square, because there is no radius in this direction, and
+ * flat under reduced motion rather than removed — it still carries meaning.
+ */
+function PulseDot({ color }: { color: string }) {
+  const reduced = useReducedMotion();
+  const wave = useSharedValue(1);
+
+  useEffect(() => {
+    if (reduced) {
+      wave.value = 1;
+      return;
+    }
+    wave.value = withRepeat(
+      withTiming(0.25, { duration: PULSE_MS / 2, easing: Easing.inOut(Easing.quad) }),
+      -1,
+      true
+    );
+    return () => cancelAnimation(wave);
+  }, [reduced, wave]);
+
+  const style = useAnimatedStyle(() => ({ opacity: wave.value }));
+
+  return (
+    <Animated.View
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={[styles.dot, { backgroundColor: color }, style]}
+    />
+  );
+}
 
 function SessionCardBase({
   name,
@@ -34,6 +86,8 @@ function SessionCardBase({
   nowPlaying,
   onPress,
 }: SessionCardProps) {
+  const C = useColors();
+
   const subtitle = nowPlaying
     ? `${nowPlaying.title} — ${nowPlaying.artist}`
     : `${hostName} is on aux`;
@@ -44,42 +98,46 @@ function SessionCardBase({
       accessibilityLabel={`${name}. ${subtitle}. ${listeners} listening.`}
       accessibilityHint="Opens this Session"
       onPress={onPress}
-      style={({ pressed }) => [styles.pressable, pressed && styles.pressed]}>
-      <GlassCard>
-        <View style={styles.row}>
-          {/*
-            One of the few places outside the Feed where accent is earned: a
-            Session card only exists for a room you can walk into right now.
-          */}
-          <View style={styles.badge}>
-            <Radio size={20} color={Colors.accent} strokeWidth={ICON_STROKE} />
-          </View>
+      style={({ pressed }) => [
+        styles.row,
+        { borderBottomColor: C.rule, backgroundColor: pressed ? C.surface : 'transparent' },
+      ]}>
+      <View style={[styles.well, { borderRightColor: C.rule, backgroundColor: C.bgRecessed }]}>
+        <Text style={[styles.wellGlyph, { color: C.artwork }]}>
+          {glyphFor(nowPlaying?.title ?? name)}
+        </Text>
+      </View>
 
-          <View style={styles.body}>
-            <View style={styles.titleRow}>
-              {isPlaying ? <LivePulse size={7} /> : null}
-              <Text numberOfLines={1} style={styles.name}>
-                {name}
-              </Text>
-            </View>
-
-            <Text numberOfLines={1} style={styles.subtitle}>
-              {subtitle}
-            </Text>
-
-            {nowPlaying ? (
-              <Text numberOfLines={1} style={styles.host}>
-                {hostName} is on aux
-              </Text>
-            ) : null}
-          </View>
-
-          <View style={styles.listeners}>
-            <Headphones size={16} color={Colors.muted} strokeWidth={ICON_STROKE} />
-            <Text style={styles.listenerCount}>{listeners}</Text>
-          </View>
+      <View style={styles.body}>
+        <View style={styles.titleRow}>
+          {isPlaying ? <PulseDot color={C.live} /> : null}
+          <Text numberOfLines={1} style={[styles.name, { color: C.ink }]}>
+            {name}
+          </Text>
         </View>
-      </GlassCard>
+
+        <Text numberOfLines={1} style={[styles.subtitle, { color: C.ink }]}>
+          {subtitle}
+        </Text>
+
+        <View style={styles.meta}>
+          {nowPlaying ? (
+            <Text numberOfLines={1} style={[styles.metaLabel, { color: C.ink3 }]}>
+              {`${hostName} on aux`}
+            </Text>
+          ) : null}
+
+          {/* A head count measures, so it sets as a readout. Accent only while
+              there is somebody in there to be in sync with. */}
+          <Text style={[styles.listeners, { color: listeners > 0 ? C.liveText : C.ink3 }]}>
+            {`${listeners} LISTENING`}
+          </Text>
+        </View>
+      </View>
+
+      <View style={[styles.inCell, { borderLeftColor: C.rule }]}>
+        <Text style={[styles.inLabel, { color: C.liveText }]}>IN</Text>
+      </View>
     </Pressable>
   );
 }
@@ -87,62 +145,75 @@ function SessionCardBase({
 export const SessionCard = memo(SessionCardBase);
 
 const styles = StyleSheet.create({
-  pressable: {
-    width: '100%',
-  },
-  pressed: {
-    opacity: 0.72,
-  },
   row: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space.md,
+    minHeight: 76,
+    borderBottomWidth: Rule.hair,
   },
-  badge: {
-    width: BADGE,
-    height: BADGE,
-    borderRadius: Radius.md,
+
+  well: {
+    width: WELL,
+    borderRightWidth: Rule.hair,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: LIVE_WASH,
-    borderWidth: 1,
-    borderColor: LIVE_EDGE,
+    overflow: 'hidden',
   },
+  wellGlyph: {
+    ...Type.display(26),
+    lineHeight: 30,
+  },
+
   body: {
     flex: 1,
-    gap: 2,
+    minWidth: 0,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    justifyContent: 'center',
   },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Space.xs,
+    gap: 6,
+  },
+  dot: {
+    width: DOT,
+    height: DOT,
   },
   name: {
-    ...Type.bodyStrong,
-    color: Colors.text,
+    ...Type.heading(13),
+    letterSpacing: 13 * 0.05,
     flexShrink: 1,
   },
   subtitle: {
-    ...Type.body,
-    color: Colors.muted,
+    ...Type.body(13),
+    lineHeight: 18,
+    marginTop: 5,
   },
-  /*
-    Colors.muted, not Colors.faint: faint measures ~2.7:1 against the glass
-    surface, which is under the 4.5:1 floor for anything that is real copy.
-  */
-  host: {
-    ...Type.monoLabel,
-    color: Colors.muted,
-    marginTop: 2,
+  meta: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: Space.sm,
+    marginTop: 5,
+  },
+  metaLabel: {
+    ...Type.label(10),
+    letterSpacing: 10 * 0.09,
+    flexShrink: 1,
   },
   listeners: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space.xs,
+    ...Type.label(10),
+    letterSpacing: 10 * 0.09,
   },
-  /** A head count measures. Mono. */
-  listenerCount: {
-    ...Type.mono,
-    color: Colors.muted,
+
+  inCell: {
+    width: IN_CELL,
+    borderLeftWidth: Rule.hair,
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+  inLabel: {
+    ...Type.heading(11),
+    letterSpacing: 11 * 0.08,
   },
 });

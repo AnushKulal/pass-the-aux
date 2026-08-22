@@ -1,101 +1,184 @@
 /**
- * Aux design tokens — "Signal Afterglow".
+ * Aux design tokens — "Patchbay".
  *
- * The artwork lights the room, and one line runs through everyone in it.
- * Technical precision — the playhead, the drift readouts, the hairlines — sits
- * inside a warm album-art bloom rather than on cold black.
+ * Flat, gridded, zero corner radius, hard rules, Archivo throughout, near-mono
+ * red on near-black. Separation is done with rules and ground steps, never with
+ * shadows. Red is reserved: it means live, playing, joinable, in sync, on aux —
+ * and nothing else.
  *
- * The token NAMES are deliberately unchanged from the previous system so that
- * every component keeps working; only the values moved. See design/SYSTEM.md
- * for the design rationale and the artboards it came from.
+ * Two themes. Every value here is exact, from
+ * design/handoff/design_handoff_aux_mobile/README.md.
  *
- * Dark only. Aux is a night-time, party-context app, and a single palette keeps
- * contrast guarantees provable instead of doubled.
+ * `Colors` is the DARK palette and is what a module gets by importing directly.
+ * Anything that must follow the user's Dark / Light / System choice reads
+ * `useColors()` from '@/lib/theme-context' instead — same key names, so the two
+ * are interchangeable at a call site.
  */
 
 import { Platform } from 'react-native';
 
-export const Colors = {
-  /** Ground. Deep indigo-plum — warm-leaning, never neutral grey, never pure black. */
-  bg: '#0E0A16',
-  /** One step up: list rows, solid blocks. */
-  surface: '#140F1E',
-  /** Two steps up: pressed states, nested cards. */
-  surfaceRaised: '#1C1526',
-  /**
-   * Non-live interactive fill. Drawn from the bloom's violet and darkened until
-   * white text clears 4.5:1 — so primary actions belong to the atmosphere
-   * rather than competing with it.
-   */
-  primary: '#5A3C7A',
-  primaryDim: '#3B2751',
-  /**
-   * THE reserved colour: live, playing, joinable, in sync. It is also the
-   * playhead. Nothing decorative may use it — the Feed is scannable precisely
-   * because this green-cyan means "something is happening here you can join".
-   */
-  accent: '#57E2D5',
-  accentDim: '#2A8F86',
-  /** Primary text. Warm white, not pure. */
-  text: '#F2EDF7',
-  /** Secondary text, timestamps, metadata. 7.1:1 on bg. */
-  muted: '#A79FB8',
-  /** Placeholders and dividers ONLY — fails 4.5:1 for readable copy. */
-  faint: '#6E6681',
-  /** Buffering, adjusting, linked-but-free. Not an error colour. */
-  warn: '#E8B15C',
-  /** Out of sync, leave, destructive. */
-  danger: '#F2657E',
-  /** Hairlines. */
-  border: 'rgba(255, 255, 255, 0.10)',
-  borderBright: 'rgba(255, 255, 255, 0.18)',
-  /** Fill for glass surfaces — always sits over the bloom so it tints. */
-  glass: 'rgba(255, 255, 255, 0.055)',
-  glassStrong: 'rgba(255, 255, 255, 0.09)',
-  /** The faint 25px grid, on Session and Feed only. */
-  grid: 'rgba(255, 255, 255, 0.028)',
-  /** Scrim behind modals. */
-  scrim: 'rgba(8, 5, 14, 0.74)',
+export const DarkPalette = {
+  /** App ground. */
+  bg: '#0a0908',
+  /** Recessed — artwork wells, composer fields. */
+  bgRecessed: '#0f0e0d',
+  /** Raised — row hover, docked bar. */
+  surface: '#141312',
+  surface2: '#1c1a19',
+  /** Pressed, inactive toggle track. */
+  surface3: '#211f1e',
+  /** Avatar fill. */
+  avatar: '#2d2b2b',
+  /** Artwork stand-in glyph. */
+  artwork: '#3a3736',
+
+  /** Primary text. */
+  ink: '#f3f2f2',
+  /** Secondary text — 6.9:1. */
+  ink2: '#9b9797',
+  /** Tertiary labels — 5.7:1. */
+  ink3: '#8a8686',
+
+  /** RESERVED. Accent fills. */
+  live: '#ec3013',
+  /** RESERVED. Accent text on dark — the fill colour fails as small text. */
+  liveText: '#ff563c',
+  /** Text sitting on an accent fill. */
+  onLive: '#0a0908',
+  danger: '#f2657e',
+
+  /** Hairline between list rows. */
+  ruleSoft: 'rgba(243,242,242,.10)',
+  /** Standard rule. */
+  rule: 'rgba(243,242,242,.16)',
+  /** Control border. */
+  rule2: 'rgba(243,242,242,.24)',
+  /** Strong border. */
+  rule3: 'rgba(243,242,242,.30)',
+  /** Progress track. */
+  track: 'rgba(243,242,242,.12)',
+  /** 25px modular grid overlay. */
+  grid: 'rgba(243,242,242,.045)',
+
+  liveWash: 'rgba(236,48,19,.14)',
+  liveMid: 'rgba(236,48,19,.28)',
+  dangerBorder: 'rgba(242,101,126,.50)',
+  dangerWash: 'rgba(242,101,126,.12)',
+  scrim: 'rgba(10,9,8,.86)',
 } as const;
 
-export type ColorToken = keyof typeof Colors;
-
 /**
- * Atmosphere. Derived from album art, DECORATIVE ONLY — these never carry
- * meaning, which is exactly what frees `accent` to be semantic. Vary them per
- * track; they are why every Session looks slightly different.
+ * Both palettes carry exactly the same keys; only the values differ. Annotating
+ * the light one as `typeof DarkPalette` would pin every key to the DARK literal
+ * — `bg` would have to be the string `'#0a0908'` — so the light values cannot
+ * typecheck against it. This mapped type keeps the key set exact (a missing or
+ * misspelled token is still an error) while letting the value be any colour
+ * string.
  */
-export const Bloom = {
-  a: '#C77FA8',
-  b: '#8B5FB0',
-  c: '#4A6BA0',
-} as const;
-
-/** A radial bloom behind artwork. `size` is the square it occupies. */
-export const bloomGradient = (opacity = 0.4) =>
-  [
-    `rgba(199, 127, 168, ${opacity})`,
-    `rgba(139, 95, 176, ${opacity * 0.55})`,
-    'rgba(14, 10, 22, 0)',
-  ] as const;
+export type Palette = { readonly [K in keyof typeof DarkPalette]: string };
+export type ColorToken = keyof Palette;
 
 /**
- * Three faces, three jobs. Instrument Serif carries the feeling, Figtree does
- * the reading, IBM Plex Mono does the measuring — every number that MEASURES
- * (timecodes, drift, counts, invite codes) is mono. That is the single
- * strongest signal of this direction.
+ * The accent DARKENS on light. White on #ec3013 reaches only 3.8:1, which fails
+ * on small labels; #ae1800 reaches 6.5:1 and reads stronger on a light ground.
+ */
+export const LightPalette: Palette = {
+  bg: '#f3f2f2',
+  bgRecessed: '#eae9e9',
+  surface: '#eae7e7',
+  surface2: '#e2dfdf',
+  surface3: '#d7d3d3',
+  avatar: '#d7d3d3',
+  artwork: '#bab6b6',
+
+  ink: '#201e1d',
+  ink2: '#444141',
+  ink3: '#605d5d',
+
+  live: '#ae1800',
+  liveText: '#ae1800',
+  onLive: '#f3f2f2',
+  danger: '#a4152c',
+
+  ruleSoft: 'rgba(32,30,29,.12)',
+  rule: 'rgba(32,30,29,.20)',
+  rule2: 'rgba(32,30,29,.32)',
+  rule3: 'rgba(32,30,29,.42)',
+  track: 'rgba(32,30,29,.14)',
+  grid: 'rgba(32,30,29,.05)',
+
+  liveWash: 'rgba(236,48,19,.10)',
+  liveMid: 'rgba(236,48,19,.24)',
+  dangerBorder: 'rgba(164,21,44,.45)',
+  dangerWash: 'rgba(164,21,44,.10)',
+  scrim: 'rgba(32,30,29,.55)',
+};
+
+export const Palettes = { dark: DarkPalette, light: LightPalette } as const;
+export type ThemeName = keyof typeof Palettes;
+export type ThemeChoice = ThemeName | 'system';
+
+/** Direct-import default. Theme-aware call sites use `useColors()` instead. */
+export const Colors = DarkPalette;
+
+/**
+ * One typeface. The "measuring voice" is a WEIGHT plus tabular figures, not a
+ * second family — there is no mono face in this design.
  */
 export const Fonts = {
-  display: 'InstrumentSerif_400Regular',
-  displayItalic: 'InstrumentSerif_400Regular_Italic',
-  body: 'Figtree_400Regular',
-  bodyMedium: 'Figtree_500Medium',
-  bodySemi: 'Figtree_600SemiBold',
-  mono: 'IBMPlexMono_400Regular',
-  monoMedium: 'IBMPlexMono_500Medium',
+  regular: 'Archivo_400Regular',
+  semibold: 'Archivo_600SemiBold',
+  extrabold: 'Archivo_800ExtraBold',
 } as const;
 
-/** 4px base scale. */
+/** React Native takes letterSpacing in px; the spec gives em. */
+export const tracking = (fontSize: number, em: number) => fontSize * em;
+
+/**
+ * Five roles, distinguished by weight and tracking rather than family.
+ * Sizes vary per screen — these are the anchors; scale with `display(n)` etc.
+ */
+export const Type = {
+  /** Screen titles, track titles, the wordmark. 800, tight negative tracking. */
+  display: (size = 26) => ({
+    fontFamily: Fonts.extrabold,
+    fontSize: size,
+    lineHeight: Math.round(size * 1.06),
+    letterSpacing: tracking(size, size >= 64 ? -0.045 : size >= 36 ? -0.03 : -0.02),
+  }),
+  /** Section titles, button labels. 800, open tracking. */
+  heading: (size = 13) => ({
+    fontFamily: Fonts.extrabold,
+    fontSize: size,
+    lineHeight: Math.round(size * 1.25),
+    letterSpacing: tracking(size, 0.045),
+  }),
+  /** All prose. */
+  body: (size = 16) => ({
+    fontFamily: Fonts.regular,
+    fontSize: size,
+    lineHeight: Math.round(size * 1.5),
+  }),
+  /** Metadata, section kickers. Uppercase. */
+  label: (size = 11) => ({
+    fontFamily: Fonts.semibold,
+    fontSize: size,
+    lineHeight: Math.round(size * 1.35),
+    letterSpacing: tracking(size, 0.12),
+    textTransform: 'uppercase' as const,
+  }),
+  /**
+   * Every number that measures: −412ms, 3/5, QUEUE/5, 1:44.
+   * Tabular figures keep columns from shifting as digits change.
+   */
+  readout: (size = 13) => ({
+    fontFamily: Fonts.extrabold,
+    fontSize: size,
+    lineHeight: Math.round(size * 1.2),
+    fontVariant: ['tabular-nums'] as const,
+  }),
+} as const;
+
 export const Space = {
   xs: 4,
   sm: 8,
@@ -107,68 +190,46 @@ export const Space = {
   huge: 44,
 } as const;
 
-export const Radius = {
-  /** Data chips, small squares. */
-  sm: 6,
-  /** Controls. */
-  md: 12,
-  /** Cards. */
-  lg: 18,
-  /** Sheets. */
-  xl: 26,
-  pill: 999,
-} as const;
-
 /**
- * WCAG / platform minimum for a tappable element. Anything interactive must
- * reach this even when its visual is smaller — pad it, do not shrink the target.
+ * Zero everywhere. This is a defining property of the direction, not an
+ * oversight — do not soften a corner because it "looks better".
  */
+export const Radius = 0;
+
+/** 1px hairline within a group, 2px between major sections. */
+export const Rule = { hair: 1, major: 2 } as const;
+
+/** The modular grid overlay pitch. */
+export const GRID = 25;
+
 export const TOUCH_TARGET = 44;
 
-/** Micro-interaction timing. Anything slower than 300ms reads as lag. */
+/** 200–320ms, per the spec. */
 export const Duration = {
-  fast: 150,
-  base: 220,
-  slow: 300,
+  press: 160,
+  enter: 280,
+  sheet: 300,
+  scrim: 200,
 } as const;
 
-/** Explicit z-scale so overlays never fight. Anything not listed sits at 0. */
+/** List entrance stagger, in ms per row. */
+export const Stagger = { feed: 55, messages: 50 } as const;
+
+export const Easing = { standard: 'cubic-bezier(.2,.8,.2,1)' } as const;
+
 export const ZIndex = {
   content: 0,
-  miniPlayer: 10,
+  rail: 10,
   tabBar: 20,
+  dock: 25,
   sheet: 30,
   modal: 40,
   toast: 50,
 } as const;
 
-export const Type = {
-  hero: { fontFamily: Fonts.display, fontSize: 40, lineHeight: 44 },
-  display: { fontFamily: Fonts.display, fontSize: 32, lineHeight: 37 },
-  title: { fontFamily: Fonts.display, fontSize: 24, lineHeight: 29 },
-  heading: { fontFamily: Fonts.bodySemi, fontSize: 17, lineHeight: 23 },
-  /** 16px floor for body text on mobile. */
-  body: { fontFamily: Fonts.body, fontSize: 16, lineHeight: 24 },
-  bodyStrong: { fontFamily: Fonts.bodyMedium, fontSize: 16, lineHeight: 24 },
-  label: { fontFamily: Fonts.bodyMedium, fontSize: 13.5, lineHeight: 19 },
-  caption: { fontFamily: Fonts.body, fontSize: 12.5, lineHeight: 18 },
-  /** Timecodes, drift, counts. */
-  mono: { fontFamily: Fonts.monoMedium, fontSize: 11.5, lineHeight: 15, letterSpacing: 0.4 },
-  /** Uppercase section eyebrows. */
-  monoLabel: {
-    fontFamily: Fonts.monoMedium,
-    fontSize: 10,
-    lineHeight: 13,
-    letterSpacing: 0.9,
-    textTransform: 'uppercase' as const,
-  },
-} as const;
-
 /**
- * React Native 0.86 deprecated the `pointerEvents` PROP in favour of the
- * `pointerEvents` STYLE. Module-level constants rather than inline objects so a
- * decorative overlay does not allocate a new style on every render and defeat
- * the memoisation of whatever it sits inside.
+ * RN 0.86 deprecated the `pointerEvents` PROP in favour of the style. Constants
+ * rather than inline objects so decorative overlays do not allocate per render.
  */
 export const PointerEvents = {
   none: { pointerEvents: 'none' },
@@ -177,21 +238,12 @@ export const PointerEvents = {
 } as const;
 
 /**
- * Elevation. iOS gets a coloured shadow that reads as ambient light from the
- * artwork; Android only understands `elevation`; web uses boxShadow.
+ * Elevation is deliberately absent from this direction — separation comes from
+ * rules and ground steps. Kept only so the web build can suppress any default
+ * platform shadow.
  */
-export const shadow = (level: 'sm' | 'md' | 'lg') => {
-  const spec = { sm: [4, 0.3, 2], md: [14, 0.36, 6], lg: [30, 0.44, 14] }[level];
-  const [radius, opacity, offset] = spec;
-
-  return Platform.select({
-    web: { boxShadow: `0 ${offset}px ${radius}px rgba(6, 3, 12, ${opacity})` },
-    android: { elevation: offset },
-    default: {
-      shadowColor: '#06030C',
-      shadowOpacity: opacity,
-      shadowRadius: radius,
-      shadowOffset: { width: 0, height: offset },
-    },
-  }) as object;
-};
+export const noShadow = Platform.select({
+  web: { boxShadow: 'none' },
+  android: { elevation: 0 },
+  default: { shadowOpacity: 0 },
+}) as object;

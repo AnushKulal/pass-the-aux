@@ -1,34 +1,63 @@
 import { Redirect, router } from 'expo-router';
-import { Info, Music, Unlink } from 'lucide-react-native';
-import { useEffect } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
+import { ArrowLeft } from 'lucide-react-native';
+import { useEffect, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import Animated, {
+  Easing,
+  FadeInDown,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from 'react-native-reanimated';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { AuxButton, GlassCard, Screen, SheetTabs, Skeleton, useToast } from '@/components/ui';
+import { useToast } from '@/components/ui';
 import { useSpotifyLink } from '@/features/spotify/use-spotify-link';
 import { useAuth } from '@/lib/auth';
-import { Bloom, Colors, PointerEvents, Radius, Space, Type } from '@/lib/theme';
+import { Duration, Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
+import { useColors } from '@/lib/theme-context';
 import { usePlayback, type SourcePreference } from '@/playback/store';
+
+const GUTTER = 12;
+const CELL = 46;
 
 /** Resolved link state. "free" is a normal, supported way to use Aux. */
 type LinkState = 'unlinked' | 'free' | 'premium';
 
-const SOURCE_OPTIONS: { value: SourcePreference; title: string; detail: string }[] = [
+const SOURCE_OPTIONS: { value: SourcePreference; label: string; detail: string }[] = [
   {
     value: 'auto',
-    title: 'Auto (recommended)',
-    detail: 'Plays through Spotify when your account is linked and Premium, YouTube for everyone else.',
+    label: 'AUTO',
+    detail:
+      'Plays through Spotify when your account is linked and Premium, YouTube for everyone else.',
   },
   {
     value: 'youtube',
-    title: 'Always YouTube',
-    detail: 'Ignores Spotify even on Premium. Useful if Spotify keeps handing playback to another device.',
+    label: 'ALWAYS YOUTUBE',
+    detail:
+      'Ignores Spotify even on Premium. Useful if Spotify keeps handing playback to another device.',
   },
 ];
 
-const SOURCE_TABS = SOURCE_OPTIONS.map((option) => ({ key: option.value, label: option.title }));
+const BADGE: Record<LinkState, string> = {
+  unlinked: 'NOT CONNECTED',
+  free: 'CONNECTED · FREE',
+  premium: 'CONNECTED · PREMIUM',
+};
+
+const EXPLANATION: Record<LinkState, string> = {
+  unlinked:
+    'Aux does not need Spotify. Everything plays through YouTube unless you link a Spotify Premium account here.',
+  free: 'Your Spotify account is linked, but Spotify only lets apps control playback on Premium accounts. Aux will play your Sessions through YouTube instead.',
+  premium:
+    'Sessions play through the Spotify app on this device. Keep Spotify installed and signed in, and leave it open when you take the aux.',
+};
 
 export default function ConnectionsScreen() {
+  const C = useColors();
+  const reduced = useReducedMotion();
   const toast = useToast();
   const { session, profile, loading } = useAuth();
   const { link, unlink, linking, error } = useSpotifyLink();
@@ -57,293 +86,412 @@ export default function ConnectionsScreen() {
   if (!loading && !session) return <Redirect href="/(auth)/sign-in" />;
 
   return (
-    <Screen
-      title="Connections"
-      scroll
-      onBack={() => {
-        if (router.canGoBack()) router.back();
-        else router.replace('/(tabs)/profile');
-      }}>
-      {/* Signature 1, at its faintest: settings sit further from the artwork
-          than anything else in the app. */}
-      <View style={[styles.bloom, PointerEvents.none]}>
-        <Svg width="100%" height="100%">
-          <Defs>
-            <RadialGradient id="connectionsBloom" cx="50%" cy="6%" rx="60%" ry="88%">
-              <Stop offset="0" stopColor={Bloom.a} stopOpacity={0.2} />
-              <Stop offset="0.45" stopColor={Bloom.b} stopOpacity={0.11} />
-              <Stop offset="0.76" stopColor={Colors.bg} stopOpacity={0} />
-            </RadialGradient>
-          </Defs>
-          <Rect x="0" y="0" width="100%" height="100%" fill="url(#connectionsBloom)" />
-        </Svg>
-      </View>
-
-      <View style={styles.stack}>
-        {loading ? (
-          <SpotifyCardSkeleton />
-        ) : (
-          <SpotifyCard
-            state={state}
-            overridden={overridden}
-            linking={linking}
-            onLink={() => {
-              void link();
+    <SafeAreaView edges={['top', 'left', 'right']} style={[styles.root, { backgroundColor: C.bg }]}>
+      <Animated.View
+        style={styles.flex}
+        entering={
+          reduced
+            ? undefined
+            : FadeInDown.duration(Duration.enter).withInitialValues({
+                opacity: 0,
+                transform: [{ translateY: 8 }],
+              })
+        }>
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Back to you"
+            onPress={() => {
+              if (router.canGoBack()) router.back();
+              else router.replace('/(tabs)/profile');
             }}
-            onUnlink={() => {
-              void unlink();
-            }}
-          />
-        )}
+            style={({ pressed }) => [styles.back, pressed && { opacity: 0.6 }]}>
+            <ArrowLeft size={15} strokeWidth={2} color={C.ink2} />
+            <Text style={[styles.backLabel, { color: C.ink2 }]}>YOU</Text>
+          </Pressable>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Playback source</Text>
-          <Text style={styles.sectionLede}>
-            How Aux decides where the audio for a Session comes from.
-          </Text>
+          <Text style={[styles.screenTitle, { color: C.ink }]}>Connections</Text>
 
-          {/* No loading branch: the store holds the preference synchronously,
-              and setSourcePreference re-picks the adapter mid-Session. */}
-          {/* Pill segments, per the artboard: "Always YouTube" is a word label,
-              and a stored source preference is not a live state. */}
-          <SheetTabs
-            tabs={SOURCE_TABS}
-            active={source}
-            variant="segmented"
-            onChange={(next) => {
-              usePlayback
-                .getState()
-                .setSourcePreference(next === 'youtube' ? 'youtube' : 'auto');
-            }}
-          />
+          {/* --------------------------------------------------- spotify card */}
+          <View style={[styles.card, { borderColor: C.rule2 }]}>
+            <View style={styles.cardHead}>
+              <Text style={[styles.cardTitle, { color: C.ink }]}>Spotify</Text>
+              {loading ? (
+                <View style={[styles.chip, { borderColor: C.rule3 }]}>
+                  <Text style={[styles.chipLabel, { color: C.ink3 }]}>CHECKING…</Text>
+                </View>
+              ) : state === 'premium' ? (
+                /* The one accent on this screen: Premium is the state in which
+                   Aux can actually drive Spotify. */
+                <View style={[styles.chipFilled, { backgroundColor: C.live }]}>
+                  <Text style={[styles.chipLabel, { color: C.onLive }]}>{BADGE.premium}</Text>
+                </View>
+              ) : (
+                /* Free is a bordered, mono chip — deliberately NOT danger. A
+                   linked free account is a supported configuration, and paint-
+                   ing it red would tell the user to go fix something that is
+                   not broken. */
+                <View style={[styles.chip, { borderColor: C.rule3 }]}>
+                  <Text style={[styles.chipLabel, { color: C.ink2 }]}>{BADGE[state]}</Text>
+                </View>
+              )}
+            </View>
 
-          <Text style={styles.sectionDetail}>{sourceDetail}</Text>
-        </View>
+            {loading ? (
+              <Text style={[styles.cardBody, { color: C.ink2 }]}>
+                Checking your Spotify connection…
+              </Text>
+            ) : (
+              <>
+                <Text style={[styles.cardBody, { color: C.ink2 }]}>{EXPLANATION[state]}</Text>
 
-        <View style={styles.gap} />
+                {state === 'free' ? (
+                  <View style={[styles.inset, { borderColor: C.rule }]}>
+                    <Text style={[styles.insetText, { color: C.ink2 }]}>
+                      <Text style={{ color: C.ink }}>
+                        Nothing is broken and nothing is missing.
+                      </Text>{' '}
+                      Search, queueing, chat and sync all work exactly the same — only the audio
+                      comes from YouTube.
+                    </Text>
+                  </View>
+                ) : null}
 
-        <View style={styles.footnoteRow}>
-          <Text style={styles.footnote}>
+                {overridden ? (
+                  <View style={[styles.inset, { borderColor: C.rule }]}>
+                    <Text style={[styles.insetText, { color: C.ink2 }]}>
+                      Playback source is set to Always YouTube below, so Sessions are not using
+                      Spotify right now.
+                    </Text>
+                  </View>
+                ) : null}
+
+                <View style={styles.actions}>
+                  {state === 'unlinked' ? (
+                    <Action
+                      label="CONNECT SPOTIFY"
+                      accent
+                      disabled={linking}
+                      onPress={() => {
+                        void link();
+                      }}
+                    />
+                  ) : (
+                    <>
+                      {state === 'free' ? (
+                        <Action
+                          label="RECHECK PREMIUM"
+                          accent
+                          disabled={linking}
+                          onPress={() => {
+                            void link();
+                          }}
+                        />
+                      ) : null}
+                      <Action
+                        label="UNLINK"
+                        disabled={linking}
+                        onPress={() => {
+                          void unlink();
+                        }}
+                      />
+                    </>
+                  )}
+                </View>
+              </>
+            )}
+          </View>
+
+          {/* ------------------------------------------------- playback source */}
+          <Text style={[styles.kicker, { color: C.ink3 }]}>PLAYBACK SOURCE</Text>
+          <View accessibilityRole="radiogroup" style={[styles.segment, { borderColor: C.rule3 }]}>
+            {SOURCE_OPTIONS.map((option, index) => {
+              const selected = source === option.value;
+              return (
+                <Pressable
+                  key={option.value}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected }}
+                  accessibilityLabel={option.label}
+                  onPress={() => usePlayback.getState().setSourcePreference(option.value)}
+                  style={({ pressed }) => [
+                    styles.segmentCell,
+                    index > 0 && { borderLeftWidth: Rule.hair, borderLeftColor: C.rule3 },
+                    {
+                      backgroundColor: selected ? C.live : pressed ? C.surface : 'transparent',
+                    },
+                  ]}>
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      selected ? styles.segmentLabelOn : styles.segmentLabelOff,
+                      { color: selected ? C.onLive : C.ink2 },
+                    ]}>
+                    {option.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={[styles.caption, { color: C.ink3 }]}>{sourceDetail}</Text>
+
+          {/* ------------------------------------------------------ handshake */}
+          {linking ? <Handshake reduced={reduced} /> : null}
+
+          <View style={[styles.footnoteRule, { backgroundColor: C.rule }]} />
+          <Text style={[styles.footnote, { color: C.ink3 }]}>
             Your choice is stored on this device only, so each phone you sign in on can play from a
             different source.
           </Text>
-        </View>
-      </View>
-    </Screen>
+        </ScrollView>
+      </Animated.View>
+    </SafeAreaView>
   );
 }
 
-const BADGE: Record<LinkState, string> = {
-  unlinked: 'Not connected',
-  free: 'Connected · Free',
-  premium: 'Connected · Premium',
-};
+/* ------------------------------------------------------------------- parts */
 
-const EXPLANATION: Record<LinkState, string> = {
-  unlinked:
-    'Aux does not need Spotify. Everything plays through YouTube unless you link a Spotify Premium account here.',
-  free:
-    'Your Spotify account is linked, but Spotify only lets apps control playback on Premium accounts. Aux will play your Sessions through YouTube instead.',
-  premium:
-    'Sessions play through the Spotify app on this device. Keep Spotify installed and signed in, and leave it open when you take the aux.',
-};
-
-function SpotifyCard({
-  state,
-  overridden,
-  linking,
-  onLink,
-  onUnlink,
+function Action({
+  label,
+  accent = false,
+  disabled = false,
+  onPress,
 }: {
-  state: LinkState;
-  overridden: boolean;
-  linking: boolean;
-  onLink: () => void;
-  onUnlink: () => void;
+  label: string;
+  accent?: boolean;
+  disabled?: boolean;
+  onPress: () => void;
 }) {
+  const C = useColors();
+
   return (
-    <GlassCard>
-      <View style={styles.cardHead}>
-        <View style={styles.tile}>
-          <Music size={22} color={Colors.muted} strokeWidth={1.6} />
-        </View>
-        <View style={styles.cardHeadText}>
-          <Text style={styles.cardTitle}>Spotify</Text>
-          {/* Signature 4: a connection state is a readout, so it is mono. */}
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>{BADGE[state]}</Text>
-          </View>
-        </View>
-      </View>
-
-      <Text style={styles.body}>{EXPLANATION[state]}</Text>
-
-      {state === 'free' ? (
-        /*
-          Colors.warn at most, and never Colors.danger. A free Spotify account is
-          a supported configuration, not a failure — the app works end to end, it
-          just uses YouTube for audio. Painting this red would tell the user to
-          go fix something that is not broken.
-        */
-        <View style={styles.notice}>
-          <Info size={18} color={Colors.warn} strokeWidth={1.6} />
-          <Text style={styles.noticeText}>
-            Nothing is broken and nothing is missing. Search, queueing, chat and sync all work
-            exactly the same — only the audio comes from YouTube.
-          </Text>
-        </View>
-      ) : null}
-
-      {overridden ? (
-        <View style={styles.notice}>
-          <Info size={18} color={Colors.warn} strokeWidth={1.6} />
-          <Text style={styles.noticeText}>
-            Playback source is set to Always YouTube below, so Sessions are not using Spotify right
-            now.
-          </Text>
-        </View>
-      ) : null}
-
-      <View style={styles.cardAction}>
-        {state === 'unlinked' ? (
-          <AuxButton label="Connect Spotify" fullWidth loading={linking} onPress={onLink} />
-        ) : (
-          <AuxButton
-            label="Disconnect Spotify"
-            icon={Unlink}
-            variant="ghost"
-            fullWidth
-            loading={linking}
-            onPress={onUnlink}
-          />
-        )}
-      </View>
-    </GlassCard>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.action,
+        {
+          borderColor: accent ? C.live : C.rule2,
+          backgroundColor: pressed ? (accent ? C.liveWash : C.surface) : 'transparent',
+          opacity: disabled ? 0.55 : 1,
+        },
+      ]}>
+      <Text
+        style={[accent ? styles.actionLabelAccent : styles.actionLabel, { color: accent ? C.liveText : C.ink2 }]}>
+        {label}
+      </Text>
+    </Pressable>
   );
 }
 
-function SpotifyCardSkeleton() {
+/** The OAuth round trip, while the browser is away. */
+function Handshake({ reduced }: { reduced: boolean }) {
+  const C = useColors();
+  const pulse = useSharedValue(1);
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    if (reduced) {
+      pulse.value = 1;
+      return;
+    }
+    pulse.value = withRepeat(
+      withTiming(0.25, { duration: 1000, easing: Easing.inOut(Easing.quad) }),
+      -1,
+      true
+    );
+  }, [pulse, reduced]);
+
+  useEffect(() => {
+    const timer = setInterval(() => setElapsed((n) => n + 1), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const animated = useAnimatedStyle(() => ({ opacity: pulse.value }));
+  const minutes = Math.floor(elapsed / 60);
+  const seconds = elapsed % 60;
+
   return (
-    <GlassCard>
-      <View style={styles.cardHead}>
-        <Skeleton width={44} height={44} radius={Radius.md} />
-        <View style={styles.cardHeadText}>
-          <Skeleton width={92} height={22} />
-          <Skeleton width={130} height={18} radius={Radius.pill} />
-        </View>
+    <View style={styles.handshake}>
+      <View style={[styles.handshakeRule, { backgroundColor: C.rule }]} />
+      <Text style={[styles.kicker, styles.handshakeKicker, { color: C.ink3 }]}>CONNECTING…</Text>
+      <View style={[styles.handshakeRow, { borderColor: C.rule }]}>
+        <Animated.View style={[styles.mark, { backgroundColor: C.live }, animated]} />
+        <Text style={[styles.handshakeText, { color: C.ink2 }]}>Returning from Spotify…</Text>
+        <Text style={[styles.readout, { color: C.ink3 }]}>
+          {minutes}:{String(seconds).padStart(2, '0')}
+        </Text>
       </View>
-      <View style={styles.skeletonBody}>
-        <Skeleton width="100%" height={16} />
-        <Skeleton width="88%" height={16} />
-      </View>
-    </GlassCard>
+    </View>
   );
 }
+
+/* ------------------------------------------------------------------ styles */
 
 const styles = StyleSheet.create({
-  bloom: {
-    position: 'absolute',
-    // Out past the screen gutter so the glow reaches the edges rather than
-    // stopping on the same line the content does.
-    left: -Space.lg,
-    right: -Space.lg,
-    top: 0,
-    height: 320,
+  root: {
+    flex: 1,
   },
-  stack: {
-    flexGrow: 1,
-    paddingTop: Space.sm,
-    gap: Space.lg,
+  flex: {
+    flex: 1,
+  },
+  content: {
+    width: '100%',
+    maxWidth: 720,
+    alignSelf: 'center',
+    paddingBottom: Space.xxxl,
+  },
+  back: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 7,
+    minHeight: TOUCH_TARGET,
+    paddingHorizontal: GUTTER,
+  },
+  backLabel: {
+    ...Type.label(11),
+    letterSpacing: tracking(11, 0.1),
+  },
+  screenTitle: {
+    ...Type.display(26),
+    letterSpacing: tracking(26, -0.025),
+    paddingHorizontal: GUTTER,
+    marginBottom: Space.lg,
+  },
+  card: {
+    marginHorizontal: GUTTER,
+    padding: 14,
+    borderWidth: Rule.hair,
   },
   cardHead: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Space.md,
-  },
-  tile: {
-    width: 44,
-    height: 44,
-    borderRadius: Radius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.glassStrong,
-  },
-  cardHeadText: {
-    flex: 1,
-    gap: Space.xs,
-    alignItems: 'flex-start',
+    gap: Space.sm,
   },
   cardTitle: {
-    ...Type.heading,
-    color: Colors.text,
-  },
-  badge: {
-    paddingHorizontal: 9,
-    paddingVertical: Space.xs,
-    borderRadius: Radius.pill,
-    backgroundColor: Colors.glass,
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  badgeText: {
-    ...Type.monoLabel,
-    color: Colors.muted,
-  },
-  body: {
-    ...Type.body,
-    color: Colors.text,
-    marginTop: Space.lg,
-  },
-  notice: {
-    flexDirection: 'row',
-    gap: Space.md,
-    marginTop: Space.md,
-    padding: Space.md,
-    borderRadius: Radius.md,
-    backgroundColor: Colors.glass,
-  },
-  noticeText: {
-    ...Type.body,
-    color: Colors.muted,
+    ...Type.heading(15),
+    letterSpacing: tracking(15, 0.01),
     flex: 1,
   },
-  cardAction: {
-    marginTop: Space.lg,
+  chip: {
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderWidth: Rule.hair,
   },
-  skeletonBody: {
-    marginTop: Space.lg,
-    gap: Space.sm,
+  chipFilled: {
+    paddingHorizontal: 7,
+    paddingVertical: 3,
   },
-  section: {
+  chipLabel: {
+    ...Type.heading(11),
+    letterSpacing: tracking(11, 0.1),
+  },
+  cardBody: {
+    ...Type.body(16),
+    marginTop: 10,
+  },
+  /** A quieter nested note. Bordered, never washed in danger. */
+  inset: {
+    marginTop: Space.md,
+    padding: Space.md,
+    borderWidth: Rule.hair,
+  },
+  insetText: {
+    ...Type.body(14),
+  },
+  actions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: Space.sm,
+    marginTop: 14,
+  },
+  action: {
+    minHeight: TOUCH_TARGET,
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    borderWidth: Rule.hair,
+  },
+  actionLabelAccent: {
+    ...Type.heading(11),
+    letterSpacing: tracking(11, 0.09),
+  },
+  actionLabel: {
+    ...Type.label(11),
+    letterSpacing: tracking(11, 0.09),
+  },
+  kicker: {
+    ...Type.label(11),
+    letterSpacing: tracking(11, 0.12),
+    paddingHorizontal: GUTTER,
+    marginTop: Space.xl,
+    marginBottom: Space.sm,
+  },
+  segment: {
+    flexDirection: 'row',
+    marginHorizontal: GUTTER,
+    borderWidth: Rule.hair,
+  },
+  segmentCell: {
+    flex: 1,
+    minHeight: CELL,
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+  },
+  segmentLabelOn: {
+    ...Type.heading(11),
+    letterSpacing: tracking(11, 0.08),
+  },
+  segmentLabelOff: {
+    ...Type.label(11),
+    letterSpacing: tracking(11, 0.08),
+  },
+  caption: {
+    ...Type.body(14),
+    paddingHorizontal: GUTTER,
     marginTop: Space.sm,
   },
-  sectionTitle: {
-    ...Type.monoLabel,
-    color: Colors.muted,
+  handshake: {
+    marginTop: 22,
   },
-  sectionLede: {
-    ...Type.body,
-    color: Colors.muted,
+  handshakeRule: {
+    height: Rule.major,
+    marginHorizontal: GUTTER,
   },
-  /** The consequence of the segment above it, not a caption for the screen. */
-  sectionDetail: {
-    ...Type.body,
-    color: Colors.muted,
-    marginTop: Space.xs,
+  handshakeKicker: {
+    marginTop: 14,
   },
-  gap: {
-    flexGrow: 1,
-    minHeight: Space.lg,
+  handshakeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginHorizontal: GUTTER,
+    padding: Space.md,
+    borderWidth: Rule.hair,
   },
-  footnoteRow: {
-    paddingTop: Space.md,
-    marginBottom: Space.lg,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Colors.border,
+  mark: {
+    width: 8,
+    height: 8,
+  },
+  handshakeText: {
+    ...Type.body(14),
+    flex: 1,
+  },
+  readout: {
+    ...Type.readout(12),
+    fontVariant: ['tabular-nums' as const],
+  },
+  footnoteRule: {
+    height: Rule.major,
+    marginHorizontal: GUTTER,
+    marginTop: 22,
   },
   footnote: {
-    ...Type.label,
-    color: Colors.muted,
+    ...Type.body(14),
+    paddingHorizontal: GUTTER,
+    marginTop: 14,
   },
 });

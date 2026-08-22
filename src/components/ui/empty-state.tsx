@@ -2,7 +2,8 @@ import type { LucideIcon } from 'lucide-react-native';
 import type { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { Colors, Radius, Space, Type } from '@/lib/theme';
+import { useColors } from '@/lib/theme-context';
+import { Radius, Rule, Space, Type } from '@/lib/theme';
 
 export type EmptyStateProps = {
   icon: LucideIcon;
@@ -11,16 +12,25 @@ export type EmptyStateProps = {
   action?: ReactNode;
 };
 
-/** Shown when a loaded list is genuinely empty — never in place of a Skeleton. */
+/**
+ * Shown when a loaded list is genuinely empty — never in place of a Skeleton.
+ *
+ * A bordered block, flush left, exactly like the prototype's "You are not in a
+ * lounge yet" and "No lounges yet" markers. No centred illustration and no
+ * badge: an empty state here is a note in the margin, not an event, and
+ * centring it would give it more weight than the content it is standing in for.
+ */
 export function EmptyState({ icon: Icon, title, description, action }: EmptyStateProps) {
-  return (
-    <View style={styles.root}>
-      <View style={styles.badge}>
-        <Icon size={28} color={Colors.muted} />
-      </View>
+  const C = useColors();
 
-      <Text style={styles.title}>{title}</Text>
-      {description ? <Text style={styles.description}>{description}</Text> : null}
+  return (
+    <View style={[styles.root, { borderColor: C.rule2 }]}>
+      <Icon size={20} strokeWidth={2} color={C.ink3} />
+
+      <Text style={[styles.title, { color: C.ink }]}>{title}</Text>
+      {description ? (
+        <Text style={[styles.description, { color: C.ink2 }]}>{description}</Text>
+      ) : null}
       {action ? <View style={styles.action}>{action}</View> : null}
     </View>
   );
@@ -28,38 +38,20 @@ export function EmptyState({ icon: Icon, title, description, action }: EmptyStat
 
 const styles = StyleSheet.create({
   root: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: Space.xxxl,
-    paddingHorizontal: Space.xl,
-    gap: Space.md,
-  },
-  badge: {
-    width: 64,
-    height: 64,
-    borderRadius: Radius.xl,
-    alignItems: 'center',
-    justifyContent: 'center',
-    // Glass rather than a solid block, so the badge tints when a Bloom sits
-    // behind it.
-    backgroundColor: Colors.glass,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    alignItems: 'flex-start',
+    padding: Space.lg,
+    gap: Space.sm,
+    borderRadius: Radius,
+    borderWidth: Rule.hair,
   },
   title: {
-    // Instrument Serif. Empty states are the one place the app speaks, so the
-    // title takes the display face rather than the UI face.
-    ...Type.title,
-    color: Colors.text,
-    textAlign: 'center',
+    ...Type.heading(15),
   },
   description: {
-    ...Type.body,
-    color: Colors.muted,
-    textAlign: 'center',
-    maxWidth: 320,
+    ...Type.body(16),
+    maxWidth: 380,
   },
   action: {
-    marginTop: Space.sm,
+    marginTop: Space.xs,
   },
 });

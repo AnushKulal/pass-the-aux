@@ -8,7 +8,8 @@ import {
   type TextInputProps,
 } from 'react-native';
 
-import { Colors, Radius, Space, Type } from '@/lib/theme';
+import { useColors } from '@/lib/theme-context';
+import { Radius, Rule, Space, Type } from '@/lib/theme';
 
 export type TextFieldProps = {
   label?: string;
@@ -23,6 +24,9 @@ export type TextFieldProps = {
   keyboardType?: KeyboardTypeOptions;
 };
 
+/** Every field in the prototype: 46px, `surface`, 1px `rule2`, square. */
+const FIELD_HEIGHT = 46;
+
 export function TextField({
   label,
   value,
@@ -35,14 +39,23 @@ export function TextField({
   autoComplete,
   keyboardType,
 }: TextFieldProps) {
+  const C = useColors();
   const [focused, setFocused] = useState(false);
 
   const onFocus = useCallback(() => setFocused(true), []);
   const onBlur = useCallback(() => setFocused(false), []);
 
+  /*
+    Focus is an ink border, never the accent — a focused field is not a live one,
+    and spending the red here is exactly what stops it meaning anything on the
+    Feed. Only the colour changes; the 1px width is held on every state so
+    focusing a field never nudges its text by a pixel.
+  */
+  const borderColor = error ? C.danger : focused ? C.ink : C.rule2;
+
   return (
     <View style={styles.root}>
-      {label ? <Text style={styles.label}>{label}</Text> : null}
+      {label ? <Text style={[styles.label, { color: C.ink3 }]}>{label}</Text> : null}
 
       <TextInput
         value={value}
@@ -50,7 +63,7 @@ export function TextField({
         onFocus={onFocus}
         onBlur={onBlur}
         placeholder={placeholder}
-        placeholderTextColor={Colors.faint}
+        placeholderTextColor={C.ink3}
         secureTextEntry={secureTextEntry}
         autoCapitalize={autoCapitalize}
         autoCorrect={!secureTextEntry}
@@ -62,18 +75,12 @@ export function TextField({
         accessibilityLabel={label}
         // The error Text below is a polite live region, which is what actually
         // announces the failure; RN has no aria-invalid equivalent.
-        selectionColor={Colors.text}
-        style={[
-          styles.input,
-          // Border width never changes, only its colour — a thicker focus ring
-          // would shift the text by a pixel on every focus.
-          focused && styles.inputFocused,
-          error ? styles.inputError : null,
-        ]}
+        selectionColor={C.live}
+        style={[styles.input, { color: C.ink, backgroundColor: C.surface, borderColor }]}
       />
 
       {error ? (
-        <Text accessibilityLiveRegion="polite" style={styles.error}>
+        <Text accessibilityLiveRegion="polite" style={[styles.error, { color: C.danger }]}>
           {error}
         </Text>
       ) : null}
@@ -83,39 +90,24 @@ export function TextField({
 
 const styles = StyleSheet.create({
   root: {
-    gap: Space.xs,
+    gap: Space.sm,
     width: '100%',
   },
   label: {
-    ...Type.label,
-    color: Colors.muted,
+    ...Type.label(11),
   },
   input: {
-    ...Type.body,
-    minHeight: 48,
+    ...Type.body(16),
+    height: FIELD_HEIGHT,
+    // A fixed line height inside a fixed-height box makes Android centre the
+    // text the way iOS already does.
+    lineHeight: undefined,
     paddingHorizontal: Space.md,
-    paddingVertical: Space.sm,
-    color: Colors.text,
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.md,
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-  },
-  /*
-    Focus is an ink border, never Colors.accent — a focused field is not a live
-    one, and the artboard's TEXT FIELD cell makes the point explicitly. Only the
-    colour changes; the 1.5px width is held on every state so focusing a field
-    never nudges its text by a pixel.
-  */
-  inputFocused: {
-    borderColor: Colors.text,
-    backgroundColor: Colors.surfaceRaised,
-  },
-  inputError: {
-    borderColor: Colors.danger,
+    paddingVertical: 0,
+    borderRadius: Radius,
+    borderWidth: Rule.hair,
   },
   error: {
-    ...Type.label,
-    color: Colors.danger,
+    ...Type.label(11),
   },
 });

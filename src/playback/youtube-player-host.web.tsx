@@ -317,7 +317,7 @@ const styles = StyleSheet.create({
     width: '100%',
     aspectRatio: 16 / 9,
     overflow: 'hidden',
-    borderRadius: Radius.lg,
+    borderRadius: Radius,
     // Letterbox bars read as part of the artwork instead of the app background.
     backgroundColor: '#000000',
   },

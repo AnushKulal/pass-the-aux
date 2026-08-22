@@ -1,23 +1,29 @@
+import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { Check, X } from 'lucide-react-native';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { ArrowLeft } from 'lucide-react-native';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import {
   ActivityIndicator,
   BackHandler,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
+  type KeyboardTypeOptions,
+  type TextInputProps,
 } from 'react-native';
-import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
+import Animated, { FadeInDown, useReducedMotion } from 'react-native-reanimated';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { AuxButton, Avatar, GlassCard, Screen, TextField, useToast } from '@/components/ui';
+import { useToast } from '@/components/ui';
 import {
   USERNAME_MAX,
   USERNAME_MIN,
+  USERNAME_PATTERN,
   normalizeUsername,
   useUpdateProfile,
   useUsernameAvailability,
@@ -25,9 +31,20 @@ import {
   type UsernameStatus,
 } from '@/features/profile/queries';
 import { useAuth } from '@/lib/auth';
-import { Bloom, Colors, PointerEvents, Radius, Space, Type } from '@/lib/theme';
+import { Duration, Fonts, Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
+import { useColors } from '@/lib/theme-context';
+import type { Palette } from '@/lib/theme';
+
+const GUTTER = 26;
+const CELL = 46;
+const BUTTON = 52;
+/** The `@` block and the avatar block, straight off the artboard. */
+const AT_BLOCK = 46;
+const AVATAR_BLOCK = 76;
 
 export default function ClaimUsernameScreen() {
+  const C = useColors();
+  const reduced = useReducedMotion();
   const toast = useToast();
   const { user, profile, pendingUsernameClaim, finishUsernameClaim } = useAuth();
   const update = useUpdateProfile(user?.id);
@@ -37,6 +54,7 @@ export default function ClaimUsernameScreen() {
   const [avatarUrl, setAvatarUrl] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const [handleFocused, setHandleFocused] = useState(false);
+  const avatarField = useRef<TextInput>(null);
 
   // The profile row can arrive a beat after this screen mounts (the signup
   // trigger writes it server-side). Seed once, then never stomp on typing.
@@ -115,34 +133,32 @@ export default function ClaimUsernameScreen() {
     user,
   ]);
 
-  // "Taken" is reported by the hint row below the field, with its own icon —
-  // saying it twice reads as two separate problems. The field's error slot is
-  // reserved for the format rules, which only matter once they try to save.
+  // "Taken" is reported by the chip inside the control, with its own colour —
+  // saying it twice reads as two separate problems. This line is reserved for
+  // the format rules, which only matter once they try to save.
   const usernameError =
     submitted && (availability.status === 'invalid' || availability.status === 'idle')
       ? (availability.message ?? 'Pick a username.')
-      : undefined;
+      : null;
+
+  /*
+    A handle that is merely still being typed is not a failure. "Too short" is
+    reported quietly in the hint line; only characters the constraint actually
+    rejects earn the red frame and the INVALID verdict, so the control does not
+    shout at someone two keystrokes in.
+  */
+  const rejected = normalized.length > 0 && !USERNAME_PATTERN.test(normalized);
+  const verdict: UsernameStatus =
+    availability.status === 'invalid' && !rejected ? 'idle' : availability.status;
+
+  const frame = frameColor(C, verdict, handleFocused);
+  const initial = (displayName.trim() || normalized || '?').charAt(0).toUpperCase();
+  const showAvatar = !avatarProblem && avatarUrl.trim().length > 0;
 
   return (
-    <Screen
-      title="Your handle"
-      scroll={false}
-      onBack={pendingUsernameClaim ? undefined : leave}>
-      {/* Signature 1: low and to the left, so the preview glass above it picks
-          up colour instead of sitting on flat ground. */}
-      <View style={[styles.bloom, PointerEvents.none]}>
-        <Svg width="100%" height="100%">
-          <Defs>
-            <RadialGradient id="claimBloom" cx="16%" cy="34%" rx="70%" ry="52%">
-              <Stop offset="0" stopColor={Bloom.a} stopOpacity={0.2} />
-              <Stop offset="0.45" stopColor={Bloom.b} stopOpacity={0.12} />
-              <Stop offset="0.78" stopColor={Colors.bg} stopOpacity={0} />
-            </RadialGradient>
-          </Defs>
-          <Rect x="0" y="0" width="100%" height="100%" fill="url(#claimBloom)" />
-        </Svg>
-      </View>
-
+    <SafeAreaView
+      edges={['top', 'bottom', 'left', 'right']}
+      style={[styles.root, { backgroundColor: C.bg }]}>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -150,170 +166,272 @@ export default function ClaimUsernameScreen() {
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
-          <Text style={styles.lede}>
-            {pendingUsernameClaim
-              ? 'You are in. Pick the name people will see when you take the aux.'
-              : 'Change how you show up in lounges and Sessions.'}
-          </Text>
+          <Animated.View
+            style={styles.column}
+            entering={
+              reduced
+                ? undefined
+                : FadeInDown.duration(Duration.enter).withInitialValues({
+                    opacity: 0,
+                    transform: [{ translateY: 8 }],
+                  })
+            }>
+            {pendingUsernameClaim ? (
+              <Text style={[styles.step, { color: C.ink3 }]}>STEP 2 OF 2</Text>
+            ) : (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Back"
+                onPress={leave}
+                style={styles.back}>
+                <ArrowLeft size={15} color={C.ink2} strokeWidth={2} />
+                <Text style={[styles.backLabel, { color: C.ink2 }]}>YOU</Text>
+              </Pressable>
+            )}
 
-          {/* Live preview of the row everyone else will see you as. */}
-          <GlassCard>
-            <View style={styles.preview}>
-              <Avatar
-                uri={avatarProblem ? null : avatarUrl || null}
-                name={displayName || normalized}
-                size={72}
+            <Text style={[styles.title, { color: C.ink }]}>Claim your handle</Text>
+            <Text style={[styles.lede, { color: C.ink2 }]}>
+              {pendingUsernameClaim
+                ? 'You are in. Pick the name people will see when you take the aux.'
+                : 'Change how you show up in lounges and Sessions.'}
+            </Text>
+
+            {/*
+              Composed rather than a plain field because the artboard puts the
+              `@` inside the control as furniture and the verdict chip inside
+              the same frame — the whole control is one object that changes
+              colour, not a field with decorations bolted on.
+            */}
+            <View style={[styles.handle, { borderColor: frame }]}>
+              <View style={[styles.at, { backgroundColor: C.live }]}>
+                <Text style={[styles.atGlyph, { color: C.onLive }]}>@</Text>
+              </View>
+              <TextInput
+                value={username}
+                // Canonicalised on the way in so the field, the button and the
+                // availability verdict can never disagree about what was typed.
+                onChangeText={(next) => setUsername(normalizeUsername(next))}
+                onFocus={() => setHandleFocused(true)}
+                onBlur={() => setHandleFocused(false)}
+                accessibilityLabel="Username"
+                placeholder="handle"
+                placeholderTextColor={C.ink3}
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="username"
+                maxLength={USERNAME_MAX}
+                selectionColor={C.live}
+                style={[styles.handleInput, { backgroundColor: C.surface, color: C.ink }]}
               />
-              <View style={styles.previewText}>
-                <Text numberOfLines={1} style={styles.previewName}>
-                  {displayName.trim() || normalized || 'Your name'}
-                </Text>
-                <Text numberOfLines={1} style={styles.previewHandle}>
-                  @{normalized || 'username'}
-                </Text>
-              </View>
+              <StatusChip status={verdict} />
             </View>
-          </GlassCard>
 
-          <View style={styles.form}>
-            <View style={styles.field}>
-              <View style={styles.fieldHead}>
-                <Text style={styles.fieldLabel}>Username</Text>
-                {/* Signature 4: a length is a measurement, so it is mono. */}
-                <Text style={styles.count}>
-                  {String(normalized.length).padStart(2, '0')}/{USERNAME_MAX}
-                </Text>
-              </View>
+            {/* One live region for the whole control: the chip carries the
+                verdict, this line carries the reason. */}
+            <Text
+              accessibilityLiveRegion="polite"
+              style={[
+                styles.hint,
+                { color: usernameError || verdict === 'taken' || rejected ? C.danger : C.ink3 },
+              ]}>
+              {usernameError ??
+                availability.message ??
+                `${USERNAME_MIN} to ${USERNAME_MAX} characters. Lowercase letters, numbers and underscores only.`}
+            </Text>
 
-              {/*
-                Composed here rather than with TextField because the artboard
-                puts the `@` inside the control as field furniture, and the kit's
-                input has no prefix slot.
-              */}
-              <View
-                style={[
-                  styles.control,
-                  handleFocused && styles.controlFocused,
-                  usernameError ? styles.controlError : null,
-                ]}>
-                <Text style={styles.at}>@</Text>
-                <TextInput
-                  value={username}
-                  // Canonicalised on the way in so the field, the preview and the
-                  // availability verdict can never disagree about what was typed.
-                  onChangeText={(next) => setUsername(normalizeUsername(next))}
-                  onFocus={() => setHandleFocused(true)}
-                  onBlur={() => setHandleFocused(false)}
-                  accessibilityLabel="Username"
-                  placeholder="lowercase_and_numbers"
-                  placeholderTextColor={Colors.faint}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  autoComplete="username"
-                  maxLength={USERNAME_MAX}
-                  selectionColor={Colors.text}
-                  style={styles.input}
+            <View style={styles.identity}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Change your avatar"
+                onPress={() => avatarField.current?.focus()}
+                style={[styles.avatar, { backgroundColor: C.live }]}>
+                {showAvatar ? (
+                  <Image
+                    source={{ uri: avatarUrl.trim() }}
+                    style={styles.avatarImage}
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
+                    transition={Duration.press}
+                    accessibilityIgnoresInvertColors
+                  />
+                ) : (
+                  <Text style={[styles.avatarInitial, { color: C.onLive }]}>{initial}</Text>
+                )}
+              </Pressable>
+
+              <View style={styles.identityFields}>
+                <Field
+                  label="DISPLAY NAME"
+                  value={displayName}
+                  onChangeText={setDisplayName}
+                  placeholder="What friends call you"
+                  maxLength={40}
+                  autoComplete="name"
                 />
-              </View>
-
-              {/* Worded and weighted exactly like the kit's own field error, so
-                  a format problem here does not look like a different species of
-                  problem from one on the fields below. */}
-              {usernameError ? (
-                <Text accessibilityLiveRegion="polite" style={styles.messageError}>
-                  {usernameError}
+                <Text style={[styles.caption, { color: C.ink3 }]}>
+                  Tap the block to change your avatar
                 </Text>
-              ) : null}
-
-              <AvailabilityHint status={availability.status} username={normalized} />
-
-              <Text style={styles.rules}>
-                {USERNAME_MIN} to {USERNAME_MAX} characters. Lowercase letters, numbers and
-                underscores only.
-              </Text>
+              </View>
             </View>
 
-            <TextField
-              label="Display name"
-              value={displayName}
-              onChangeText={setDisplayName}
-              placeholder="What friends call you"
-              maxLength={40}
-              autoComplete="name"
-            />
+            <View style={styles.avatarUrl}>
+              <Field
+                inputRef={avatarField}
+                label="AVATAR URL"
+                value={avatarUrl}
+                onChangeText={setAvatarUrl}
+                placeholder="https://..."
+                autoCapitalize="none"
+                keyboardType="url"
+                error={submitted ? avatarProblem : undefined}
+              />
+            </View>
 
-            <TextField
-              label="Avatar URL"
-              value={avatarUrl}
-              onChangeText={setAvatarUrl}
-              placeholder="https://..."
-              autoCapitalize="none"
-              keyboardType="url"
-              error={submitted ? avatarProblem : undefined}
-            />
-          </View>
+            <View style={styles.gap} />
 
-          <View style={styles.gap} />
-
-          <View style={styles.actions}>
-            <AuxButton
-              label="Save"
-              fullWidth
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={pendingUsernameClaim ? `Continue as @${normalized}` : 'Save'}
+              accessibilityState={{ busy: update.isPending }}
+              disabled={update.isPending}
               onPress={() => {
                 void save();
               }}
-              loading={update.isPending}
-            />
+              style={({ pressed }) => [
+                styles.primary,
+                { backgroundColor: pressed ? C.liveText : C.live, opacity: update.isPending ? 0.55 : 1 },
+              ]}>
+              {update.isPending ? (
+                <ActivityIndicator size="small" color={C.onLive} />
+              ) : (
+                <Text numberOfLines={1} style={[styles.primaryLabel, { color: C.onLive }]}>
+                  {pendingUsernameClaim && normalized ? `CONTINUE AS @${normalized.toUpperCase()}` : 'SAVE'}
+                </Text>
+              )}
+            </Pressable>
 
             {pendingUsernameClaim ? (
-              <AuxButton
-                label="Skip for now"
-                variant="ghost"
-                fullWidth
-                onPress={leave}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Skip for now"
                 disabled={update.isPending}
-              />
+                onPress={leave}
+                style={({ pressed }) => [
+                  styles.secondary,
+                  {
+                    borderColor: C.rule3,
+                    backgroundColor: pressed ? C.surface : 'transparent',
+                    opacity: update.isPending ? 0.55 : 1,
+                  },
+                ]}>
+                <Text style={[styles.secondaryLabel, { color: C.ink }]}>SKIP FOR NOW</Text>
+              </Pressable>
             ) : null}
-          </View>
+          </Animated.View>
         </ScrollView>
       </KeyboardAvoidingView>
-    </Screen>
+    </SafeAreaView>
   );
 }
 
 /* ------------------------------------------------------------------- parts */
 
-function AvailabilityHint({ status, username }: { status: UsernameStatus; username: string }) {
-  if (status === 'idle' || status === 'invalid') return null;
+/**
+ * The verdict, inside the frame. Accent means the handle is yours to take —
+ * "joinable" in the same sense the Feed uses it — and nothing else on this
+ * screen is allowed to borrow that colour.
+ */
+function StatusChip({ status }: { status: UsernameStatus }) {
+  const C = useColors();
+  if (status === 'idle') return null;
 
   if (status === 'checking') {
     return (
-      <View style={styles.messageRow} accessibilityLiveRegion="polite">
-        <ActivityIndicator size="small" color={Colors.muted} />
-        <Text style={styles.messageMuted}>Checking…</Text>
+      <View style={[styles.chip, { backgroundColor: C.surface }]}>
+        <ActivityIndicator size="small" color={C.ink3} />
       </View>
     );
   }
 
-  const taken = status === 'taken';
+  const bad = status === 'taken' || status === 'invalid';
+  const label = status === 'available' ? 'AVAILABLE' : status === 'taken' ? 'TAKEN' : 'INVALID';
 
   return (
-    <View style={styles.messageRow} accessibilityLiveRegion="polite">
-      {taken ? (
-        <X size={18} color={Colors.danger} strokeWidth={1.6} />
-      ) : (
-        /*
-          Warm white, NOT Colors.accent. A free handle is a success, but the
-          accent is reserved for live/playing/joinable — spending it on a form
-          verdict is exactly what would stop the Feed being scannable.
-        */
-        <Check size={18} color={Colors.text} strokeWidth={1.6} />
-      )}
-      <Text style={taken ? styles.messageError : styles.messageOk}>
-        {taken ? `@${username} is taken` : `@${username} is yours`}
-      </Text>
+    <View style={[styles.chip, { backgroundColor: C.surface }]}>
+      <Text style={[styles.chipLabel, { color: bad ? C.danger : C.liveText }]}>{label}</Text>
     </View>
   );
+}
+
+function Field({
+  label,
+  value,
+  onChangeText,
+  placeholder,
+  error,
+  autoCapitalize = 'sentences',
+  autoComplete,
+  keyboardType,
+  maxLength,
+  inputRef,
+}: {
+  label: string;
+  value: string;
+  onChangeText: (v: string) => void;
+  placeholder?: string;
+  error?: string;
+  autoCapitalize?: 'none' | 'sentences';
+  autoComplete?: string;
+  keyboardType?: KeyboardTypeOptions;
+  maxLength?: number;
+  inputRef?: RefObject<TextInput | null>;
+}) {
+  const C = useColors();
+  const [focused, setFocused] = useState(false);
+
+  return (
+    <View>
+      <Text style={[styles.fieldLabel, { color: C.ink3 }]}>{label}</Text>
+      <TextInput
+        ref={inputRef}
+        value={value}
+        onChangeText={onChangeText}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        placeholder={placeholder}
+        placeholderTextColor={C.ink3}
+        autoCapitalize={autoCapitalize}
+        autoCorrect={false}
+        keyboardType={keyboardType}
+        maxLength={maxLength}
+        autoComplete={autoComplete as TextInputProps['autoComplete']}
+        accessibilityLabel={label}
+        selectionColor={C.live}
+        style={[
+          styles.input,
+          {
+            backgroundColor: C.surface,
+            color: C.ink,
+            borderColor: error ? C.danger : focused ? C.ink : C.rule2,
+          },
+        ]}
+      />
+      {error ? (
+        <Text accessibilityLiveRegion="polite" style={[styles.fieldError, { color: C.danger }]}>
+          {error}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+/* ------------------------------------------------------------------- utils */
+
+function frameColor(C: Palette, status: UsernameStatus, focused: boolean): string {
+  if (status === 'taken' || status === 'invalid') return C.dangerBorder;
+  if (status === 'available') return C.live;
+  if (focused) return C.ink;
+  return C.rule2;
 }
 
 function avatarUrlProblem(value: string): string | undefined {
@@ -328,132 +446,165 @@ function avatarUrlProblem(value: string): string | undefined {
 /* ------------------------------------------------------------------ styles */
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
   flex: {
     flex: 1,
   },
-  bloom: {
-    position: 'absolute',
-    // Out past the screen gutter so the glow reaches the edges rather than
-    // stopping on the same line the content does.
-    left: -Space.lg,
-    right: -Space.lg,
-    top: 0,
-    height: 430,
-  },
   content: {
     flexGrow: 1,
-    paddingTop: Space.sm,
-    paddingBottom: Space.xxl,
-    gap: Space.xl,
+  },
+  column: {
+    flex: 1,
+    width: '100%',
+    maxWidth: 720,
+    alignSelf: 'center',
+    paddingHorizontal: GUTTER,
+    paddingTop: Space.lg,
+    paddingBottom: Space.huge,
+  },
+  step: {
+    ...Type.label(11),
+    letterSpacing: tracking(11, 0.12),
+    minHeight: Space.xxl,
+  },
+  back: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 7,
+    minHeight: TOUCH_TARGET,
+    paddingRight: 10,
+  },
+  backLabel: {
+    ...Type.label(11),
+    letterSpacing: tracking(11, 0.1),
+  },
+  title: {
+    ...Type.display(40),
+    lineHeight: 42,
+    letterSpacing: tracking(40, -0.03),
+    marginTop: 10,
   },
   lede: {
-    ...Type.body,
-    color: Colors.muted,
+    ...Type.body(16),
+    marginTop: Space.sm,
+    marginBottom: Space.xxl,
   },
-  preview: {
+  /** One frame around `@`, the input and the verdict. */
+  handle: {
     flexDirection: 'row',
+    alignItems: 'stretch',
+    borderWidth: Rule.hair,
+  },
+  at: {
+    width: AT_BLOCK,
     alignItems: 'center',
-    gap: Space.lg,
+    justifyContent: 'center',
   },
-  previewText: {
+  atGlyph: {
+    ...Type.display(20),
+    letterSpacing: 0,
+  },
+  handleInput: {
     flex: 1,
-    gap: Space.xs,
+    minWidth: 0,
+    height: 56,
+    paddingHorizontal: Space.md,
+    paddingVertical: 0,
+    fontFamily: Fonts.extrabold,
+    fontSize: 22,
+    letterSpacing: tracking(22, -0.01),
   },
-  previewName: {
-    ...Type.heading,
-    color: Colors.text,
+  chip: {
+    justifyContent: 'center',
+    paddingHorizontal: 14,
   },
-  previewHandle: {
-    ...Type.body,
-    color: Colors.muted,
+  chipLabel: {
+    ...Type.heading(11),
+    letterSpacing: tracking(11, 0.12),
   },
-  form: {
-    gap: Space.lg,
+  hint: {
+    ...Type.body(14),
+    marginTop: Space.sm,
+    // Reserved height so nothing below jumps as the verdict changes.
+    minHeight: 42,
   },
-  field: {
-    gap: Space.xs,
-  },
-  fieldHead: {
+  identity: {
     flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-    gap: Space.md,
+    gap: 10,
+    marginTop: Space.lg,
+  },
+  avatar: {
+    width: AVATAR_BLOCK,
+    height: AVATAR_BLOCK,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  avatarInitial: {
+    ...Type.display(38),
+    letterSpacing: 0,
+  },
+  identityFields: {
+    flex: 1,
+    minWidth: 0,
+  },
+  avatarUrl: {
+    marginTop: Space.md,
+  },
+  caption: {
+    ...Type.body(14),
+    marginTop: 6,
   },
   fieldLabel: {
-    ...Type.label,
-    color: Colors.muted,
-  },
-  count: {
-    ...Type.mono,
-    color: Colors.muted,
-  },
-  /*
-    Deliberately identical to the kit's TextField shell — same 48px floor, same
-    1.5px border held across every state — so the three fields on this screen
-    read as one set even though this one is composed locally.
-  */
-  control: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    minHeight: 48,
-    paddingHorizontal: Space.md,
-    borderRadius: Radius.md,
-    backgroundColor: Colors.surface,
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-  },
-  controlFocused: {
-    backgroundColor: Colors.surfaceRaised,
-    borderColor: Colors.text,
-  },
-  /** Error outranks focus on the border, so the reason is never hidden. */
-  controlError: {
-    borderColor: Colors.danger,
-  },
-  /** Furniture, not content — the mono face marks it as part of the control. */
-  at: {
-    ...Type.mono,
-    fontSize: 16,
-    lineHeight: 22,
-    color: Colors.muted,
+    ...Type.label(11),
+    letterSpacing: tracking(11, 0.12),
+    marginBottom: 6,
   },
   input: {
-    ...Type.body,
-    flex: 1,
-    color: Colors.text,
-    paddingVertical: Space.sm,
+    height: CELL,
+    paddingHorizontal: Space.md,
+    paddingVertical: 0,
+    borderWidth: Rule.hair,
+    fontFamily: Fonts.regular,
+    fontSize: 16,
   },
-  messageRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space.sm,
-    // Reserved height so the fields below do not jump as the verdict changes.
-    minHeight: 24,
-  },
-  messageMuted: {
-    ...Type.label,
-    color: Colors.muted,
-  },
-  messageOk: {
-    ...Type.label,
-    color: Colors.text,
-  },
-  messageError: {
-    ...Type.label,
-    color: Colors.danger,
-  },
-  rules: {
-    ...Type.label,
-    // The format constraints are the copy that gets you past this screen —
-    // `faint` fails AA on bg, so they have to be `muted`.
-    color: Colors.muted,
+  fieldError: {
+    ...Type.label(11),
+    letterSpacing: tracking(11, 0.09),
+    marginTop: 6,
   },
   gap: {
     flexGrow: 1,
-    minHeight: Space.xs,
+    minHeight: Space.xl,
   },
-  actions: {
-    gap: Space.md,
+  primary: {
+    marginTop: Space.lg,
+    height: BUTTON,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    paddingHorizontal: Space.lg,
+  },
+  primaryLabel: {
+    ...Type.heading(13),
+    letterSpacing: tracking(13, 0.1),
+  },
+  secondary: {
+    marginTop: 10,
+    height: BUTTON,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    paddingHorizontal: Space.lg,
+    borderWidth: Rule.hair,
+  },
+  secondaryLabel: {
+    ...Type.heading(11),
+    letterSpacing: tracking(11, 0.1),
   },
 });

@@ -10,19 +10,30 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
-import { Colors, Radius } from '@/lib/theme';
+import { useColors } from '@/lib/theme-context';
+import { Radius } from '@/lib/theme';
 
 export type SkeletonProps = {
   width: number | string;
   height: number;
+  /** @deprecated Radius is 0 everywhere in this direction. */
   radius?: number;
   style?: StyleProp<ViewStyle>;
 };
 
-const DIM = 0.4;
-const BRIGHT = 0.8;
+const DIM = 0.45;
+const BRIGHT = 0.9;
 
-export function Skeleton({ width, height, radius = Radius.sm, style }: SkeletonProps) {
+/**
+ * A loading block: `surface2`, square, breathing.
+ *
+ * The pulse is opacity only — no travelling sheen. A shimmer would need a
+ * gradient, and this direction has none; a plain rectangle that dims and lifts
+ * says "not here yet" just as clearly and collapses cleanly when the user has
+ * asked for less motion.
+ */
+export function Skeleton({ width, height, style }: SkeletonProps) {
+  const C = useColors();
   const reduced = useReducedMotion();
   const opacity = useSharedValue(DIM);
 
@@ -39,7 +50,7 @@ export function Skeleton({ width, height, radius = Radius.sm, style }: SkeletonP
     return () => cancelAnimation(opacity);
   }, [reduced, opacity]);
 
-  const shimmer = useAnimatedStyle(() => ({ opacity: opacity.value }));
+  const breathe = useAnimatedStyle(() => ({ opacity: opacity.value }));
 
   return (
     <Animated.View
@@ -49,8 +60,8 @@ export function Skeleton({ width, height, radius = Radius.sm, style }: SkeletonP
         styles.base,
         // The contract types `width` loosely as `number | string`; ViewStyle wants
         // the narrower DimensionValue. Callers pass numbers or '60%'.
-        { width: width as DimensionValue, height, borderRadius: radius },
-        shimmer,
+        { width: width as DimensionValue, height, backgroundColor: C.surface2 },
+        breathe,
         style,
       ]}
     />
@@ -59,6 +70,6 @@ export function Skeleton({ width, height, radius = Radius.sm, style }: SkeletonP
 
 const styles = StyleSheet.create({
   base: {
-    backgroundColor: Colors.surfaceRaised,
+    borderRadius: Radius,
   },
 });

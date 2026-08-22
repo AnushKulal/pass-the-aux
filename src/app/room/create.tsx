@@ -4,13 +4,18 @@
  * A Session always belongs to a lounge — that is what scopes who can hear it,
  * who can queue, and who can chat. So the lounge is a required choice, not a
  * setting buried behind "advanced".
+ *
+ * Flat throughout: bordered cells, hard rules, one accent fill on the single
+ * control that actually starts something live. Selecting a lounge is a passive
+ * form choice, so it is marked with an accent BORDER and a word, never an
+ * accent fill — the fill has to keep meaning "live".
  */
 
-import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Check, Radio, Users } from 'lucide-react-native';
-import { useCallback, useEffect, useState } from 'react';
+import { Check, Users } from 'lucide-react-native';
+import { memo, useCallback, useState } from 'react';
 import {
+  ActivityIndicator,
   FlatList,
   Pressable,
   StyleSheet,
@@ -19,23 +24,19 @@ import {
   type ListRenderItemInfo,
 } from 'react-native';
 
-import { AuxButton, EmptyState, Screen, Skeleton, TextField, useToast } from '@/components/ui';
+import { EmptyState, Screen, Skeleton, TextField, useToast } from '@/components/ui';
 import { useCreateRoom, useMyLounges } from '@/features/rooms/queries';
 import type { LoungeRow } from '@/lib/database.types';
-import {
-  Colors,
-  PointerEvents,
-  Radius,
-  Space,
-  TOUCH_TARGET,
-  Type,
-  bloomGradient,
-} from '@/lib/theme';
+import { Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
+import { useColors } from '@/lib/theme-context';
 
 const MAX_NAME_LENGTH = 50;
 const SKELETON_ROWS = 3;
+const OPTION_HEIGHT = 58;
 
 export default function CreateRoomScreen() {
+  const C = useColors();
+
   // See room/[id].tsx: the generic must be a required-property shape.
   const params = useLocalSearchParams<{ loungeId: string }>();
   const toast = useToast();
@@ -44,20 +45,19 @@ export default function CreateRoomScreen() {
   const createRoom = useCreateRoom();
 
   const [name, setName] = useState('');
-  const [loungeId, setLoungeId] = useState<string | null>(
+  const [picked, setPicked] = useState<string | null>(
     typeof params.loungeId === 'string' ? params.loungeId : null
   );
 
-  // Coming from a lounge preselects it; landing here from the tab bar with
-  // exactly one lounge should not make the user tap a list of one.
-  useEffect(() => {
-    if (loungeId) return;
-
-    const all = lounges.data;
-    if (!all || all.length !== 1) return;
-
-    setLoungeId(all[0].id);
-  }, [loungeId, lounges.data]);
+  /*
+    Derived, not synchronised. Coming from a lounge preselects it, and landing
+    here from the tab bar with exactly one lounge should not make the user tap a
+    list of one — but writing that default into state from an effect means a
+    cascading render, and a default that would fight the user's own choice the
+    moment the query refetched.
+  */
+  const all = lounges.data;
+  const loungeId = picked ?? (all && all.length === 1 ? all[0].id : null);
 
   const handleCreate = useCallback(() => {
     if (!loungeId) {
@@ -90,10 +90,12 @@ export default function CreateRoomScreen() {
 
   const renderItem = useCallback(
     ({ item }: ListRenderItemInfo<LoungeRow>) => (
-      <LoungeOption lounge={item} selected={item.id === loungeId} onSelect={setLoungeId} />
+      <LoungeOption lounge={item} selected={item.id === loungeId} onSelect={setPicked} />
     ),
     [loungeId]
   );
+
+  const canStart = Boolean(loungeId) && !createRoom.isPending;
 
   return (
     /*
@@ -103,9 +105,6 @@ export default function CreateRoomScreen() {
       the scrolling instead, with the form around it as header and footer.
     */
     <Screen title="Start a Session" onBack={handleBack}>
-      {/* Nothing is playing yet, so the room is only half lit. */}
-      <Bloom />
-
       <FlatList
         style={styles.flex}
         data={lounges.data ?? []}
@@ -127,21 +126,16 @@ export default function CreateRoomScreen() {
             />
 
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Which lounge?</Text>
-              <View style={styles.sectionRule} />
+              <Text style={[styles.sectionTitle, { color: C.ink3 }]}>Which lounge?</Text>
+              <View style={[styles.sectionRule, { backgroundColor: C.rule }]} />
             </View>
           </View>
         }
         ListEmptyComponent={
           lounges.isLoading && !lounges.data ? (
-            <View style={styles.list}>
+            <View style={styles.skeletons}>
               {Array.from({ length: SKELETON_ROWS }, (_, index) => (
-                <Skeleton
-                  key={index}
-                  width="100%"
-                  height={TOUCH_TARGET + Space.md}
-                  radius={Radius.md}
-                />
+                <Skeleton key={index} width="100%" height={OPTION_HEIGHT} radius={0} />
               ))}
             </View>
           ) : (
@@ -150,31 +144,44 @@ export default function CreateRoomScreen() {
               title="No lounges yet"
               description="A Session lives inside a lounge. Join one with an invite code, or start your own."
               action={
-                <AuxButton
-                  label="Find a lounge"
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Find a lounge"
                   onPress={() => router.replace('/lounges')}
-                  variant="ghost"
-                  size="sm"
-                />
+                  style={({ pressed }) => [
+                    styles.ghost,
+                    { borderColor: C.rule2 },
+                    pressed ? { borderColor: C.ink } : null,
+                  ]}>
+                  <Text style={[styles.ghostLabel, { color: C.ink }]}>Find a lounge</Text>
+                </Pressable>
               }
             />
           )
         }
         ListFooterComponent={
           <View style={styles.footer}>
-            <AuxButton
-              label="Go on aux"
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Go on aux"
+              accessibilityState={{ disabled: !canStart, busy: createRoom.isPending }}
+              disabled={!canStart}
               onPress={handleCreate}
-              variant="accent"
-              size="lg"
-              icon={Radio}
-              fullWidth
-              loading={createRoom.isPending}
-              disabled={!loungeId || createRoom.isPending}
-            />
+              style={({ pressed }) => [
+                styles.start,
+                { backgroundColor: C.live },
+                pressed ? { backgroundColor: C.liveText } : null,
+                canStart ? null : styles.inert,
+              ]}>
+              {createRoom.isPending ? (
+                <ActivityIndicator size="small" color={C.onLive} />
+              ) : (
+                <Text style={[styles.startLabel, { color: C.onLive }]}>Go on aux</Text>
+              )}
+            </Pressable>
 
-            <Text style={styles.footnote}>
-              You start as host. Anyone in the lounge can join and add to the queue.
+            <Text style={[styles.footnote, { color: C.ink2 }]}>
+              You go on aux. Anyone in the lounge can join and add to the queue.
             </Text>
           </View>
         }
@@ -185,36 +192,6 @@ export default function CreateRoomScreen() {
 
 const keyExtractor = (item: LoungeRow) => item.id;
 
-/**
- * The room's light. Decorative only — Bloom colours never carry meaning, which
- * is what keeps Colors.accent free to mean "live", and the one accent on this
- * screen is the button that actually starts something live. React Native has no
- * blur, so the softness is two gradients falling off on different axes.
- */
-function Bloom() {
-  return (
-    <View
-      accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
-      style={[styles.bloom, PointerEvents.none]}>
-      <LinearGradient
-        colors={bloomGradient(0.22)}
-        locations={[0, 0.45, 1]}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 1 }}
-        style={StyleSheet.absoluteFill}
-      />
-      <LinearGradient
-        colors={bloomGradient(0.13)}
-        locations={[0, 0.5, 1]}
-        start={{ x: 0.1, y: 0.1 }}
-        end={{ x: 0.95, y: 0.9 }}
-        style={StyleSheet.absoluteFill}
-      />
-    </View>
-  );
-}
-
 /** Keeps the 8px minimum between adjacent radio targets. */
 const OptionGap = () => <View style={styles.optionGap} />;
 
@@ -224,7 +201,13 @@ type LoungeOptionProps = {
   onSelect: (loungeId: string) => void;
 };
 
-function LoungeOption({ lounge, selected, onSelect }: LoungeOptionProps) {
+const LoungeOption = memo(function LoungeOption({
+  lounge,
+  selected,
+  onSelect,
+}: LoungeOptionProps) {
+  const C = useColors();
+
   return (
     <Pressable
       accessibilityRole="radio"
@@ -233,34 +216,36 @@ function LoungeOption({ lounge, selected, onSelect }: LoungeOptionProps) {
       onPress={() => onSelect(lounge.id)}
       style={({ pressed }) => [
         styles.option,
-        selected && styles.optionSelected,
-        pressed && styles.optionPressed,
+        { borderColor: selected ? C.live : C.rule2 },
+        pressed ? { backgroundColor: C.surface } : null,
       ]}>
       <View style={styles.optionMeta}>
-        <Text numberOfLines={1} style={styles.optionName}>
+        <Text numberOfLines={1} style={[styles.optionName, { color: C.ink }]}>
           {lounge.name}
         </Text>
         {lounge.description ? (
-          <Text numberOfLines={1} style={styles.optionDescription}>
+          <Text numberOfLines={1} style={[styles.optionDescription, { color: C.ink2 }]}>
             {lounge.description}
           </Text>
         ) : null}
       </View>
 
-      {/* A check glyph, not just the border tint — selection must survive being
-          seen by someone who cannot separate indigo from the surface. */}
-      {selected ? <Check size={20} color={Colors.text} strokeWidth={1.6} /> : null}
+      {/* A word and a glyph, not just the border tint — selection has to survive
+          being seen by someone who cannot separate the red from the ground. */}
+      {selected ? (
+        <>
+          <Text style={[styles.optionSelected, { color: C.liveText }]}>Selected</Text>
+          <Check size={18} color={C.liveText} strokeWidth={2} />
+        </>
+      ) : null}
     </Pressable>
   );
-}
+});
 
 const styles = StyleSheet.create({
   flex: {
     flex: 1,
   },
-  /* The three blocks below reproduce what `body`'s 24px gap and the section's
-     12px gap used to space, now that header, items and footer are siblings of
-     the virtualised list rather than children of one column. */
   content: {
     flexGrow: 1,
     paddingTop: Space.md,
@@ -271,7 +256,7 @@ const styles = StyleSheet.create({
     paddingBottom: Space.md,
   },
   footer: {
-    gap: Space.xl,
+    gap: Space.lg,
     paddingTop: Space.xl,
   },
   optionGap: {
@@ -283,66 +268,69 @@ const styles = StyleSheet.create({
     gap: Space.md,
   },
   sectionTitle: {
-    // A mono eyebrow with a hairline running out of it: the same figure the
-    // chat log uses for day breaks and the lounge uses for its sections.
-    ...Type.monoLabel,
-    color: Colors.muted,
+    // A kicker with a hairline running out of it: the same figure the chat log
+    // uses for day breaks and the lounge uses for its sections.
+    ...Type.label(10),
   },
   sectionRule: {
     flex: 1,
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: Colors.border,
+    height: Rule.hair,
   },
-  bloom: {
-    position: 'absolute',
-    // Parked above the header so its hard top edge never lands on the screen.
-    top: -200,
-    left: -Space.huge,
-    right: -Space.huge,
-    height: 360,
-    borderRadius: Radius.pill,
-    overflow: 'hidden',
-  },
-  list: {
+  skeletons: {
     gap: Space.sm,
   },
   option: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Space.md,
-    minHeight: TOUCH_TARGET + Space.md,
-    paddingHorizontal: Space.lg,
+    minHeight: OPTION_HEIGHT,
+    paddingHorizontal: Space.md - 1,
     paddingVertical: Space.md,
-    borderRadius: Radius.md,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    // Glass unselected, so the options sit in the bloom rather than on top of
-    // it as a stack of opaque grey bars.
-    backgroundColor: Colors.glass,
-  },
-  optionSelected: {
-    // Indigo, not the accent: picking a lounge is a passive form choice, and
-    // the green has to keep meaning live/play/join.
-    borderColor: Colors.primary,
-    backgroundColor: Colors.surfaceRaised,
-  },
-  optionPressed: {
-    opacity: 0.75,
+    borderWidth: Rule.hair,
   },
   optionMeta: {
     flex: 1,
-    gap: 2,
+    minWidth: 0,
   },
   optionName: {
-    ...Type.bodyStrong,
-    color: Colors.text,
+    ...Type.heading(14),
+    letterSpacing: tracking(14, 0.01),
   },
   optionDescription: {
-    ...Type.label,
-    color: Colors.muted,
+    ...Type.body(13),
+  },
+  optionSelected: {
+    ...Type.heading(10),
+    letterSpacing: tracking(10, 0.09),
+    textTransform: 'uppercase',
+  },
+  start: {
+    minHeight: 52,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    paddingHorizontal: Space.lg,
+  },
+  startLabel: {
+    ...Type.heading(13),
+    letterSpacing: tracking(13, 0.1),
+    textTransform: 'uppercase',
+  },
+  inert: {
+    opacity: 0.55,
+  },
+  ghost: {
+    minHeight: TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Space.lg,
+    borderWidth: Rule.hair,
+  },
+  ghostLabel: {
+    ...Type.heading(11),
+    letterSpacing: tracking(11, 0.1),
+    textTransform: 'uppercase',
   },
   footnote: {
-    ...Type.body,
-    color: Colors.muted,
+    ...Type.body(16),
   },
 });

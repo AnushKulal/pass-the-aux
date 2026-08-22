@@ -1,169 +1,186 @@
+/**
+ * The app shell.
+ *
+ * A row: the 58px lounge rail on the left, the screen column on the right, and
+ * the 54px tab bar pinned to the bottom of that column — so the bar starts
+ * where the rail's rule ends rather than running under it.
+ *
+ * Both the rail and the bar are gated on the profile being finished. Until it
+ * is, neither renders at all: an unfinished profile gets the screen it is on
+ * and nothing to navigate with. That is the design's gate, not a loading state.
+ */
+
 import { Redirect } from 'expo-router';
-import { Tabs } from 'expo-router/js-tabs';
-import { Compass, House, User, Users, type LucideIcon } from 'lucide-react-native';
-import { StyleSheet, View } from 'react-native';
+import { Tabs, type BottomTabBarProps } from 'expo-router/js-tabs';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { LoungeRail } from '@/components/shell/lounge-rail';
 import { useAuth } from '@/lib/auth';
-import { Colors, Fonts, Radius, Space, Type } from '@/lib/theme';
+import { useLocalProfile } from '@/lib/providers';
+import { Rule, Space, Type } from '@/lib/theme';
+import { useColors } from '@/lib/theme-context';
+
+/** Content height of the bar, above the device's bottom safe-area inset. */
+const TAB_BAR_HEIGHT = 54;
+/** The mark under the active cell's label. */
+const ACTIVE_BAR_WIDTH = 22;
 
 /**
- * Content height of the bar, above the device's bottom safe-area inset.
- * The artboard's 60pt band plus the 1pt hairline: an icon plate, a 4pt gap and
- * a label, with every item comfortably past the 44pt minimum target.
- */
-const TAB_BAR_CONTENT_HEIGHT = 62;
-const ICON_SIZE = 24;
-
-/** The plate behind the selected icon. Wider than the glyph, so it reads as a key. */
-const PLATE_WIDTH = 44;
-const PLATE_HEIGHT = 30;
-
-/**
- * Builds a `tabBarIcon` renderer.
+ * The three cells, in order, keyed by route name.
  *
- * We pick the tint from `focused` instead of using the `color` react-navigation
- * passes in: that argument is typed `ColorValue`, which may be an opaque
- * platform handle, while lucide forwards `color` straight into an SVG prop that
- * needs a real string. Reading our own tokens keeps this strictly typed.
+ * `lounges` is deliberately absent: lounges are the rail's job in this
+ * direction. The route still exists and is still reachable — it just has no
+ * cell competing with FEED / EXPLORE / YOU.
  */
-function tabIcon(Icon: LucideIcon) {
-  return function TabIcon({ focused }: { focused: boolean }) {
-    return (
-      <View style={[styles.plate, focused && styles.plateActive]}>
-        <Icon
-          size={ICON_SIZE}
-          color={focused ? Colors.text : Colors.muted}
-          /*
-            1.6 is the system's stroke. Selection is carried by weight and by a
-            glass plate rather than by a tint, because the one tint that would
-            read loudest here — Colors.accent — means "live", and the bar sits
-            directly under Feed rows that use it for exactly that.
-          */
-          strokeWidth={focused ? 2.2 : 1.6}
-        />
-      </View>
-    );
-  };
+const CELLS = [
+  { name: 'index', label: 'FEED' },
+  { name: 'explore', label: 'EXPLORE' },
+  { name: 'profile', label: 'YOU' },
+] as const;
+
+function PatchbayTabBar({ state, navigation }: BottomTabBarProps) {
+  const C = useColors();
+  const insets = useSafeAreaInsets();
+
+  return (
+    <View
+      style={[
+        styles.tabBar,
+        {
+          height: TAB_BAR_HEIGHT + insets.bottom,
+          paddingBottom: insets.bottom,
+          backgroundColor: C.bg,
+          borderTopColor: C.rule,
+        },
+      ]}>
+      {CELLS.map((cell, position) => {
+        const index = state.routes.findIndex((route) => route.name === cell.name);
+        if (index === -1) return null;
+
+        const route = state.routes[index];
+        const focused = state.index === index;
+
+        const onPress = () => {
+          const event = navigation.emit({
+            type: 'tabPress',
+            target: route.key,
+            canPreventDefault: true,
+          });
+          if (!focused && !event.defaultPrevented) {
+            navigation.navigate(route.name, route.params);
+          }
+        };
+
+        return (
+          <Pressable
+            key={route.key}
+            onPress={onPress}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: focused }}
+            accessibilityLabel={cell.label}
+            style={[
+              styles.cell,
+              position > 0 && { borderLeftWidth: Rule.hair, borderLeftColor: C.rule },
+            ]}>
+            <Text style={[styles.cellLabel, { color: focused ? C.ink : C.ink2 }]}>
+              {cell.label}
+            </Text>
+            {/*
+              The one accent in the bar. It marks the cell you are actually on —
+              which is a "you are here", not a decoration, so it earns the red.
+            */}
+            {focused ? <View style={[styles.activeBar, { backgroundColor: C.live }]} /> : null}
+          </Pressable>
+        );
+      })}
+    </View>
+  );
 }
 
-const HomeIcon = tabIcon(House);
-const ExploreIcon = tabIcon(Compass);
-const LoungesIcon = tabIcon(Users);
-const ProfileIcon = tabIcon(User);
+const renderTabBar = (props: BottomTabBarProps) => <PatchbayTabBar {...props} />;
+const renderNoTabBar = () => null;
 
 export default function TabsLayout() {
-  const insets = useSafeAreaInsets();
+  const C = useColors();
   const { session, loading } = useAuth();
+  const { profileDone, hydrating: gateHydrating } = useLocalProfile();
 
   /**
    * The inverse of the `(auth)` group's guard. `/` resolves into this group, so
    * a cold start with no stored session lands here first and has to be sent
-   * back out. Rendering nothing while `loading` is what stops the sign-in
-   * screen from flashing for one frame on every launch.
+   * back out. Rendering nothing while `loading` is what stops the intro from
+   * flashing for one frame on every launch.
+   *
+   * `/(auth)/intro` rather than sign-in: intro persists its own "seen" flag and
+   * forwards to sign-in the second time, so returning users pay one redirect
+   * and see nothing.
    */
-  if (loading) return null;
-  if (!session) return <Redirect href="/(auth)/sign-in" />;
+  if (loading || gateHydrating) return null;
+  if (!session) return <Redirect href="/(auth)/intro" />;
 
   return (
-    <Tabs
-      screenOptions={{
-        // Each tab screen renders its own header via the `Screen` component.
-        headerShown: false,
-        // Not the accent: green is the Feed's "live" signal, and repeating it
-        // one row below on the selected tab drains that signal of meaning.
-        // Inactive is `muted`, not `faint` — the tint colours the labels too,
-        // and faint sits under 4.5:1 on the bar.
-        tabBarActiveTintColor: Colors.text,
-        tabBarInactiveTintColor: Colors.muted,
-        // Pinned rather than left to the automatic breakpoint: `below-icon`
-        // keeps the bar's height math valid on tablets and in landscape.
-        tabBarLabelPosition: 'below-icon',
-        tabBarLabelStyle: styles.label,
-        tabBarItemStyle: styles.item,
-        tabBarHideOnKeyboard: true,
-        sceneStyle: styles.scene,
-        /**
-         * A numeric `height` here overrides react-navigation's own inset math,
-         * so we add the inset back explicitly. The bar's default
-         * `paddingBottom: insets.bottom` still applies underneath, which is
-         * what keeps the content band clear of the home indicator.
-         */
-        tabBarStyle: [styles.tabBar, { height: TAB_BAR_CONTENT_HEIGHT + insets.bottom }],
-      }}>
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Home',
-          tabBarAccessibilityLabel: 'Home',
-          tabBarIcon: HomeIcon,
-        }}
-      />
-      <Tabs.Screen
-        name="explore"
-        options={{
-          title: 'Explore',
-          tabBarAccessibilityLabel: 'Explore lounges and Sessions',
-          tabBarIcon: ExploreIcon,
-        }}
-      />
-      <Tabs.Screen
-        name="lounges"
-        options={{
-          title: 'Lounges',
-          tabBarAccessibilityLabel: 'Your lounges',
-          tabBarIcon: LoungesIcon,
-        }}
-      />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: 'Profile',
-          tabBarAccessibilityLabel: 'Your profile',
-          tabBarIcon: ProfileIcon,
-        }}
-      />
-    </Tabs>
+    <View style={[styles.shell, { backgroundColor: C.bg }]}>
+      {profileDone ? <LoungeRail /> : null}
+      <View style={styles.column}>
+        <Tabs
+          tabBar={profileDone ? renderTabBar : renderNoTabBar}
+          screenOptions={{
+            // Each tab screen renders its own header.
+            headerShown: false,
+            sceneStyle: { backgroundColor: C.bg },
+          }}>
+          <Tabs.Screen
+            name="index"
+            options={{ title: 'The Feed', tabBarAccessibilityLabel: 'The Feed' }}
+          />
+          <Tabs.Screen
+            name="explore"
+            options={{ title: 'Explore', tabBarAccessibilityLabel: 'Explore lounges' }}
+          />
+          <Tabs.Screen
+            name="profile"
+            options={{ title: 'You', tabBarAccessibilityLabel: 'Your profile' }}
+          />
+        </Tabs>
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  shell: {
+    flex: 1,
+    flexDirection: 'row',
+  },
+  column: {
+    flex: 1,
+    minWidth: 0,
+  },
   tabBar: {
+    flexDirection: 'row',
     /*
-      Solid surface, not glass. The bar is the one element that must never take
-      colour from the bloom behind it: it is the app's fixed frame of reference,
-      and a translucent bar over a Feed row's artwork glow changes tint as the
-      list scrolls under it.
+      2px, not a hairline: this is a boundary between major sections of the
+      app, and in this direction that weight is what separation is made of.
+      No elevation — Android's default would add a shadow competing with it.
     */
-    backgroundColor: Colors.surface,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: Colors.border,
-    paddingTop: Space.sm,
-    // The hairline is the only separator we want; Android's default elevation
-    // would add a competing shadow on top of it.
+    borderTopWidth: Rule.major,
     elevation: 0,
   },
-  plate: {
-    width: PLATE_WIDTH,
-    height: PLATE_HEIGHT,
-    alignItems: 'center',
+  cell: {
+    flex: 1,
+    alignItems: 'flex-start',
     justifyContent: 'center',
-    borderRadius: Radius.md,
+    paddingHorizontal: Space.md,
+    gap: 3,
   },
-  plateActive: {
-    backgroundColor: Colors.glassStrong,
+  cellLabel: {
+    ...Type.heading(11),
+    // .1em, per the spec's tab label. Wider than Type.heading's default.
+    letterSpacing: 1.1,
   },
-  label: {
-    fontFamily: Fonts.bodyMedium,
-    fontSize: Type.caption.fontSize,
-    // Tighter than Type.caption's 18: the bar's height budget is fixed, and the
-    // label sits directly under the plate with nothing to lead into.
-    lineHeight: 15,
-  },
-  item: {
-    paddingVertical: Space.xs,
-  },
-  scene: {
-    backgroundColor: Colors.bg,
+  activeBar: {
+    width: ACTIVE_BAR_WIDTH,
+    height: Rule.major,
   },
 });
