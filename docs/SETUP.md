@@ -28,7 +28,7 @@ Total time: about 40 minutes, most of it waiting on dashboards.
 
 ```powershell
 git clone <your-fork-url> aux
-cd aux
+cd pass-the-aux
 npm install
 ```
 
