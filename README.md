@@ -113,11 +113,12 @@ aux/
 │  │  └─ adapters/              spotify + youtube implementations of PlaybackAdapter
 │  └─ hooks/
 ├─ supabase/
-│  ├─ migrations/               the whole schema, in three ordered files
-│  └─ functions/                the three Edge Functions (see docs/SETUP.md step 3)
+│  ├─ migrations/               the whole schema, in four ordered files
+│  └─ functions/                the four Edge Functions (see docs/SETUP.md step 3)
 ├─ docs/
-│  ├─ SETUP.md
-│  └─ ARCHITECTURE.md
+│  ├─ SETUP.md                   get it running from zero
+│  ├─ ARCHITECTURE.md            how and why the sync engine works
+│  └─ DESIGN_BRIEF.md            the full UI/UX spec, for designers
 └─ assets/
 ```
 
