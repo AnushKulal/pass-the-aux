@@ -1,0 +1,105 @@
+name: Build dev client
+
+# A development build: the app's own native shell with expo-dev-client inside,
+# so it loads JavaScript from a Metro dev server instead of from a bundle baked
+# into the APK. That gives live reload on a real device.
+#
+# This exists because Expo Go cannot run this project — Expo Go on the Play
+# Store only ships the SDKs it was built with, and this app is on SDK 57. A dev
+# client is the supported replacement: same idea, but built from THIS project so
+# it carries this SDK and these native modules.
+#
+# Install it ONCE. After that every JS change reaches the phone in about a
+# second. You only rebuild when native code changes — a new native module, a
+# permission, a config plugin, or an SDK bump.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: devclient-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  devclient:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      EXPO_PUBLIC_SUPABASE_URL: https://figkjbunwqmbjisoajxe.supabase.co
+      EXPO_PUBLIC_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZpZ2tqYnVud3FtYmppc29hanhlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODczNzMzOTksImV4cCI6MjEwMjk0OTM5OX0.IScMnGpWF_a3cIOfsZ4xrF0pyD4lKarMjnyzrztBl3A
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - run: npm ci
+
+      - name: Generate native project
+        run: npx expo prebuild --platform android --no-install
+
+      # Same reasons as the release build: the default 512m metaspace is not
+      # enough once the Expo modules are compiling, and building all four ABIs
+      # is most of the wall clock for architectures no real phone uses.
+      - name: Tune Gradle memory and target one architecture
+        run: |
+          {
+            echo ""
+            echo "org.gradle.jvmargs=-Xmx6144m -XX:MaxMetaspaceSize=2048m"
+            echo "reactNativeArchitectures=arm64-v8a"
+          } >> android/gradle.properties
+
+      # DEBUG, not release: the debug variant is what embeds the dev client and
+      # leaves the app pointed at a Metro server rather than a baked-in bundle.
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Collect the APK
+        id: collect
+        run: |
+          SRC=$(find android/app/build/outputs/apk/debug -name "*.apk" | head -1)
+          test -n "$SRC" || { echo "no APK produced"; exit 1; }
+          cp "$SRC" aux-devclient.apk
+          ls -la aux-devclient.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aux-devclient
+          path: aux-devclient.apk
+          retention-days: 30
+
+      # Its own release tag, kept separate from `latest` so installing the dev
+      # client never overwrites the shippable build or vice versa.
+      - name: Publish to the "devclient" release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete devclient --yes --cleanup-tag 2>/dev/null || true
+          gh release create devclient \
+            --title "aux — development client" \
+            --notes "Built from ${GITHUB_SHA::7}.
+
+          Install once, then start the dev server on your machine and open this
+          app — it loads JavaScript over the network, so edits appear in about a
+          second.
+
+          Rebuild only when native code changes: a new native module, a
+          permission, a config plugin, or an SDK bump. JavaScript never needs one.
+
+          It expects a Metro server on your LAN. Without one it will show a
+          connection screen rather than the app." \
+            aux-devclient.apk
