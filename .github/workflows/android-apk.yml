@@ -19,6 +19,11 @@ concurrency:
   group: apk-${{ github.ref }}
   cancel-in-progress: true
 
+# Creating the "latest" release needs write access to repository contents.
+# The default GITHUB_TOKEN is read-only on this repo.
+permissions:
+  contents: write
+
 jobs:
   apk:
     runs-on: ubuntu-latest
@@ -96,3 +101,25 @@ jobs:
           name: aux-apk
           path: ${{ steps.rename.outputs.path }}
           retention-days: 30
+
+      # A single permanent link that always points at the newest build.
+      #
+      # Artifacts are per-run: every run yields its own page and its own file,
+      # and a browser that already holds aux-<oldsha>.apk will happily download
+      # it again as aux-<oldsha>(1).apk from a *different* run's page. That is
+      # how an old build gets installed while the newest one sits untouched.
+      # The "latest" release replaces its asset in place, so the download link
+      # never changes and the file on disk is always current.
+      - name: Publish to the "latest" release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create latest             --title "aux — latest build"             --notes "Built from ${GITHUB_SHA::7} on $(date -u '+%Y-%m-%d %H:%M UTC').
+
+          Install this one. It is replaced on every push to main, so this link
+          is always the newest build.
+
+          **Delete any older aux-*.apk from your phone's Downloads first** —
+          Android keeps both and it is easy to install the wrong file."             "${{ steps.rename.outputs.path }}#aux-latest.apk"
