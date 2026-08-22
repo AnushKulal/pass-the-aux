@@ -117,15 +117,20 @@ loudly and immediately rather than mysteriously later.
 
 ## Step 2 — Run the migrations
 
-The schema lives in three ordered files in `supabase/migrations/`:
+The schema lives in four ordered files in `supabase/migrations/`:
 
 | File | What it creates |
 | --- | --- |
 | `20260821000100_init_core.sql` | `profiles`, `lounges`, `lounge_members`, the signup trigger, the RLS helper functions |
 | `20260821000200_music_and_rooms.sql` | `tracks`, `track_links`, `rooms`, `room_participants`, `queue_items` |
 | `20260821000300_chat_tokens_rpc.sql` | `messages`, `reactions`, `provider_tokens`, `sync_metrics`, all the playback RPCs, and the Realtime publication |
+| `20260821000400_realtime_authorization.sql` | Realtime Authorization for the Feed's presence channels |
 
-**Order matters.** File 2 references types and functions from file 1; file 3 references both.
+**Order matters.** File 2 references types and functions from file 1; file 3 references both; file 4
+references the RLS helper from file 1.
+
+> Do not skip file 4. Without it the Feed's presence channels have no authorization, and anyone
+> holding the publishable anon key can read — and spoof — presence in a Lounge they never joined.
 
 Pick either route below. The CLI route is better if you will be changing the schema; the SQL editor
 route is faster if you just want it running.
@@ -148,7 +153,7 @@ It will prompt for the **database password** you saved in step 1a. Then push:
 npx supabase db push
 ```
 
-You should see all three migrations listed and applied. Verify:
+You should see all four migrations listed and applied. Verify:
 
 ```powershell
 npx supabase migration list
@@ -512,7 +517,7 @@ Errors you will actually hit on a first setup, and what they mean.
 | App crashes instantly: `Missing EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_ANON_KEY` | `.env` missing, misnamed (`.env.txt` — Notepad does this), or Metro started before you saved it | Confirm the file is exactly `.env` at the repo root, then restart with `npx expo start -c` |
 | You edited `.env` but nothing changed | Env values are inlined at bundle time, not read at runtime | `npx expo start -c` — a plain restart is not enough |
 | `relation "public.profiles" does not exist` | Migrations never ran, or ran against a different project | Re-run step 2 and verify with the `information_schema` query |
-| Migration 2 fails on `type "public.music_provider" does not exist` | Files run out of order | Run the three migration files strictly in filename order |
+| Migration 2 fails on `type "public.music_provider" does not exist` | Files run out of order | Run the four migration files strictly in filename order |
 | `npx supabase db push` → `Cannot find project ref` | Repo is not linked | `npx supabase link --project-ref <ref>` |
 | `npx supabase link` → wrong-password loop | You are typing the dashboard login password, not the **database** password from step 1a | Reset it under **Project Settings > Database > Database password** |
 | Any `supabase` CLI command complains about Docker | Local-stack commands (`supabase start`, `supabase db reset`) need Docker Desktop | Use `db push` against the linked hosted project instead — this guide never needs Docker |

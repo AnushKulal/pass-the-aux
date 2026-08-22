@@ -76,7 +76,7 @@ copy .env.example .env
 # 3. Link the Supabase project you created, then push the schema
 npx supabase link --project-ref <your-project-ref>
 
-# 4. Apply all three migrations
+# 4. Apply all four migrations
 npx supabase db push
 
 # 5. Run it
