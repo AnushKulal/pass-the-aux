@@ -12,6 +12,13 @@ on:
       - 'design/**'
       - 'docs/**'
 
+# Three pushes in a minute previously left three 25-minute Gradle builds fighting
+# for the same runners; two were killed mid-build. Now the newest push wins and
+# older runs are cancelled deliberately rather than dying at random.
+concurrency:
+  group: apk-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   apk:
     runs-on: ubuntu-latest

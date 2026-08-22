@@ -49,6 +49,12 @@
         "projectId": "3c252219-3619-434b-9ab4-f0931d09722a"
       }
     },
-    "owner": "anush_kulal"
+    "owner": "anush_kulal",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/3c252219-3619-434b-9ab4-f0931d09722a"
+    }
   }
 }

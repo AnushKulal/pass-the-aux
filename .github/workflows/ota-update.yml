@@ -1,0 +1,59 @@
+name: Ship OTA update
+
+# Pushes a JavaScript-only update straight to installed apps — no rebuild, no
+# reinstall. Users pick it up on next launch.
+#
+# THE LIMIT THAT MATTERS: app.json sets runtimeVersion policy "appVersion", so an
+# update only reaches builds whose version matches (currently 1.0.0). Anything
+# that changes native code — a new package with native modules, a permission, an
+# app.json plugin, or a version bump — needs a fresh APK from android-apk.yml.
+# OTA moves JS and assets. It cannot move native code.
+on:
+  workflow_dispatch:
+    inputs:
+      message:
+        description: What changed
+        required: true
+        type: string
+      branch:
+        description: Update branch (must match the build's channel)
+        required: true
+        default: preview
+        type: choice
+        options: [preview, development, production]
+
+concurrency:
+  group: ota-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      EXPO_PUBLIC_SUPABASE_URL: https://figkjbunwqmbjisoajxe.supabase.co
+      EXPO_PUBLIC_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZpZ2tqYnVud3FtYmppc29hanhlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODczNzMzOTksImV4cCI6MjEwMjk0OTM5OX0.IScMnGpWF_a3cIOfsZ4xrF0pyD4lKarMjnyzrztBl3A
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - run: npm ci
+
+      # An OTA update ships straight to real devices with no review step, so the
+      # typecheck is the only gate between a mistake and everyone's phone.
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Publish update
+        run: eas update --branch "${{ inputs.branch }}" --message "${{ inputs.message }}" --non-interactive
