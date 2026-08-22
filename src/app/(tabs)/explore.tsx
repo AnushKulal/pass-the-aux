@@ -1,8 +1,19 @@
+/**
+ * Explore — the two ways into a lounge you are not in yet: a code somebody sent
+ * you, or a search.
+ *
+ * No grid here and only a trace of bloom: the grid belongs to Session and Feed,
+ * and there is no artwork on this screen for the glow to come off. What carries
+ * the direction instead are the mono readouts — the invite code itself, its
+ * character count, and the result count on the section rule.
+ */
+
 import { router } from 'expo-router';
 import { Compass, KeyRound, SearchX, WifiOff } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
 import { FlatList, StyleSheet, Text, View, type ListRenderItem } from 'react-native';
 
+import { BloomBackdrop } from '@/components/atmosphere';
 import { LoungeCard, LoungeListSkeleton } from '@/components/lounge/lounge-card';
 import { AuxButton, EmptyState, GlassCard, Screen, TextField, useToast } from '@/components/ui';
 import {
@@ -19,6 +30,9 @@ import { Colors, Space, Type } from '@/lib/theme';
  */
 const SEARCH_DEBOUNCE_MS = 400;
 const CODE_LENGTH = 8;
+
+/** No artwork on this screen, so the bloom is dialled well back. */
+const BLOOM_INTENSITY = 0.22;
 
 export default function ExploreScreen() {
   const toast = useToast();
@@ -54,8 +68,12 @@ export default function ExploreScreen() {
     [],
   );
 
+  const resultCount = data?.length ?? 0;
+
   return (
     <Screen title="Explore">
+      <BloomBackdrop intensity={BLOOM_INTENSITY} rise={120} />
+
       {/*
         The code field and the search field sit OUTSIDE the FlatList on purpose.
         As a ListHeaderComponent they would remount whenever the list re-renders,
@@ -84,32 +102,41 @@ export default function ExploreScreen() {
           action={<AuxButton label="Try again" variant="ghost" onPress={() => void refetch()} />}
         />
       ) : (
-        <FlatList
-          data={data}
-          keyExtractor={keyExtractor}
-          renderItem={renderItem}
-          ItemSeparatorComponent={Separator}
-          style={styles.list}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-          ListEmptyComponent={
-            debounced.trim().length > 0 ? (
-              <EmptyState
-                icon={SearchX}
-                title="Nothing matched"
-                description={`No public lounge mentions "${debounced.trim()}".`}
-              />
-            ) : (
-              <EmptyState
-                icon={Compass}
-                title="No public lounges yet"
-                description="Be the first — create one and make it public."
-              />
-            )
-          }
-        />
+        <>
+          <View style={styles.rule}>
+            <Text style={styles.eyebrow}>Public lounges</Text>
+            <Text style={styles.ruleCount}>
+              {`${resultCount} ${resultCount === 1 ? 'result' : 'results'}`}
+            </Text>
+          </View>
+
+          <FlatList
+            data={data}
+            keyExtractor={keyExtractor}
+            renderItem={renderItem}
+            ItemSeparatorComponent={Separator}
+            style={styles.list}
+            contentContainerStyle={styles.listContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            ListEmptyComponent={
+              debounced.trim().length > 0 ? (
+                <EmptyState
+                  icon={SearchX}
+                  title="Nothing matched"
+                  description={`No public lounge mentions "${debounced.trim()}".`}
+                />
+              ) : (
+                <EmptyState
+                  icon={Compass}
+                  title="No public lounges yet"
+                  description="Be the first — create one and make it public."
+                />
+              )
+            }
+          />
+        </>
       )}
     </Screen>
   );
@@ -142,24 +169,36 @@ function JoinByCodeCard({ onJoined }: { onJoined: (loungeId: string) => void }) 
       <View style={styles.codeCard}>
         <Text style={styles.codeTitle}>Have an invite code?</Text>
 
-        <TextField
-          value={code}
-          onChangeText={handleChange}
-          placeholder="A1B2C3D4"
-          autoCapitalize="none"
-          autoComplete="off"
-          maxLength={CODE_LENGTH}
-          error={error ?? undefined}
-        />
+        <View style={styles.codeRow}>
+          <View style={styles.codeField}>
+            <TextField
+              value={code}
+              onChangeText={handleChange}
+              placeholder="A1B2C3D4"
+              autoCapitalize="none"
+              autoComplete="off"
+              maxLength={CODE_LENGTH}
+              error={error ?? undefined}
+            />
+          </View>
 
-        <AuxButton
-          label="Join"
-          icon={KeyRound}
-          size="sm"
-          onPress={handleSubmit}
-          loading={join.isPending}
-          disabled={code.length < CODE_LENGTH}
-        />
+          {/* Wrapped: AuxButton pins itself with `alignSelf`, which would
+              otherwise fight this row. */}
+          <View>
+            <AuxButton
+              label="Join"
+              icon={KeyRound}
+              variant="ghost"
+              size="sm"
+              onPress={handleSubmit}
+              loading={join.isPending}
+              disabled={code.length < CODE_LENGTH}
+            />
+          </View>
+        </View>
+
+        {/* A code is eight characters and you are counting them out. Mono. */}
+        <Text style={styles.codeCounter}>{`${code.length}/${CODE_LENGTH}`}</Text>
       </View>
     </GlassCard>
   );
@@ -185,6 +224,41 @@ const styles = StyleSheet.create({
   codeTitle: {
     ...Type.heading,
     color: Colors.text,
+  },
+  codeRow: {
+    flexDirection: 'row',
+    // Top, not centre: an error message grows the field downwards and the
+    // button must stay level with the input it belongs to.
+    alignItems: 'flex-start',
+    gap: Space.md,
+  },
+  codeField: {
+    flex: 1,
+    minWidth: 0,
+  },
+  codeCounter: {
+    ...Type.mono,
+    color: Colors.muted,
+    textAlign: 'right',
+  },
+  /*
+    Colors.muted, not Colors.faint. The artboards set these eyebrows in the
+    faint ink, but faint is a divider colour here and these are words people
+    have to read; muted is the nearest tone that clears 4.5:1.
+  */
+  eyebrow: {
+    ...Type.monoLabel,
+    color: Colors.muted,
+  },
+  rule: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: Space.md,
+  },
+  ruleCount: {
+    ...Type.monoLabel,
+    color: Colors.muted,
   },
   list: {
     flex: 1,

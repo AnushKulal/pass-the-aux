@@ -5,6 +5,7 @@
 export { BLURHASH_SURFACE } from '@/components/ui/blurhash';
 
 export { Avatar, type AvatarProps } from '@/components/ui/avatar';
+export { Bloom, type BloomProps } from '@/components/ui/bloom';
 export {
   AuxButton,
   type AuxButtonProps,
@@ -16,7 +17,12 @@ export { GlassCard, type GlassCardProps } from '@/components/ui/glass-card';
 export { LivePulse, type LivePulseProps } from '@/components/ui/live-pulse';
 export { ProgressBar, type ProgressBarProps } from '@/components/ui/progress-bar';
 export { Screen, type ScreenProps } from '@/components/ui/screen';
-export { SheetTabs, type SheetTab, type SheetTabsProps } from '@/components/ui/sheet-tabs';
+export {
+  SheetTabs,
+  type SheetTab,
+  type SheetTabsProps,
+  type SheetTabsVariant,
+} from '@/components/ui/sheet-tabs';
 export { Skeleton, type SkeletonProps } from '@/components/ui/skeleton';
 export { TextField, type TextFieldProps } from '@/components/ui/text-field';
 export {

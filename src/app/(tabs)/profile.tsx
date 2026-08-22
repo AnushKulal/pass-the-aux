@@ -1,7 +1,8 @@
 import { router } from 'expo-router';
-import { CalendarDays, ChevronRight, LogOut, Music, Pencil, Settings, Users } from 'lucide-react-native';
+import { ChevronRight, LogOut, Music, Pencil, Settings, Users } from 'lucide-react-native';
 import { memo, useCallback } from 'react';
 import { Alert, FlatList, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 
 import {
   Avatar,
@@ -15,7 +16,15 @@ import {
 import { useMyLounges, type MyLounge } from '@/features/profile/queries';
 import { useAuth } from '@/lib/auth';
 import type { ProfileRow } from '@/lib/database.types';
-import { Colors, Radius, Space, TOUCH_TARGET, Type } from '@/lib/theme';
+import { Bloom, Colors, PointerEvents, Radius, Space, TOUCH_TARGET, Type } from '@/lib/theme';
+
+/**
+ * `Colors.danger` washed back to a tinted outline, per the artboard: sign out is
+ * destructive enough to stay rose, but it is not the loudest thing on a screen
+ * that is mostly about who you are.
+ */
+const DANGER_WASH = 'rgba(242, 101, 126, 0.10)';
+const DANGER_EDGE = 'rgba(242, 101, 126, 0.34)';
 
 export default function ProfileScreen() {
   const toast = useToast();
@@ -36,7 +45,7 @@ export default function ProfileScreen() {
   }, [signOut, toast]);
 
   const renderLounge = useCallback(
-    ({ item }: { item: MyLounge }) => <LoungeCard item={item} />,
+    ({ item }: { item: MyLounge }) => <LoungeRow item={item} />,
     []
   );
 
@@ -50,9 +59,24 @@ export default function ProfileScreen() {
           accessibilityLabel="Settings"
           onPress={() => router.push('/settings/connections')}
           style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}>
-          <Settings size={22} color={Colors.text} />
+          <Settings size={22} color={Colors.text} strokeWidth={1.6} />
         </Pressable>
       }>
+      {/* Signature 1. Fainter than a Session: there is no artwork here, only
+          the people the artwork is for. */}
+      <View style={[styles.bloom, PointerEvents.none]}>
+        <Svg width="100%" height="100%">
+          <Defs>
+            <RadialGradient id="profileBloom" cx="50%" cy="8%" rx="62%" ry="88%">
+              <Stop offset="0" stopColor={Bloom.a} stopOpacity={0.24} />
+              <Stop offset="0.45" stopColor={Bloom.b} stopOpacity={0.13} />
+              <Stop offset="0.76" stopColor={Colors.bg} stopOpacity={0} />
+            </RadialGradient>
+          </Defs>
+          <Rect x="0" y="0" width="100%" height="100%" fill="url(#profileBloom)" />
+        </Svg>
+      </View>
+
       {/*
         A FlatList rather than a ScrollView: a heavy lounge user has dozens of
         memberships, and the identity block rides along as the list header so
@@ -68,6 +92,7 @@ export default function ProfileScreen() {
           <ProfileHeader
             profile={profile}
             loading={loading}
+            count={lounges.data?.length ?? null}
             onEdit={() => router.push('/(auth)/claim-username')}
             onRetry={() => {
               void refreshProfile();
@@ -77,13 +102,14 @@ export default function ProfileScreen() {
         ListEmptyComponent={lounges.isPending ? <LoungeSkeletons /> : <NoLounges />}
         ListFooterComponent={
           <View style={styles.footer}>
-            <AuxButton
-              label="Sign out"
-              icon={LogOut}
-              variant="danger"
-              fullWidth
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Sign out"
               onPress={confirmSignOut}
-            />
+              style={({ pressed }) => [styles.signOut, pressed && styles.pressed]}>
+              <LogOut size={18} color={Colors.danger} strokeWidth={1.6} />
+              <Text style={styles.signOutLabel}>Sign out</Text>
+            </Pressable>
           </View>
         }
       />
@@ -98,11 +124,13 @@ const keyExtractor = (item: MyLounge) => item.lounge.id;
 function ProfileHeader({
   profile,
   loading,
+  count,
   onEdit,
   onRetry,
 }: {
   profile: ProfileRow | null;
   loading: boolean;
+  count: number | null;
   onEdit: () => void;
   onRetry: () => void;
 }) {
@@ -114,7 +142,7 @@ function ProfileHeader({
             <Avatar
               uri={profile.avatar_url}
               name={profile.display_name || profile.username}
-              size={72}
+              size={68}
             />
             <View style={styles.identityText}>
               <Text numberOfLines={1} style={styles.name}>
@@ -123,15 +151,13 @@ function ProfileHeader({
               <Text numberOfLines={1} style={styles.handle}>
                 @{profile.username}
               </Text>
-              <View style={styles.since}>
-                <CalendarDays size={14} color={Colors.muted} />
-                <Text style={styles.sinceText}>Member since {formatMonth(profile.created_at)}</Text>
-              </View>
+              {/* Signature 4: a join date is a measurement, so it is mono. */}
+              <Text style={styles.since}>Member since {formatMonth(profile.created_at)}</Text>
             </View>
           </View>
         ) : loading ? (
           <View style={styles.identity}>
-            <Skeleton width={72} height={72} radius={36} />
+            <Skeleton width={68} height={68} radius={34} />
             <View style={styles.identityText}>
               <Skeleton width="70%" height={22} />
               <Skeleton width="45%" height={18} />
@@ -169,7 +195,12 @@ function ProfileHeader({
 
       <SpotifyRow profile={profile} loading={loading} />
 
-      <Text style={styles.sectionTitle}>Your lounges</Text>
+      <View style={styles.sectionHead}>
+        <Text style={styles.sectionTitle}>Your lounges</Text>
+        {count === null ? null : (
+          <Text style={styles.sectionCount}>{String(count).padStart(2, '0')}</Text>
+        )}
+      </View>
     </View>
   );
 }
@@ -192,7 +223,7 @@ function SpotifyRow({ profile, loading }: { profile: ProfileRow | null; loading:
       <GlassCard>
         <View style={styles.row}>
           <View style={styles.rowIcon}>
-            <Music size={20} color={Colors.muted} />
+            <Music size={20} color={Colors.muted} strokeWidth={1.6} />
           </View>
           <View style={styles.rowText}>
             <Text style={styles.rowTitle}>Spotify</Text>
@@ -200,7 +231,7 @@ function SpotifyRow({ profile, loading }: { profile: ProfileRow | null; loading:
                 different claim from "still checking". */}
             {loading ? <Skeleton width="80%" height={14} /> : <Text style={styles.rowValue}>{status}</Text>}
           </View>
-          <ChevronRight size={20} color={Colors.muted} />
+          <ChevronRight size={20} color={Colors.muted} strokeWidth={1.6} />
         </View>
       </GlassCard>
     </Pressable>
@@ -209,7 +240,7 @@ function SpotifyRow({ profile, loading }: { profile: ProfileRow | null; loading:
 
 /* ------------------------------------------------------------------- list */
 
-const LoungeCard = memo(function LoungeCard({ item }: { item: MyLounge }) {
+const LoungeRow = memo(function LoungeRow({ item }: { item: MyLounge }) {
   const { lounge, role } = item;
 
   return (
@@ -217,21 +248,18 @@ const LoungeCard = memo(function LoungeCard({ item }: { item: MyLounge }) {
       accessibilityRole="button"
       accessibilityLabel={`${lounge.name}. You are ${role === 'owner' ? 'the owner' : `a ${role}`}.`}
       onPress={() => router.push({ pathname: '/lounge/[id]', params: { id: lounge.id } })}
-      style={({ pressed }) => [styles.rowPressable, pressed && styles.pressed]}>
-      <GlassCard>
-        <View style={styles.row}>
-          <Avatar uri={lounge.icon_url} name={lounge.name} size={44} />
-          <View style={styles.rowText}>
-            <Text numberOfLines={1} style={styles.rowTitle}>
-              {lounge.name}
-            </Text>
-            <Text numberOfLines={1} style={styles.rowValue}>
-              {role === 'member' ? 'Member' : role === 'mod' ? 'Moderator' : 'Owner'}
-            </Text>
-          </View>
-          <ChevronRight size={20} color={Colors.muted} />
-        </View>
-      </GlassCard>
+      style={({ pressed }) => [styles.listRow, pressed && styles.pressed]}>
+      <Avatar uri={lounge.icon_url} name={lounge.name} size={40} />
+      <View style={styles.rowText}>
+        <Text numberOfLines={1} style={styles.rowTitle}>
+          {lounge.name}
+        </Text>
+        <Text numberOfLines={1} style={styles.rowValue}>
+          {role === 'member' ? 'Member' : role === 'mod' ? 'Moderator' : 'Owner'}
+        </Text>
+      </View>
+      {/* An affordance glyph, not copy — `faint` is doing divider duty here. */}
+      <ChevronRight size={20} color={Colors.faint} strokeWidth={1.6} />
     </Pressable>
   );
 });
@@ -240,15 +268,13 @@ function LoungeSkeletons() {
   return (
     <View style={styles.skeletons}>
       {[0, 1, 2].map((key) => (
-        <GlassCard key={key}>
-          <View style={styles.row}>
-            <Skeleton width={44} height={44} radius={22} />
-            <View style={styles.rowText}>
-              <Skeleton width="60%" height={18} />
-              <Skeleton width="30%" height={14} />
-            </View>
+        <View key={key} style={styles.listRow}>
+          <Skeleton width={40} height={40} radius={20} />
+          <View style={styles.rowText}>
+            <Skeleton width="60%" height={18} />
+            <Skeleton width="30%" height={14} />
           </View>
-        </GlassCard>
+        </View>
       ))}
     </View>
   );
@@ -298,10 +324,20 @@ function confirmDestructive(
 /* ----------------------------------------------------------------- styles */
 
 const styles = StyleSheet.create({
+  bloom: {
+    position: 'absolute',
+    // Out past the screen gutter so the glow reaches the edges rather than
+    // stopping on the same line the content does.
+    left: -Space.lg,
+    right: -Space.lg,
+    top: 0,
+    height: 340,
+  },
   content: {
-    paddingTop: Space.sm,
+    paddingTop: Space.md,
     paddingBottom: Space.xxl,
-    gap: Space.md,
+    // 8px between adjacent hit areas, per the touch-target spacing rule.
+    gap: Space.sm,
   },
   header: {
     gap: Space.md,
@@ -324,7 +360,7 @@ const styles = StyleSheet.create({
   },
   identityText: {
     flex: 1,
-    gap: Space.xs,
+    gap: 3,
   },
   name: {
     ...Type.title,
@@ -335,13 +371,9 @@ const styles = StyleSheet.create({
     color: Colors.muted,
   },
   since: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space.xs,
-  },
-  sinceText: {
-    ...Type.caption,
+    ...Type.monoLabel,
     color: Colors.muted,
+    marginTop: 3,
   },
   editRow: {
     marginTop: Space.lg,
@@ -362,7 +394,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Colors.surfaceRaised,
+    backgroundColor: Colors.glassStrong,
   },
   rowText: {
     flex: 1,
@@ -376,15 +408,54 @@ const styles = StyleSheet.create({
     ...Type.label,
     color: Colors.muted,
   },
+  sectionHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Space.md,
+    marginTop: Space.md,
+  },
   sectionTitle: {
-    ...Type.heading,
-    color: Colors.text,
-    marginTop: Space.sm,
+    ...Type.monoLabel,
+    color: Colors.muted,
+  },
+  sectionCount: {
+    ...Type.monoLabel,
+    color: Colors.muted,
+  },
+  /**
+   * Hairline-separated rows rather than a stack of cards: the lounges are a
+   * list you scan, and cards would give every one of them the weight of the
+   * identity block above.
+   */
+  listRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.md,
+    minHeight: 56,
+    paddingBottom: Space.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border,
   },
   skeletons: {
-    gap: Space.md,
+    gap: Space.sm,
   },
   footer: {
     marginTop: Space.xl,
+  },
+  signOut: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Space.sm,
+    minHeight: 52,
+    borderRadius: Radius.pill,
+    backgroundColor: DANGER_WASH,
+    borderWidth: 1,
+    borderColor: DANGER_EDGE,
+  },
+  signOutLabel: {
+    ...Type.bodyStrong,
+    color: Colors.danger,
   },
 });

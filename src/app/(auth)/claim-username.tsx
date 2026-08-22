@@ -9,10 +9,12 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
+import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 
-import { AuxButton, Avatar, Screen, TextField, useToast } from '@/components/ui';
+import { AuxButton, Avatar, GlassCard, Screen, TextField, useToast } from '@/components/ui';
 import {
   USERNAME_MAX,
   USERNAME_MIN,
@@ -23,7 +25,7 @@ import {
   type UsernameStatus,
 } from '@/features/profile/queries';
 import { useAuth } from '@/lib/auth';
-import { Colors, Space, Type } from '@/lib/theme';
+import { Bloom, Colors, PointerEvents, Radius, Space, Type } from '@/lib/theme';
 
 export default function ClaimUsernameScreen() {
   const toast = useToast();
@@ -34,6 +36,7 @@ export default function ClaimUsernameScreen() {
   const [displayName, setDisplayName] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
   const [submitted, setSubmitted] = useState(false);
+  const [handleFocused, setHandleFocused] = useState(false);
 
   // The profile row can arrive a beat after this screen mounts (the signup
   // trigger writes it server-side). Seed once, then never stomp on typing.
@@ -125,6 +128,21 @@ export default function ClaimUsernameScreen() {
       title="Your handle"
       scroll={false}
       onBack={pendingUsernameClaim ? undefined : leave}>
+      {/* Signature 1: low and to the left, so the preview glass above it picks
+          up colour instead of sitting on flat ground. */}
+      <View style={[styles.bloom, PointerEvents.none]}>
+        <Svg width="100%" height="100%">
+          <Defs>
+            <RadialGradient id="claimBloom" cx="16%" cy="34%" rx="70%" ry="52%">
+              <Stop offset="0" stopColor={Bloom.a} stopOpacity={0.2} />
+              <Stop offset="0.45" stopColor={Bloom.b} stopOpacity={0.12} />
+              <Stop offset="0.78" stopColor={Colors.bg} stopOpacity={0} />
+            </RadialGradient>
+          </Defs>
+          <Rect x="0" y="0" width="100%" height="100%" fill="url(#claimBloom)" />
+        </Svg>
+      </View>
+
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -138,33 +156,81 @@ export default function ClaimUsernameScreen() {
               : 'Change how you show up in lounges and Sessions.'}
           </Text>
 
-          <View style={styles.preview}>
-            <Avatar uri={avatarProblem ? null : avatarUrl || null} name={displayName || normalized} size={72} />
-            <View style={styles.previewText}>
-              <Text numberOfLines={1} style={styles.previewName}>
-                {displayName.trim() || normalized || 'Your name'}
-              </Text>
-              <Text numberOfLines={1} style={styles.previewHandle}>
-                @{normalized || 'username'}
-              </Text>
+          {/* Live preview of the row everyone else will see you as. */}
+          <GlassCard>
+            <View style={styles.preview}>
+              <Avatar
+                uri={avatarProblem ? null : avatarUrl || null}
+                name={displayName || normalized}
+                size={72}
+              />
+              <View style={styles.previewText}>
+                <Text numberOfLines={1} style={styles.previewName}>
+                  {displayName.trim() || normalized || 'Your name'}
+                </Text>
+                <Text numberOfLines={1} style={styles.previewHandle}>
+                  @{normalized || 'username'}
+                </Text>
+              </View>
             </View>
-          </View>
+          </GlassCard>
 
           <View style={styles.form}>
-            <View>
-              <TextField
-                label="Username"
-                value={username}
-                // Canonicalised on the way in so the field, the preview and the
-                // availability verdict can never disagree about what was typed.
-                onChangeText={(next) => setUsername(normalizeUsername(next))}
-                placeholder="lowercase_and_numbers"
-                autoCapitalize="none"
-                autoComplete="username"
-                maxLength={USERNAME_MAX}
-                error={usernameError}
-              />
+            <View style={styles.field}>
+              <View style={styles.fieldHead}>
+                <Text style={styles.fieldLabel}>Username</Text>
+                {/* Signature 4: a length is a measurement, so it is mono. */}
+                <Text style={styles.count}>
+                  {String(normalized.length).padStart(2, '0')}/{USERNAME_MAX}
+                </Text>
+              </View>
+
+              {/*
+                Composed here rather than with TextField because the artboard
+                puts the `@` inside the control as field furniture, and the kit's
+                input has no prefix slot.
+              */}
+              <View
+                style={[
+                  styles.control,
+                  handleFocused && styles.controlFocused,
+                  usernameError ? styles.controlError : null,
+                ]}>
+                <Text style={styles.at}>@</Text>
+                <TextInput
+                  value={username}
+                  // Canonicalised on the way in so the field, the preview and the
+                  // availability verdict can never disagree about what was typed.
+                  onChangeText={(next) => setUsername(normalizeUsername(next))}
+                  onFocus={() => setHandleFocused(true)}
+                  onBlur={() => setHandleFocused(false)}
+                  accessibilityLabel="Username"
+                  placeholder="lowercase_and_numbers"
+                  placeholderTextColor={Colors.faint}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  autoComplete="username"
+                  maxLength={USERNAME_MAX}
+                  selectionColor={Colors.text}
+                  style={styles.input}
+                />
+              </View>
+
+              {/* Worded and weighted exactly like the kit's own field error, so
+                  a format problem here does not look like a different species of
+                  problem from one on the fields below. */}
+              {usernameError ? (
+                <Text accessibilityLiveRegion="polite" style={styles.messageError}>
+                  {usernameError}
+                </Text>
+              ) : null}
+
               <AvailabilityHint status={availability.status} username={normalized} />
+
+              <Text style={styles.rules}>
+                {USERNAME_MIN} to {USERNAME_MAX} characters. Lowercase letters, numbers and
+                underscores only.
+              </Text>
             </View>
 
             <TextField
@@ -187,10 +253,11 @@ export default function ClaimUsernameScreen() {
             />
           </View>
 
+          <View style={styles.gap} />
+
           <View style={styles.actions}>
             <AuxButton
               label="Save"
-              size="lg"
               fullWidth
               onPress={() => {
                 void save();
@@ -208,11 +275,6 @@ export default function ClaimUsernameScreen() {
               />
             ) : null}
           </View>
-
-          <Text style={styles.rules}>
-            {USERNAME_MIN} to {USERNAME_MAX} characters. Lowercase letters, numbers and underscores
-            only.
-          </Text>
         </ScrollView>
       </KeyboardAvoidingView>
     </Screen>
@@ -226,9 +288,9 @@ function AvailabilityHint({ status, username }: { status: UsernameStatus; userna
 
   if (status === 'checking') {
     return (
-      <View style={styles.hint} accessibilityLiveRegion="polite">
+      <View style={styles.messageRow} accessibilityLiveRegion="polite">
         <ActivityIndicator size="small" color={Colors.muted} />
-        <Text style={styles.hintMuted}>Checking…</Text>
+        <Text style={styles.messageMuted}>Checking…</Text>
       </View>
     );
   }
@@ -236,13 +298,18 @@ function AvailabilityHint({ status, username }: { status: UsernameStatus; userna
   const taken = status === 'taken';
 
   return (
-    <View style={styles.hint} accessibilityLiveRegion="polite">
+    <View style={styles.messageRow} accessibilityLiveRegion="polite">
       {taken ? (
-        <X size={18} color={Colors.danger} />
+        <X size={18} color={Colors.danger} strokeWidth={1.6} />
       ) : (
-        <Check size={18} color={Colors.accent} />
+        /*
+          Warm white, NOT Colors.accent. A free handle is a success, but the
+          accent is reserved for live/playing/joinable — spending it on a form
+          verdict is exactly what would stop the Feed being scannable.
+        */
+        <Check size={18} color={Colors.text} strokeWidth={1.6} />
       )}
-      <Text style={taken ? styles.hintTaken : styles.hintFree}>
+      <Text style={taken ? styles.messageError : styles.messageOk}>
         {taken ? `@${username} is taken` : `@${username} is yours`}
       </Text>
     </View>
@@ -263,6 +330,15 @@ function avatarUrlProblem(value: string): string | undefined {
 const styles = StyleSheet.create({
   flex: {
     flex: 1,
+  },
+  bloom: {
+    position: 'absolute',
+    // Out past the screen gutter so the glow reaches the edges rather than
+    // stopping on the same line the content does.
+    left: -Space.lg,
+    right: -Space.lg,
+    top: 0,
+    height: 430,
   },
   content: {
     flexGrow: 1,
@@ -294,33 +370,90 @@ const styles = StyleSheet.create({
   form: {
     gap: Space.lg,
   },
-  hint: {
+  field: {
+    gap: Space.xs,
+  },
+  fieldHead: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: Space.md,
+  },
+  fieldLabel: {
+    ...Type.label,
+    color: Colors.muted,
+  },
+  count: {
+    ...Type.mono,
+    color: Colors.muted,
+  },
+  /*
+    Deliberately identical to the kit's TextField shell — same 48px floor, same
+    1.5px border held across every state — so the three fields on this screen
+    read as one set even though this one is composed locally.
+  */
+  control: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    minHeight: 48,
+    paddingHorizontal: Space.md,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.surface,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+  },
+  controlFocused: {
+    backgroundColor: Colors.surfaceRaised,
+    borderColor: Colors.text,
+  },
+  /** Error outranks focus on the border, so the reason is never hidden. */
+  controlError: {
+    borderColor: Colors.danger,
+  },
+  /** Furniture, not content — the mono face marks it as part of the control. */
+  at: {
+    ...Type.mono,
+    fontSize: 16,
+    lineHeight: 22,
+    color: Colors.muted,
+  },
+  input: {
+    ...Type.body,
+    flex: 1,
+    color: Colors.text,
+    paddingVertical: Space.sm,
+  },
+  messageRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Space.sm,
     // Reserved height so the fields below do not jump as the verdict changes.
     minHeight: 24,
-    marginTop: Space.xs,
   },
-  hintMuted: {
+  messageMuted: {
     ...Type.label,
     color: Colors.muted,
   },
-  hintFree: {
+  messageOk: {
     ...Type.label,
-    color: Colors.accent,
+    color: Colors.text,
   },
-  hintTaken: {
+  messageError: {
     ...Type.label,
     color: Colors.danger,
   },
-  actions: {
-    gap: Space.md,
-  },
   rules: {
-    ...Type.caption,
+    ...Type.label,
     // The format constraints are the copy that gets you past this screen —
     // `faint` fails AA on bg, so they have to be `muted`.
     color: Colors.muted,
+  },
+  gap: {
+    flexGrow: 1,
+    minHeight: Space.xs,
+  },
+  actions: {
+    gap: Space.md,
   },
 });

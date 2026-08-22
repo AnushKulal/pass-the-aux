@@ -1,13 +1,25 @@
+/**
+ * Lounges — the rooms I belong to.
+ *
+ * Fainter atmosphere than the Feed and no grid: the artwork is two screens
+ * away from here, and these are only the doorways to it. What the cards carry
+ * instead are the mono counts, and one live pulse per lounge that has a Session
+ * actually running in it.
+ */
+
 import { router } from 'expo-router';
 import { KeyRound, Plus, Users, WifiOff } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
 import { FlatList, RefreshControl, StyleSheet, View, type ListRenderItem } from 'react-native';
 
+import { BloomBackdrop } from '@/components/atmosphere';
 import { JoinCodeModal } from '@/components/lounge/join-code-modal';
 import { LoungeCard, LoungeListSkeleton } from '@/components/lounge/lounge-card';
 import { AuxButton, EmptyState, Screen, useToast } from '@/components/ui';
 import { loungeErrorMessage, useMyLounges, type LoungeSummary } from '@/features/lounges/queries';
 import { Colors, Space } from '@/lib/theme';
+
+const BLOOM_INTENSITY = 0.24;
 
 export default function LoungesScreen() {
   const toast = useToast();
@@ -45,8 +57,15 @@ export default function LoungesScreen() {
 
   return (
     <Screen title="Lounges">
+      <BloomBackdrop intensity={BLOOM_INTENSITY} rise={130} height={360} />
+
+      {/*
+        Both actions are outlines. Neither is the primary path — you either have
+        a code or you do not — and a filled button here would compete with the
+        live pulses in the list below it.
+      */}
       <View style={styles.actions}>
-        <AuxButton label="Create" icon={Plus} size="sm" onPress={openCreate} />
+        <AuxButton label="Create" icon={Plus} variant="ghost" size="sm" onPress={openCreate} />
         <AuxButton
           label="Join with code"
           icon={KeyRound}

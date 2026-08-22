@@ -5,12 +5,17 @@
  * everything here is push-driven: the rows arrive over Realtime presence, and
  * the only queries are the two slow-moving lists behind them (my lounges, my
  * Sessions).
+ *
+ * Visually it is the direction's thesis statement: the bloom is tinted by the
+ * artwork at the top of the list, the 25px grid runs under everything, every
+ * number that measures is mono, and Colors.accent appears only where there is
+ * a Session to walk into.
  */
 
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { Radio, Users, WifiOff } from 'lucide-react-native';
-import { useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import {
   FlatList,
   Pressable,
@@ -21,6 +26,7 @@ import {
   type ListRenderItemInfo,
 } from 'react-native';
 
+import { BloomBackdrop, GridOverlay } from '@/components/atmosphere';
 import { NowPlayingCard } from '@/components/feed/now-playing-card';
 import { AuxButton, EmptyState, LivePulse, Screen, Skeleton } from '@/components/ui';
 import {
@@ -44,6 +50,13 @@ import type { RoomTimeline } from '@/playback/sync-controller';
 
 const MY_SESSIONS_KEY = 'my-sessions';
 const SKELETON_ROWS = [0, 1, 2, 3];
+
+/** Matches the card: 38pt avatar, 54pt artwork. A skeleton that resizes on load is worse than none. */
+const SKELETON_AVATAR = 38;
+const SKELETON_ART = 54;
+
+const SESSION_CHIP_WIDTH = 156;
+const HEAD_DOT = 6;
 
 /** A live Session I am already a participant in. */
 type ActiveSession = {
@@ -134,13 +147,27 @@ const renderItem = ({ item }: ListRenderItemInfo<FeedEntry>) => <NowPlayingCard 
 
 const Separator = () => <View style={styles.separator} />;
 
+/**
+ * The header readout. A count is a measurement, so it is mono — and the dot
+ * beside it is `muted`, not `accent`: this counts everyone listening, including
+ * the people nobody can join.
+ */
+const HeadCount = memo(function HeadCount({ count }: { count: number }) {
+  return (
+    <View style={styles.headCount}>
+      <View style={styles.headDot} />
+      <Text style={styles.headLabel}>{`${count} listening`}</Text>
+    </View>
+  );
+});
+
 function FeedSkeleton() {
   return (
     <View style={styles.skeletonList}>
       {SKELETON_ROWS.map((row) => (
         <View key={row} style={styles.skeletonRow}>
-          <Skeleton width={40} height={40} radius={Radius.pill} />
-          <Skeleton width={56} height={56} radius={Radius.md} />
+          <Skeleton width={SKELETON_AVATAR} height={SKELETON_AVATAR} radius={Radius.pill} />
+          <Skeleton width={SKELETON_ART} height={SKELETON_ART} radius={Radius.md} />
           <View style={styles.skeletonText}>
             <Skeleton width="75%" height={16} />
             <Skeleton width="50%" height={12} />
@@ -162,7 +189,7 @@ function SessionStrip({
 }) {
   return (
     <View style={styles.strip}>
-      <Text style={styles.stripLabel}>Your Sessions</Text>
+      <Text style={styles.eyebrow}>Your Sessions</Text>
 
       <FlatList
         horizontal
@@ -194,6 +221,22 @@ function SessionStrip({
     </View>
   );
 }
+
+/**
+ * The rule above the list. The joinable count on the right is the only place
+ * the screen explains its own colour: that number is green because those rows
+ * are green, and both mean the same thing.
+ */
+const SectionRule = memo(function SectionRule({ joinable }: { joinable: number }) {
+  return (
+    <View style={styles.rule}>
+      <Text style={styles.eyebrow}>Listening now</Text>
+      {joinable > 0 ? (
+        <Text style={styles.joinable}>{`${joinable} joinable`}</Text>
+      ) : null}
+    </View>
+  );
+});
 
 // ------------------------------------------------------------------ the screen
 
@@ -287,13 +330,31 @@ export default function FeedScreen() {
   }, [queryClient]);
 
   const showSkeleton = lounges.isPending || (!ready && !lounges.isError);
+  const hasRows = !showSkeleton && entries.length > 0;
+
+  const joinable = useMemo(
+    () => entries.reduce((total, entry) => total + (entry.roomId === null ? 0 : 1), 0),
+    [entries]
+  );
+
+  /**
+   * The bloom takes its hue from the row at the top of the list, so the screen
+   * is lit by whatever is playing loudest right now. Keyed on the artwork URL
+   * rather than the pixels: sampling a remote image would put a decode on the
+   * Feed's critical path for a decorative gradient.
+   */
+  const bloomSeed = entries[0]?.artworkUrl ?? entries[0]?.userId ?? null;
 
   const header = useMemo(
-    () =>
-      sessionList.length > 0 ? (
-        <SessionStrip sessions={sessionList} loungeNames={loungeNames} onOpen={openRoom} />
-      ) : null,
-    [sessionList, loungeNames, openRoom]
+    () => (
+      <>
+        {sessionList.length > 0 ? (
+          <SessionStrip sessions={sessionList} loungeNames={loungeNames} onOpen={openRoom} />
+        ) : null}
+        {hasRows ? <SectionRule joinable={joinable} /> : null}
+      </>
+    ),
+    [sessionList, loungeNames, openRoom, hasRows, joinable]
   );
 
   const empty = useMemo(() => {
@@ -346,7 +407,13 @@ export default function FeedScreen() {
   }, [showSkeleton, lounges.isError, loungeList.length, onRefresh, router]);
 
   return (
-    <Screen title="Now playing">
+    <Screen title="Now playing" right={<HeadCount count={hasRows ? entries.length : 0} />}>
+      {/* Atmosphere first, so every row paints over it. Both layers are
+          non-interactive and bleed past the gutters on purpose; the grid sits
+          on top of the bloom so the lattice stays legible through the glow. */}
+      <BloomBackdrop seed={bloomSeed} intensity={hasRows ? 0.4 : 0.18} />
+      <GridOverlay />
+
       <FlatList
         data={showSkeleton ? [] : entries}
         keyExtractor={keyExtractor}
@@ -385,33 +452,72 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
-  strip: {
+  headCount: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: Space.sm,
-    paddingBottom: Space.lg,
+    paddingHorizontal: Space.md,
+    paddingVertical: Space.xs,
+    borderRadius: Radius.pill,
+    backgroundColor: Colors.glass,
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
-  stripLabel: {
-    ...Type.label,
+  headDot: {
+    width: HEAD_DOT,
+    height: HEAD_DOT,
+    borderRadius: Radius.pill,
+    backgroundColor: Colors.muted,
+  },
+  headLabel: {
+    ...Type.monoLabel,
     color: Colors.muted,
   },
+
+  /*
+    Colors.muted, not Colors.faint. The artboards set these eyebrows in the
+    faint ink, but faint is a divider colour here and these are words people
+    have to read; muted is the nearest tone that clears 4.5:1.
+  */
+  eyebrow: {
+    ...Type.monoLabel,
+    color: Colors.muted,
+  },
+  rule: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: Space.md,
+  },
+  joinable: {
+    ...Type.monoLabel,
+    color: Colors.accent,
+  },
+
+  strip: {
+    gap: Space.md,
+    paddingBottom: Space.xl,
+  },
   stripRow: {
-    gap: Space.sm,
+    gap: Space.md,
     paddingRight: Space.xs,
   },
   session: {
-    minWidth: 168,
-    maxWidth: 240,
-    minHeight: TOUCH_TARGET + Space.md,
+    width: SESSION_CHIP_WIDTH,
+    minHeight: TOUCH_TARGET + Space.lg,
     justifyContent: 'center',
-    gap: 2,
+    gap: 3,
     paddingVertical: Space.sm,
     paddingHorizontal: Space.md,
     borderRadius: Radius.md,
-    backgroundColor: Colors.surfaceRaised,
+    // Glass rather than a solid block: these chips sit inside the bloom and
+    // should pick its colour up.
+    backgroundColor: Colors.glass,
     borderWidth: 1,
     borderColor: Colors.border,
   },
   sessionPressed: {
-    opacity: 0.7,
+    opacity: 0.72,
   },
   sessionTop: {
     flexDirection: 'row',
@@ -434,10 +540,10 @@ const styles = StyleSheet.create({
   skeletonRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Space.sm,
+    gap: Space.md,
     padding: Space.md,
     borderRadius: Radius.lg,
-    backgroundColor: Colors.surface,
+    backgroundColor: Colors.glass,
     borderWidth: 1,
     borderColor: Colors.border,
   },

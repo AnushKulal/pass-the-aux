@@ -1,12 +1,13 @@
 import { Redirect, router } from 'expo-router';
 import { Info, Music, Unlink } from 'lucide-react-native';
 import { useEffect } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 
-import { AuxButton, GlassCard, Screen, Skeleton, useToast } from '@/components/ui';
+import { AuxButton, GlassCard, Screen, SheetTabs, Skeleton, useToast } from '@/components/ui';
 import { useSpotifyLink } from '@/features/spotify/use-spotify-link';
 import { useAuth } from '@/lib/auth';
-import { Colors, Radius, Space, TOUCH_TARGET, Type } from '@/lib/theme';
+import { Bloom, Colors, PointerEvents, Radius, Space, Type } from '@/lib/theme';
 import { usePlayback, type SourcePreference } from '@/playback/store';
 
 /** Resolved link state. "free" is a normal, supported way to use Aux. */
@@ -24,6 +25,8 @@ const SOURCE_OPTIONS: { value: SourcePreference; title: string; detail: string }
     detail: 'Ignores Spotify even on Premium. Useful if Spotify keeps handing playback to another device.',
   },
 ];
+
+const SOURCE_TABS = SOURCE_OPTIONS.map((option) => ({ key: option.value, label: option.title }));
 
 export default function ConnectionsScreen() {
   const toast = useToast();
@@ -47,6 +50,7 @@ export default function ConnectionsScreen() {
       : 'free';
 
   const overridden = state === 'premium' && source === 'youtube';
+  const sourceDetail = SOURCE_OPTIONS.find((option) => option.value === source)?.detail ?? '';
 
   // This screen sits outside both guarded groups, so a deep link can land here
   // signed out. Without this it would render "Not connected" to a stranger.
@@ -60,6 +64,21 @@ export default function ConnectionsScreen() {
         if (router.canGoBack()) router.back();
         else router.replace('/(tabs)/profile');
       }}>
+      {/* Signature 1, at its faintest: settings sit further from the artwork
+          than anything else in the app. */}
+      <View style={[styles.bloom, PointerEvents.none]}>
+        <Svg width="100%" height="100%">
+          <Defs>
+            <RadialGradient id="connectionsBloom" cx="50%" cy="6%" rx="60%" ry="88%">
+              <Stop offset="0" stopColor={Bloom.a} stopOpacity={0.2} />
+              <Stop offset="0.45" stopColor={Bloom.b} stopOpacity={0.11} />
+              <Stop offset="0.76" stopColor={Colors.bg} stopOpacity={0} />
+            </RadialGradient>
+          </Defs>
+          <Rect x="0" y="0" width="100%" height="100%" fill="url(#connectionsBloom)" />
+        </Svg>
+      </View>
+
       <View style={styles.stack}>
         {loading ? (
           <SpotifyCardSkeleton />
@@ -82,28 +101,33 @@ export default function ConnectionsScreen() {
           <Text style={styles.sectionLede}>
             How Aux decides where the audio for a Session comes from.
           </Text>
+
+          {/* No loading branch: the store holds the preference synchronously,
+              and setSourcePreference re-picks the adapter mid-Session. */}
+          {/* Pill segments, per the artboard: "Always YouTube" is a word label,
+              and a stored source preference is not a live state. */}
+          <SheetTabs
+            tabs={SOURCE_TABS}
+            active={source}
+            variant="segmented"
+            onChange={(next) => {
+              usePlayback
+                .getState()
+                .setSourcePreference(next === 'youtube' ? 'youtube' : 'auto');
+            }}
+          />
+
+          <Text style={styles.sectionDetail}>{sourceDetail}</Text>
         </View>
 
-        <GlassCard padded={false}>
-          <View style={styles.options} accessibilityRole="radiogroup">
-            {/* No loading branch: the store holds the preference synchronously,
-                and setSourcePreference re-picks the adapter mid-Session. */}
-            {SOURCE_OPTIONS.map((option) => (
-              <SourceOption
-                key={option.value}
-                title={option.title}
-                detail={option.detail}
-                selected={source === option.value}
-                onSelect={() => usePlayback.getState().setSourcePreference(option.value)}
-              />
-            ))}
-          </View>
-        </GlassCard>
+        <View style={styles.gap} />
 
-        <Text style={styles.footnote}>
-          Your choice is stored on this device only, so each phone you sign in on can play from a
-          different source.
-        </Text>
+        <View style={styles.footnoteRow}>
+          <Text style={styles.footnote}>
+            Your choice is stored on this device only, so each phone you sign in on can play from a
+            different source.
+          </Text>
+        </View>
       </View>
     </Screen>
   );
@@ -141,10 +165,11 @@ function SpotifyCard({
     <GlassCard>
       <View style={styles.cardHead}>
         <View style={styles.tile}>
-          <Music size={22} color={Colors.muted} />
+          <Music size={22} color={Colors.muted} strokeWidth={1.6} />
         </View>
         <View style={styles.cardHeadText}>
           <Text style={styles.cardTitle}>Spotify</Text>
+          {/* Signature 4: a connection state is a readout, so it is mono. */}
           <View style={styles.badge}>
             <Text style={styles.badgeText}>{BADGE[state]}</Text>
           </View>
@@ -155,13 +180,13 @@ function SpotifyCard({
 
       {state === 'free' ? (
         /*
-          Deliberately NOT Colors.danger. A free Spotify account is a supported
-          configuration, not a failure — the app works end to end, it just uses
-          YouTube for audio. Painting this red would tell the user to go fix
-          something that is not broken.
+          Colors.warn at most, and never Colors.danger. A free Spotify account is
+          a supported configuration, not a failure — the app works end to end, it
+          just uses YouTube for audio. Painting this red would tell the user to
+          go fix something that is not broken.
         */
         <View style={styles.notice}>
-          <Info size={18} color={Colors.muted} />
+          <Info size={18} color={Colors.warn} strokeWidth={1.6} />
           <Text style={styles.noticeText}>
             Nothing is broken and nothing is missing. Search, queueing, chat and sync all work
             exactly the same — only the audio comes from YouTube.
@@ -171,7 +196,7 @@ function SpotifyCard({
 
       {overridden ? (
         <View style={styles.notice}>
-          <Info size={18} color={Colors.muted} />
+          <Info size={18} color={Colors.warn} strokeWidth={1.6} />
           <Text style={styles.noticeText}>
             Playback source is set to Always YouTube below, so Sessions are not using Spotify right
             now.
@@ -215,42 +240,18 @@ function SpotifyCardSkeleton() {
   );
 }
 
-function SourceOption({
-  title,
-  detail,
-  selected,
-  onSelect,
-}: {
-  title: string;
-  detail: string;
-  selected: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="radio"
-      accessibilityState={{ selected, checked: selected }}
-      accessibilityLabel={title}
-      accessibilityHint={detail}
-      onPress={onSelect}
-      style={({ pressed }) => [
-        styles.option,
-        selected && styles.optionSelected,
-        pressed && styles.optionPressed,
-      ]}>
-      <View style={[styles.radio, selected && styles.radioOn]}>
-        {selected ? <View style={styles.radioDot} /> : null}
-      </View>
-      <View style={styles.optionText}>
-        <Text style={styles.optionTitle}>{title}</Text>
-        <Text style={styles.optionDetail}>{detail}</Text>
-      </View>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
+  bloom: {
+    position: 'absolute',
+    // Out past the screen gutter so the glow reaches the edges rather than
+    // stopping on the same line the content does.
+    left: -Space.lg,
+    right: -Space.lg,
+    top: 0,
+    height: 320,
+  },
   stack: {
+    flexGrow: 1,
     paddingTop: Space.sm,
     gap: Space.lg,
   },
@@ -265,7 +266,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Colors.surfaceRaised,
+    backgroundColor: Colors.glassStrong,
   },
   cardHeadText: {
     flex: 1,
@@ -277,15 +278,15 @@ const styles = StyleSheet.create({
     color: Colors.text,
   },
   badge: {
-    paddingHorizontal: Space.sm,
-    paddingVertical: 2,
+    paddingHorizontal: 9,
+    paddingVertical: Space.xs,
     borderRadius: Radius.pill,
-    backgroundColor: Colors.surfaceRaised,
+    backgroundColor: Colors.glass,
     borderWidth: 1,
     borderColor: Colors.border,
   },
   badgeText: {
-    ...Type.caption,
+    ...Type.monoLabel,
     color: Colors.muted,
   },
   body: {
@@ -299,7 +300,7 @@ const styles = StyleSheet.create({
     marginTop: Space.md,
     padding: Space.md,
     borderRadius: Radius.md,
-    backgroundColor: Colors.surfaceRaised,
+    backgroundColor: Colors.glass,
   },
   noticeText: {
     ...Type.body,
@@ -314,76 +315,35 @@ const styles = StyleSheet.create({
     gap: Space.sm,
   },
   section: {
-    gap: Space.xs,
+    gap: Space.sm,
     marginTop: Space.sm,
   },
   sectionTitle: {
-    ...Type.heading,
-    color: Colors.text,
+    ...Type.monoLabel,
+    color: Colors.muted,
   },
   sectionLede: {
     ...Type.body,
     color: Colors.muted,
   },
-  options: {
-    padding: Space.sm,
-    // 8px between adjacent hit areas, per the touch-target spacing rule.
-    gap: Space.sm,
-  },
-  option: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: Space.md,
-    minHeight: TOUCH_TARGET + Space.md,
-    padding: Space.md,
-    borderRadius: Radius.md,
-  },
-  optionSelected: {
-    backgroundColor: Colors.surfaceRaised,
-  },
-  optionPressed: {
-    opacity: 0.75,
-  },
-  radio: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 2,
-    borderColor: Colors.muted,
-    alignItems: 'center',
-    justifyContent: 'center',
-    // Optically aligns the control with the cap height of the title beside it.
-    marginTop: 2,
-  },
-  /*
-    White, not Colors.primary: indigo-on-indigo lands around 1.5:1 against the
-    glass card, so the "on" state would be invisible on a phone in a dark room —
-    which is the only place this app gets used.
-  */
-  radioOn: {
-    borderColor: Colors.text,
-  },
-  radioDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: Colors.text,
-  },
-  optionText: {
-    flex: 1,
-    gap: Space.xs,
-  },
-  optionTitle: {
-    ...Type.bodyStrong,
-    color: Colors.text,
-  },
-  optionDetail: {
-    ...Type.label,
+  /** The consequence of the segment above it, not a caption for the screen. */
+  sectionDetail: {
+    ...Type.body,
     color: Colors.muted,
+    marginTop: Space.xs,
+  },
+  gap: {
+    flexGrow: 1,
+    minHeight: Space.lg,
+  },
+  footnoteRow: {
+    paddingTop: Space.md,
+    marginBottom: Space.lg,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
   },
   footnote: {
     ...Type.label,
     color: Colors.muted,
-    marginBottom: Space.xl,
   },
 });

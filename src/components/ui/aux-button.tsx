@@ -20,32 +20,47 @@ export type AuxButtonProps = {
   fullWidth?: boolean;
 };
 
-/** Pressed-state washes. Light fills get darkened, dark fills get lightened. */
+/**
+ * Pressed-state washes. Bright fills get darkened by the ground colour, dark
+ * fills get lifted with white — the artboard's PRESSED cell is a flat
+ * rgba(14,10,22,.20) sheet over the label, not a scale or an opacity drop.
+ */
 const PRESS_LIGHTEN = 'rgba(255, 255, 255, 0.18)';
-const PRESS_DARKEN = 'rgba(15, 15, 35, 0.20)';
+const PRESS_DARKEN = 'rgba(14, 10, 22, 0.20)';
 
 const VARIANTS: Record<
   AuxButtonVariant,
   { bg: string; fg: string; border: string; press: string }
 > = {
+  /*
+    Signal Afterglow's non-live fill: the bloom's violet, darkened until
+    Colors.text clears 4.5:1 on it (7.7:1 measured). Primary actions belong to
+    the atmosphere rather than competing with the one colour that means "live".
+  */
   primary: { bg: Colors.primary, fg: Colors.text, border: 'transparent', press: PRESS_LIGHTEN },
   /*
     Accent and danger are both bright fills. Colors.text on either falls below
-    4.5:1 (green ~1.9:1, rose ~3.6:1), so both take the near-black bg colour as
-    their label — 6.9:1 and 5.2:1 respectively. Do not "fix" these back to white.
+    4.5:1 (aqua ~1.4:1, rose ~3.6:1), so both take the near-black ground as their
+    label — 12.4:1 and 5.2:1 respectively. Do not "fix" these back to white.
+
+    `accent` is the reserved colour: Play, Join, Go on aux, Start a Session. A
+    plain confirm or a decorative CTA must use `primary`.
   */
   accent: { bg: Colors.accent, fg: Colors.bg, border: 'transparent', press: PRESS_DARKEN },
   danger: { bg: Colors.danger, fg: Colors.bg, border: 'transparent', press: PRESS_DARKEN },
-  ghost: { bg: 'transparent', fg: Colors.text, border: Colors.border, press: PRESS_LIGHTEN },
+  /* Ghost carries the brighter hairline so it reads as an outline, not a divider. */
+  ghost: { bg: 'transparent', fg: Colors.text, border: Colors.borderBright, press: PRESS_LIGHTEN },
 };
 
 const SIZES: Record<
   AuxButtonSize,
   { minHeight: number; paddingHorizontal: number; gap: number; icon: number }
 > = {
+  // Heights and gutters come straight off the artboard's button matrix:
+  // sm 44 / 16, md 52 / 24, lg 58 / 32.
   sm: { minHeight: TOUCH_TARGET, paddingHorizontal: Space.lg, gap: Space.sm, icon: 16 },
-  md: { minHeight: 52, paddingHorizontal: Space.xl, gap: Space.sm, icon: 18 },
-  lg: { minHeight: 58, paddingHorizontal: Space.xxl, gap: Space.md, icon: 20 },
+  md: { minHeight: 52, paddingHorizontal: Space.xxl, gap: Space.sm, icon: 18 },
+  lg: { minHeight: 58, paddingHorizontal: Space.xxxl, gap: Space.md, icon: 20 },
 };
 
 export function AuxButton({

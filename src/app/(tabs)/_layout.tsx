@@ -1,19 +1,23 @@
 import { Redirect } from 'expo-router';
 import { Tabs } from 'expo-router/js-tabs';
 import { Compass, House, User, Users, type LucideIcon } from 'lucide-react-native';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/lib/auth';
-import { Colors, Fonts, Space } from '@/lib/theme';
+import { Colors, Fonts, Radius, Space, Type } from '@/lib/theme';
 
 /**
  * Content height of the bar, above the device's bottom safe-area inset.
- * 60 keeps every tab item comfortably past the 44pt minimum target once the
- * icon and label are stacked.
+ * The artboard's 60pt band plus the 1pt hairline: an icon plate, a 4pt gap and
+ * a label, with every item comfortably past the 44pt minimum target.
  */
-const TAB_BAR_CONTENT_HEIGHT = 60;
+const TAB_BAR_CONTENT_HEIGHT = 62;
 const ICON_SIZE = 24;
+
+/** The plate behind the selected icon. Wider than the glyph, so it reads as a key. */
+const PLATE_WIDTH = 44;
+const PLATE_HEIGHT = 30;
 
 /**
  * Builds a `tabBarIcon` renderer.
@@ -26,13 +30,19 @@ const ICON_SIZE = 24;
 function tabIcon(Icon: LucideIcon) {
   return function TabIcon({ focused }: { focused: boolean }) {
     return (
-      <Icon
-        size={ICON_SIZE}
-        color={focused ? Colors.text : Colors.muted}
-        // A slightly heavier stroke reads as "selected" even for users who
-        // cannot separate the two tints.
-        strokeWidth={focused ? 2.4 : 2}
-      />
+      <View style={[styles.plate, focused && styles.plateActive]}>
+        <Icon
+          size={ICON_SIZE}
+          color={focused ? Colors.text : Colors.muted}
+          /*
+            1.6 is the system's stroke. Selection is carried by weight and by a
+            glass plate rather than by a tint, because the one tint that would
+            read loudest here — Colors.accent — means "live", and the bar sits
+            directly under Feed rows that use it for exactly that.
+          */
+          strokeWidth={focused ? 2.2 : 1.6}
+        />
+      </View>
     );
   };
 }
@@ -77,7 +87,7 @@ export default function TabsLayout() {
          * A numeric `height` here overrides react-navigation's own inset math,
          * so we add the inset back explicitly. The bar's default
          * `paddingBottom: insets.bottom` still applies underneath, which is
-         * what keeps the 60pt of content clear of the home indicator.
+         * what keeps the content band clear of the home indicator.
          */
         tabBarStyle: [styles.tabBar, { height: TAB_BAR_CONTENT_HEIGHT + insets.bottom }],
       }}>
@@ -119,6 +129,12 @@ export default function TabsLayout() {
 
 const styles = StyleSheet.create({
   tabBar: {
+    /*
+      Solid surface, not glass. The bar is the one element that must never take
+      colour from the bloom behind it: it is the app's fixed frame of reference,
+      and a translucent bar over a Feed row's artwork glow changes tint as the
+      list scrolls under it.
+    */
     backgroundColor: Colors.surface,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: Colors.border,
@@ -127,10 +143,22 @@ const styles = StyleSheet.create({
     // would add a competing shadow on top of it.
     elevation: 0,
   },
+  plate: {
+    width: PLATE_WIDTH,
+    height: PLATE_HEIGHT,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radius.md,
+  },
+  plateActive: {
+    backgroundColor: Colors.glassStrong,
+  },
   label: {
     fontFamily: Fonts.bodyMedium,
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: Type.caption.fontSize,
+    // Tighter than Type.caption's 18: the bar's height budget is fixed, and the
+    // label sits directly under the plate with nothing to lead into.
+    lineHeight: 15,
   },
   item: {
     paddingVertical: Space.xs,

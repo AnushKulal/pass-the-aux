@@ -10,6 +10,7 @@
  */
 
 import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Music, Search, X } from 'lucide-react-native';
 import { memo, useCallback, useState } from 'react';
 import {
@@ -42,9 +43,26 @@ import {
   type TrackResolution,
 } from '@/features/tracks/resolve';
 import { useTrackSearch, type TrackSearchResult } from '@/features/tracks/search';
-import { Colors, Duration, Radius, Space, TOUCH_TARGET, Type } from '@/lib/theme';
+import {
+  Bloom,
+  Colors,
+  Duration,
+  PointerEvents,
+  Radius,
+  Space,
+  TOUCH_TARGET,
+  Type,
+} from '@/lib/theme';
 
 const ART_SIZE = 48;
+
+/**
+ * The bloom, dialled right down for a sheet. `expo-linear-gradient` has no
+ * radial mode, so this is a vertical wash off the top edge — enough atmosphere
+ * for the glass rows below to tint against, not enough to compete with them.
+ * Opacity lives on the view so the stops stay pure Bloom tokens.
+ */
+const SHEET_BLOOM = [Bloom.b, Bloom.c, 'transparent'] as const;
 const SKELETON_ROWS = 5;
 /** More than three alternatives is a research task, not a choice. */
 const MAX_CANDIDATES = 3;
@@ -172,14 +190,28 @@ export function AddTrackSheet({ roomId, visible, onClose }: AddTrackSheetProps) 
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.keyboard}>
           <View style={[styles.sheet, { paddingBottom: insets.bottom + Space.lg }]}>
+            <LinearGradient
+              colors={SHEET_BLOOM}
+              start={{ x: 0.5, y: 0 }}
+              end={{ x: 0.5, y: 1 }}
+              style={[styles.bloom, PointerEvents.none]}
+            />
+
+            <View style={styles.grabber} />
+
             <View style={styles.header}>
-              <Text style={styles.heading}>Add to the queue</Text>
+              <View style={styles.headingBlock}>
+                <Text style={styles.eyebrow}>
+                  {search.provider === 'spotify' ? 'Spotify' : 'YouTube'}
+                </Text>
+                <Text style={styles.heading}>Add to the queue</Text>
+              </View>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Close"
                 onPress={handleClose}
                 style={({ pressed }) => [styles.close, pressed && styles.pressed]}>
-                <X size={22} color={Colors.text} />
+                <X size={22} strokeWidth={1.6} color={Colors.text} />
               </Pressable>
             </View>
 
@@ -299,11 +331,15 @@ const SearchRow = memo(function SearchRow({ result, busy, onPick }: SearchRowPro
           {result.title}
         </Text>
         <Text numberOfLines={1} style={styles.subtitle}>
-          {result.artist} · {formatDuration(result.durationMs)}
+          {result.artist}
         </Text>
       </View>
 
-      {busy ? <ActivityIndicator size="small" color={Colors.muted} /> : null}
+      {busy ? (
+        <ActivityIndicator size="small" color={Colors.muted} />
+      ) : (
+        <Text style={styles.length}>{formatDuration(result.durationMs)}</Text>
+      )}
     </Pressable>
   );
 });
@@ -321,6 +357,7 @@ function CandidatePicker({ resolution, onConfirm, onSkip }: CandidatePickerProps
 
   return (
     <View style={styles.picker}>
+      <Text style={styles.pickerEyebrow}>Confirm the match</Text>
       <Text style={styles.pickerTitle}>Which one is it?</Text>
       <Text style={styles.pickerBody}>
         {`We could not confidently match "${resolution.track.title}" on the other provider. Pick the right one so everyone hears the same recording.`}
@@ -352,9 +389,11 @@ function CandidatePicker({ resolution, onConfirm, onSkip }: CandidatePickerProps
               {candidate.title}
             </Text>
             <Text numberOfLines={1} style={styles.subtitle}>
-              {candidate.artist} · {formatDuration(candidate.durationMs)}
+              {candidate.artist}
             </Text>
           </View>
+
+          <Text style={styles.length}>{formatDuration(candidate.durationMs)}</Text>
         </Pressable>
       ))}
 
@@ -387,25 +426,49 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 720,
     alignSelf: 'center',
+    overflow: 'hidden',
     backgroundColor: Colors.bg,
     borderTopLeftRadius: Radius.xl,
     borderTopRightRadius: Radius.xl,
     borderTopWidth: 1,
-    borderColor: Colors.border,
+    borderColor: Colors.borderBright,
     paddingHorizontal: Space.lg,
-    paddingTop: Space.lg,
+    paddingTop: Space.md,
     gap: Space.md,
+  },
+  bloom: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 220,
+    opacity: 0.22,
+  },
+  grabber: {
+    width: 44,
+    height: 4,
+    borderRadius: Radius.pill,
+    alignSelf: 'center',
+    backgroundColor: Colors.borderBright,
+    marginBottom: Space.xs,
   },
   header: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: Space.md,
+  },
+  headingBlock: {
+    flex: 1,
+    gap: Space.xs,
+  },
+  eyebrow: {
+    ...Type.monoLabel,
+    color: Colors.muted,
   },
   heading: {
     ...Type.title,
     color: Colors.text,
-    flex: 1,
   },
   close: {
     width: TOUCH_TARGET,
@@ -432,7 +495,8 @@ const styles = StyleSheet.create({
     minHeight: TOUCH_TARGET + Space.sm,
   },
   candidate: {
-    backgroundColor: Colors.surface,
+    // Glass rather than a solid: the sheet's bloom shows through and tints it.
+    backgroundColor: Colors.glass,
     borderRadius: Radius.md,
     borderWidth: 1,
     borderColor: Colors.border,
@@ -462,12 +526,23 @@ const styles = StyleSheet.create({
     ...Type.caption,
     color: Colors.muted,
   },
+  /** Runtimes are measurements, so they are mono like every other number. */
+  length: {
+    ...Type.mono,
+    color: Colors.muted,
+    flexGrow: 0,
+    flexShrink: 0,
+  },
   picker: {
     flex: 1,
     gap: Space.md,
   },
+  pickerEyebrow: {
+    ...Type.monoLabel,
+    color: Colors.muted,
+  },
   pickerTitle: {
-    ...Type.heading,
+    ...Type.title,
     color: Colors.text,
   },
   pickerBody: {

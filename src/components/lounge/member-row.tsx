@@ -3,7 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { Avatar } from '@/components/ui';
 import type { MemberRole } from '@/lib/database.types';
-import { Colors, Radius, Space, TOUCH_TARGET, Type } from '@/lib/theme';
+import { Colors, Fonts, Radius, Space, TOUCH_TARGET, Type } from '@/lib/theme';
 
 export type MemberRowProps = {
   displayName: string;
@@ -53,11 +53,13 @@ function MemberRowBase({ displayName, username, avatarUrl, role, isYou = false }
       ) : null}
 
       {/*
-        Colors.primary, deliberately. Accent green is reserved for "playing /
-        live / join" — a moderator badge in green would read as "in a Session".
+        Colors.primary, deliberately. Accent is reserved for "playing / live /
+        join" — a moderator badge in that green would read as "in a Session".
+        Owner takes the filled chip and mod the outlined one, so the two ranks
+        separate without either of them reaching for a second hue.
       */}
       {roleLabel ? (
-        <View style={[styles.chip, styles.chipRole]}>
+        <View style={[styles.chip, role === 'owner' ? styles.chipOwner : styles.chipMod]}>
           <Text style={styles.chipLabel}>{roleLabel}</Text>
         </View>
       ) : null}
@@ -92,18 +94,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: Space.md,
     paddingVertical: Space.xs,
     borderRadius: Radius.pill,
+    borderWidth: 1,
   },
-  chipRole: {
+  chipOwner: {
     backgroundColor: Colors.primary,
+    borderColor: 'transparent',
+  },
+  chipMod: {
+    backgroundColor: Colors.glass,
+    borderColor: Colors.primary,
   },
   chipYou: {
-    backgroundColor: Colors.surfaceRaised,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    backgroundColor: Colors.glass,
+    borderColor: Colors.borderBright,
   },
   chipLabel: {
+    // 12.5 is the readable floor; the old 12px override sat under it.
     ...Type.caption,
-    fontSize: 12,
+    fontFamily: Fonts.bodyMedium,
     color: Colors.text,
   },
 });

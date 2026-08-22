@@ -41,7 +41,7 @@ export function Screen({
               accessibilityRole="button"
               accessibilityLabel="Go back"
               style={({ pressed }) => [styles.back, pressed && styles.backPressed]}>
-              <ChevronLeft size={26} color={Colors.text} />
+              <ChevronLeft size={24} strokeWidth={1.6} color={Colors.text} />
             </Pressable>
           ) : null}
 
@@ -89,14 +89,18 @@ const styles = StyleSheet.create({
     maxWidth: 720,
     alignSelf: 'center',
   },
+  /** Every artboard sets its screen gutter to 20, not 16. */
   gutter: {
-    paddingHorizontal: Space.lg,
+    paddingHorizontal: Space.xl,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 56,
-    gap: Space.sm,
+    minHeight: TOUCH_TARGET,
+    paddingTop: Space.lg,
+    // The chevron already carries its own 44px box, so the title sits close to
+    // it rather than a full step away.
+    gap: Space.xs,
   },
   back: {
     width: TOUCH_TARGET,

@@ -130,10 +130,12 @@ export function ChatComposer({
             pressed && canSend && styles.sendPressed,
           ]}>
           {/*
-            Indigo, not accent green. Accent is reserved for play/live/join, and
-            a green send button next to a green "LIVE" pip makes both mean less.
+            The one legitimate accent on this bar: the glyph goes live only when
+            pressing it will actually send. Disabled it drops to Colors.faint,
+            which is exactly what faint is for — a control that is not offering
+            itself yet, not readable copy.
           */}
-          <SendHorizontal size={20} color={canSend ? Colors.text : Colors.faint} />
+          <SendHorizontal size={20} color={canSend ? Colors.accent : Colors.faint} strokeWidth={1.6} />
         </Pressable>
       </View>
     </KeyboardAvoidingView>
@@ -147,14 +149,18 @@ const styles = StyleSheet.create({
     gap: Space.sm,
     paddingHorizontal: Space.lg,
     paddingTop: Space.sm,
-    backgroundColor: Colors.bg,
-    borderTopWidth: 1,
+    // One step up from the ground, hairline-separated from the log above it, so
+    // the composer reads as a fixed edge rather than as more scrollable page.
+    backgroundColor: Colors.surface,
+    borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: Colors.border,
   },
   field: {
     flex: 1,
     justifyContent: 'center',
-    backgroundColor: Colors.surface,
+    // Glass on the raised bar — it tints with the room instead of stacking
+    // another opaque grey block on an already opaque one.
+    backgroundColor: Colors.glass,
     borderRadius: Radius.lg,
     borderWidth: 1,
     borderColor: Colors.border,
@@ -169,7 +175,8 @@ const styles = StyleSheet.create({
     maxHeight: MAX_INPUT_HEIGHT,
   },
   counter: {
-    ...Type.caption,
+    // A remaining-character count measures. Mono.
+    ...Type.mono,
     color: Colors.muted,
     alignSelf: 'flex-end',
     paddingBottom: Space.xs,
@@ -181,14 +188,22 @@ const styles = StyleSheet.create({
     width: TOUCH_TARGET,
     height: TOUCH_TARGET,
     borderRadius: Radius.pill,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  /*
+    The fill stays glass in both states and only the ring and the glyph change:
+    a solid accent disc here would out-shout the live pips in the log above,
+    which are the thing accent is actually reserved for.
+  */
   sendReady: {
-    backgroundColor: Colors.primary,
+    backgroundColor: Colors.glassStrong,
+    borderColor: Colors.accent,
   },
   sendIdle: {
     backgroundColor: Colors.surfaceRaised,
+    borderColor: Colors.border,
   },
   sendPressed: {
     opacity: 0.85,

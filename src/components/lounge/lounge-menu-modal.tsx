@@ -90,7 +90,7 @@ export function LoungeMenuModal({
                   pressed && styles.itemPressed,
                   isOwner && styles.itemDisabled,
                 ]}>
-                <LogOut size={20} color={isOwner ? Colors.muted : Colors.danger} />
+                <LogOut size={20} color={isOwner ? Colors.muted : Colors.danger} strokeWidth={1.6} />
                 <Text style={[styles.itemLabel, isOwner ? styles.itemLabelMuted : styles.itemLabelDanger]}>
                   Leave lounge
                 </Text>
@@ -99,7 +99,7 @@ export function LoungeMenuModal({
               {/* An owner tapping a dead button deserves to know why it is dead. */}
               {isOwner ? (
                 <View style={styles.note}>
-                  <Crown size={16} color={Colors.muted} />
+                  <Crown size={16} color={Colors.muted} strokeWidth={1.6} />
                   <Text style={styles.noteText}>
                     You own this lounge. Hand ownership to a member, or delete the lounge, to
                     leave it.
@@ -131,6 +131,8 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 480,
     alignSelf: 'center',
+    // Sheet radius, not card radius — this arrives from the bottom edge.
+    borderRadius: Radius.xl,
     // Sits clear of the home indicator without needing insets here.
     marginBottom: Space.xl,
   },
@@ -159,7 +161,9 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md,
   },
   itemPressed: {
-    backgroundColor: Colors.surfaceRaised,
+    // Glass, so the press wash tints with the room behind the sheet rather than
+    // stamping an opaque block onto a translucent surface.
+    backgroundColor: Colors.glassStrong,
   },
   itemDisabled: {
     opacity: 0.55,
@@ -182,6 +186,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: Space.sm,
     paddingHorizontal: Space.md,
+    paddingTop: Space.sm,
+    // A hairline is enough to say "this explains the dead control above".
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
   },
   noteText: {
     ...Type.caption,

@@ -30,7 +30,12 @@ const MAX_VISIBLE = 3;
 const ACCENTS: Record<ToastVariant, { color: string; icon: LucideIcon; role: string }> = {
   info: { color: Colors.muted, icon: Info, role: 'Notice' },
   error: { color: Colors.danger, icon: CircleAlert, role: 'Error' },
-  success: { color: Colors.accent, icon: CircleCheck, role: 'Success' },
+  /*
+    Success is ink, not Colors.accent. A completed action is not a live one, and
+    spending the reserved colour on a tick is exactly what makes a Feed stop
+    being scannable.
+  */
+  success: { color: Colors.text, icon: CircleCheck, role: 'Success' },
 };
 
 const ToastContext = createContext<ToastApi | null>(null);

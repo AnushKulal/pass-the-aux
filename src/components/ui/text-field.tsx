@@ -62,7 +62,7 @@ export function TextField({
         accessibilityLabel={label}
         // The error Text below is a polite live region, which is what actually
         // announces the failure; RN has no aria-invalid equivalent.
-        selectionColor={Colors.primary}
+        selectionColor={Colors.text}
         style={[
           styles.input,
           // Border width never changes, only its colour — a thicker focus ring
@@ -101,8 +101,14 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: Colors.border,
   },
+  /*
+    Focus is an ink border, never Colors.accent — a focused field is not a live
+    one, and the artboard's TEXT FIELD cell makes the point explicitly. Only the
+    colour changes; the 1.5px width is held on every state so focusing a field
+    never nudges its text by a pixel.
+  */
   inputFocused: {
-    borderColor: Colors.primary,
+    borderColor: Colors.text,
     backgroundColor: Colors.surfaceRaised,
   },
   inputError: {

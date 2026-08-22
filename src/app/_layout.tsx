@@ -1,10 +1,9 @@
+import { Figtree_400Regular, Figtree_500Medium, Figtree_600SemiBold } from '@expo-google-fonts/figtree';
+import { IBMPlexMono_400Regular, IBMPlexMono_500Medium } from '@expo-google-fonts/ibm-plex-mono';
 import {
-  Poppins_400Regular,
-  Poppins_500Medium,
-  Poppins_600SemiBold,
-  Poppins_700Bold,
-} from '@expo-google-fonts/poppins';
-import { Righteous_400Regular } from '@expo-google-fonts/righteous';
+  InstrumentSerif_400Regular,
+  InstrumentSerif_400Regular_Italic,
+} from '@expo-google-fonts/instrument-serif';
 import { useFonts } from 'expo-font';
 import { DarkTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
@@ -38,9 +37,10 @@ const AuxNavigationTheme = {
 };
 
 /**
- * Hold the native splash until the typefaces are resident. Righteous carries
- * the entire brand read of the app; one frame of system-font fallback looks
- * like a rendering bug, so we would rather stay on the splash a beat longer.
+ * Hold the native splash until the typefaces are resident. Instrument Serif
+ * carries the entire brand read of the app; one frame of system-font fallback
+ * looks like a rendering bug, so we would rather stay on the splash a beat
+ * longer.
  *
  * Swallowing the rejection is deliberate: on Fast Refresh the module re-runs
  * after the splash is already gone, and the resulting unhandled rejection is
@@ -51,11 +51,15 @@ SplashScreen.setOptions({ duration: Duration.slow, fade: true });
 
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
-    Righteous_400Regular,
-    Poppins_400Regular,
-    Poppins_500Medium,
-    Poppins_600SemiBold,
-    Poppins_700Bold,
+    // Instrument Serif carries the feeling, Figtree does the reading, and
+    // IBM Plex Mono does the measuring — every number that measures is mono.
+    InstrumentSerif_400Regular,
+    InstrumentSerif_400Regular_Italic,
+    Figtree_400Regular,
+    Figtree_500Medium,
+    Figtree_600SemiBold,
+    IBMPlexMono_400Regular,
+    IBMPlexMono_500Medium,
   });
 
   const fontsSettled = fontsLoaded || fontError !== null;

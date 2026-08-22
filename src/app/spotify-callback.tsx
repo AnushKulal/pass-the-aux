@@ -1,10 +1,19 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
+import { X } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
+import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 
-import { AuxButton, Screen, Skeleton } from '@/components/ui';
-import { Colors, Space, Type } from '@/lib/theme';
+import { AuxButton, Screen } from '@/components/ui';
+import { Bloom, Colors, PointerEvents, Space, Type } from '@/lib/theme';
+
+/** Colors.warn and Colors.danger held back to ring and wash weights. */
+const WARN_RING = 'rgba(232, 177, 92, 0.16)';
+const WARN_RING_INNER = 'rgba(232, 177, 92, 0.30)';
+const WARN_GLOW = 'rgba(232, 177, 92, 0.22)';
+const DANGER_WASH = 'rgba(242, 101, 126, 0.07)';
+const DANGER_EDGE = 'rgba(242, 101, 126, 0.26)';
 
 /**
  * Where Spotify sends the browser back on web: `<origin>/spotify-callback`,
@@ -75,20 +84,49 @@ export default function SpotifyCallbackScreen() {
 
   return (
     <Screen>
+      {/* Two seconds of screen, and almost nothing on it but the atmosphere. */}
+      <View style={[styles.bloom, PointerEvents.none]}>
+        <Svg width="100%" height="100%">
+          <Defs>
+            <RadialGradient id="callbackBloom" cx="50%" cy="50%" rx="62%" ry="52%">
+              <Stop offset="0" stopColor={Bloom.a} stopOpacity={0.18} />
+              <Stop offset="0.45" stopColor={Bloom.b} stopOpacity={0.1} />
+              <Stop offset="0.78" stopColor={Colors.bg} stopOpacity={0} />
+            </RadialGradient>
+          </Defs>
+          <Rect x="0" y="0" width="100%" height="100%" fill="url(#callbackBloom)" />
+        </Svg>
+      </View>
+
       <View style={styles.center}>
         {failure ? (
           <View style={styles.status}>
-            <Text style={styles.title}>Could not connect Spotify</Text>
-            <Text style={styles.body}>{failure}</Text>
+            <View style={styles.failEmblem}>
+              <X size={30} color={Colors.danger} strokeWidth={1.6} />
+            </View>
+            <View style={styles.copy}>
+              <Text style={styles.title}>Could not connect Spotify</Text>
+              <Text style={styles.body}>{failure}</Text>
+            </View>
             <AuxButton label="Try again" onPress={() => router.replace('/settings/connections')} />
           </View>
         ) : (
           <View style={styles.status}>
-            <Text style={styles.title}>Connecting Spotify…</Text>
-            <Text style={styles.body}>Handing your sign-in back to Aux.</Text>
-            <View style={styles.bars}>
-              <Skeleton width="100%" height={16} />
-              <Skeleton width="70%" height={16} />
+            {/*
+              Warn, not accent: a handshake in progress is "adjusting", and the
+              accent has to keep meaning live. Static rings rather than a spinner
+              so nothing loops behind a reduced-motion preference.
+            */}
+            <View style={styles.ringOuter}>
+              <View style={styles.ringInner}>
+                <View style={styles.glow}>
+                  <View style={styles.dot} />
+                </View>
+              </View>
+            </View>
+            <View style={styles.copy}>
+              <Text style={styles.title}>Connecting Spotify…</Text>
+              <Text style={styles.body}>Handing your sign-in back to Aux.</Text>
             </View>
           </View>
         )}
@@ -98,13 +136,71 @@ export default function SpotifyCallbackScreen() {
 }
 
 const styles = StyleSheet.create({
+  bloom: {
+    position: 'absolute',
+    // Out past the screen gutter so the glow reaches the edges rather than
+    // stopping on the same line the content does.
+    left: -Space.lg,
+    right: -Space.lg,
+    top: 0,
+    bottom: 0,
+  },
   center: {
     flex: 1,
     justifyContent: 'center',
+    paddingHorizontal: Space.md,
   },
   status: {
     alignItems: 'center',
-    gap: Space.md,
+    gap: Space.xxl,
+  },
+  ringOuter: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    borderWidth: 1,
+    borderColor: WARN_RING,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ringInner: {
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    borderWidth: 1,
+    borderColor: WARN_RING_INNER,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  /** Stacked translucency stands in for the blur RN has no filter for. */
+  glow: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: WARN_GLOW,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: Colors.warn,
+  },
+  failEmblem: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: DANGER_WASH,
+    borderWidth: 1,
+    borderColor: DANGER_EDGE,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  copy: {
+    alignItems: 'center',
+    gap: Space.sm,
+    maxWidth: 290,
   },
   title: {
     ...Type.title,
@@ -115,12 +211,5 @@ const styles = StyleSheet.create({
     ...Type.body,
     color: Colors.muted,
     textAlign: 'center',
-  },
-  bars: {
-    width: '100%',
-    maxWidth: 260,
-    gap: Space.sm,
-    marginTop: Space.sm,
-    alignItems: 'center',
   },
 });

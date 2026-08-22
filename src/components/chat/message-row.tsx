@@ -190,12 +190,12 @@ export function MessageActionsSheet({
               accessibilityLabel="Close"
               onPress={onClose}
               style={styles.sheetClose}>
-              <X size={20} color={Colors.muted} />
+              <X size={20} color={Colors.muted} strokeWidth={1.6} />
             </Pressable>
           </View>
 
           <View style={styles.picker}>
-            <SmilePlus size={18} color={Colors.faint} />
+            <SmilePlus size={18} color={Colors.muted} strokeWidth={1.6} />
             {QUICK_REACTIONS.map((emoji) => (
               <Pressable
                 key={emoji}
@@ -223,7 +223,7 @@ export function MessageActionsSheet({
                 onClose();
               }}
               style={styles.destructive}>
-              <Trash2 size={18} color={Colors.danger} />
+              <Trash2 size={18} color={Colors.danger} strokeWidth={1.6} />
               <Text style={styles.destructiveLabel}>Delete message</Text>
             </Pressable>
           ) : null}
@@ -245,11 +245,14 @@ const styles = StyleSheet.create({
   },
   dayRule: {
     flex: 1,
-    height: 1,
+    // A true hairline, so the rule reads as a measurement mark rather than a
+    // divider bar — the day label is what the eye should land on.
+    height: StyleSheet.hairlineWidth,
     backgroundColor: Colors.border,
   },
   dayLabel: {
-    ...Type.caption,
+    // The date is a coordinate on the log, not prose: mono, uppercase, tracked.
+    ...Type.monoLabel,
     color: Colors.muted,
   },
   row: {
@@ -261,7 +264,9 @@ const styles = StyleSheet.create({
     marginTop: Space.md,
   },
   rowPressed: {
-    backgroundColor: Colors.surface,
+    // Glass rather than a solid step, so the press wash tints with whatever
+    // bloom is behind the log instead of punching a grey hole in it.
+    backgroundColor: Colors.glass,
   },
   rowPending: {
     opacity: 0.6,
@@ -285,7 +290,8 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   time: {
-    ...Type.caption,
+    // Every number that MEASURES is mono. A timestamp measures.
+    ...Type.mono,
     color: Colors.muted,
   },
   body: {
@@ -326,7 +332,8 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   chipCount: {
-    ...Type.caption,
+    // A tally. Mono, like every other count in the app.
+    ...Type.mono,
     color: Colors.text,
   },
   scrim: {
@@ -340,6 +347,8 @@ const styles = StyleSheet.create({
   },
   sheet: {
     gap: Space.lg,
+    // Sheet radius, not card radius.
+    borderRadius: Radius.xl,
     // Capped like the lounge menu's card: a full-window action sheet on
     // desktop web strands the buttons at the edges of the screen.
     width: '100%',
@@ -395,9 +404,9 @@ const styles = StyleSheet.create({
     minHeight: TOUCH_TARGET,
     paddingHorizontal: Space.md,
     borderRadius: Radius.md,
-    // A 12%-alpha rose wash keeps Colors.danger text at 4.5:1 on glass, which a
-    // solid Colors.danger fill could not.
-    backgroundColor: 'rgba(244, 63, 94, 0.12)',
+    // A 12%-alpha wash of Colors.danger keeps its text at 4.5:1 on glass, which
+    // a solid Colors.danger fill could not. No token exists for the wash.
+    backgroundColor: 'rgba(242, 101, 126, 0.12)',
     borderWidth: 1,
     borderColor: Colors.danger,
   },

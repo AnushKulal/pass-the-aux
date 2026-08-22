@@ -6,6 +6,7 @@
  * setting buried behind "advanced".
  */
 
+import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Check, Radio, Users } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
@@ -21,7 +22,15 @@ import {
 import { AuxButton, EmptyState, Screen, Skeleton, TextField, useToast } from '@/components/ui';
 import { useCreateRoom, useMyLounges } from '@/features/rooms/queries';
 import type { LoungeRow } from '@/lib/database.types';
-import { Colors, Radius, Space, TOUCH_TARGET, Type } from '@/lib/theme';
+import {
+  Colors,
+  PointerEvents,
+  Radius,
+  Space,
+  TOUCH_TARGET,
+  Type,
+  bloomGradient,
+} from '@/lib/theme';
 
 const MAX_NAME_LENGTH = 50;
 const SKELETON_ROWS = 3;
@@ -94,6 +103,9 @@ export default function CreateRoomScreen() {
       the scrolling instead, with the form around it as header and footer.
     */
     <Screen title="Start a Session" onBack={handleBack}>
+      {/* Nothing is playing yet, so the room is only half lit. */}
+      <Bloom />
+
       <FlatList
         style={styles.flex}
         data={lounges.data ?? []}
@@ -114,7 +126,10 @@ export default function CreateRoomScreen() {
               autoCapitalize="sentences"
             />
 
-            <Text style={styles.sectionTitle}>Which lounge?</Text>
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Which lounge?</Text>
+              <View style={styles.sectionRule} />
+            </View>
           </View>
         }
         ListEmptyComponent={
@@ -170,6 +185,36 @@ export default function CreateRoomScreen() {
 
 const keyExtractor = (item: LoungeRow) => item.id;
 
+/**
+ * The room's light. Decorative only — Bloom colours never carry meaning, which
+ * is what keeps Colors.accent free to mean "live", and the one accent on this
+ * screen is the button that actually starts something live. React Native has no
+ * blur, so the softness is two gradients falling off on different axes.
+ */
+function Bloom() {
+  return (
+    <View
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={[styles.bloom, PointerEvents.none]}>
+      <LinearGradient
+        colors={bloomGradient(0.22)}
+        locations={[0, 0.45, 1]}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+        style={StyleSheet.absoluteFill}
+      />
+      <LinearGradient
+        colors={bloomGradient(0.13)}
+        locations={[0, 0.5, 1]}
+        start={{ x: 0.1, y: 0.1 }}
+        end={{ x: 0.95, y: 0.9 }}
+        style={StyleSheet.absoluteFill}
+      />
+    </View>
+  );
+}
+
 /** Keeps the 8px minimum between adjacent radio targets. */
 const OptionGap = () => <View style={styles.optionGap} />;
 
@@ -204,7 +249,7 @@ function LoungeOption({ lounge, selected, onSelect }: LoungeOptionProps) {
 
       {/* A check glyph, not just the border tint — selection must survive being
           seen by someone who cannot separate indigo from the surface. */}
-      {selected ? <Check size={20} color={Colors.text} /> : null}
+      {selected ? <Check size={20} color={Colors.text} strokeWidth={1.6} /> : null}
     </Pressable>
   );
 }
@@ -232,9 +277,31 @@ const styles = StyleSheet.create({
   optionGap: {
     height: Space.sm,
   },
+  section: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.md,
+  },
   sectionTitle: {
-    ...Type.heading,
-    color: Colors.text,
+    // A mono eyebrow with a hairline running out of it: the same figure the
+    // chat log uses for day breaks and the lounge uses for its sections.
+    ...Type.monoLabel,
+    color: Colors.muted,
+  },
+  sectionRule: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: Colors.border,
+  },
+  bloom: {
+    position: 'absolute',
+    // Parked above the header so its hard top edge never lands on the screen.
+    top: -200,
+    left: -Space.huge,
+    right: -Space.huge,
+    height: 360,
+    borderRadius: Radius.pill,
+    overflow: 'hidden',
   },
   list: {
     gap: Space.sm,
@@ -249,7 +316,9 @@ const styles = StyleSheet.create({
     borderRadius: Radius.md,
     borderWidth: 1,
     borderColor: Colors.border,
-    backgroundColor: Colors.surface,
+    // Glass unselected, so the options sit in the bloom rather than on top of
+    // it as a stack of opaque grey bars.
+    backgroundColor: Colors.glass,
   },
   optionSelected: {
     // Indigo, not the accent: picking a lounge is a passive form choice, and
@@ -269,7 +338,7 @@ const styles = StyleSheet.create({
     color: Colors.text,
   },
   optionDescription: {
-    ...Type.caption,
+    ...Type.label,
     color: Colors.muted,
   },
   footnote: {

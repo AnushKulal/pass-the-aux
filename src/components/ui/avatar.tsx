@@ -1,3 +1,4 @@
+import { LinearGradient } from 'expo-linear-gradient';
 import { Image } from 'expo-image';
 import { useEffect, useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -13,7 +14,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { BLURHASH_SURFACE } from '@/components/ui/blurhash';
-import { Colors, Duration, Fonts, PointerEvents } from '@/lib/theme';
+import { Colors, Duration, Bloom as BloomColors, Fonts, PointerEvents } from '@/lib/theme';
 
 export type AvatarProps = {
   uri?: string | null;
@@ -23,15 +24,24 @@ export type AvatarProps = {
   speaking?: boolean;
 };
 
-const RING_WIDTH = 2;
-/** How far the pulse halo sits outside the frame, per side. */
+/** The artboard draws the ring at 1.5px and the halo 6px outside the frame. */
+const RING_WIDTH = 1.5;
 const HALO_INSET = 6;
 
 /**
- * Tints for the initials fallback. All three clear 4.5:1 against Colors.text.
- * Deliberately no green — accent is reserved for play/live/join affordances.
+ * Initials fallbacks, lit from the same album-art bloom as everything else.
+ *
+ * The first stop of each pair is the lightest pixel the gradient ever produces,
+ * and each one was picked so Colors.text still clears 4.5:1 on it — 7.7:1, 4.7:1
+ * and 5.3:1 respectively. Bloom.a and Bloom.b themselves are too light to carry
+ * the initials (2.6:1 and 4.2:1), which is why the warm pair is darkened.
+ * Deliberately no aqua: accent is reserved for live/playing/joinable.
  */
-const TINTS = [Colors.primary, Colors.primaryDim, Colors.surfaceRaised];
+const TINTS: readonly (readonly [string, string])[] = [
+  [Colors.primary, Colors.primaryDim],
+  [BloomColors.c, '#2E4470'],
+  ['#8A4E75', Colors.primaryDim],
+];
 
 function initialsFor(name: string): string {
   const words = name.trim().split(/\s+/).filter(Boolean);
@@ -41,12 +51,12 @@ function initialsFor(name: string): string {
   return (first + second).toUpperCase();
 }
 
-function tintFor(name: string): string {
+function tintFor(name: string): readonly [string, string] {
   let hash = 0;
   for (let i = 0; i < name.length; i += 1) {
     hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
   }
-  return TINTS[hash % TINTS.length] as string;
+  return TINTS[hash % TINTS.length] as readonly [string, string];
 }
 
 export function Avatar({ uri, name, size = 40, live = false, speaking = false }: AvatarProps) {
@@ -103,10 +113,22 @@ export function Avatar({ uri, name, size = 40, live = false, speaking = false }:
             width: size,
             height: size,
             borderRadius: size / 2,
-            backgroundColor: tint,
             borderWidth: hasRing ? RING_WIDTH : 0,
+            /*
+              Only `live` earns the accent. Speaking rings in ink — it is a
+              transient state, not a claim that this person is playing something
+              you can join.
+            */
+            borderColor: live ? Colors.accent : Colors.text,
           },
         ]}>
+        <LinearGradient
+          colors={tint}
+          start={{ x: 0.15, y: 0 }}
+          end={{ x: 0.85, y: 1 }}
+          style={[StyleSheet.absoluteFill, PointerEvents.none]}
+        />
+
         {/* Initials sit under the image, so they double as the error fallback. */}
         <Text
           numberOfLines={1}
@@ -148,7 +170,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
-    borderColor: Colors.accent,
   },
   initials: {
     fontFamily: Fonts.bodySemi,

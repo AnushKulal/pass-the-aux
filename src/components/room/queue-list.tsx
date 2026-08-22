@@ -2,7 +2,9 @@
  * What is playing next, and whose fault it is.
  *
  * "Anush added this" is not decoration — attribution is the social texture of a
- * shared queue. It is what turns a playlist into a room.
+ * shared queue. It is what turns a playlist into a room. The artboard folds it
+ * into the subtitle rather than giving it its own line, so a row stays one
+ * glance deep: position, art, what it is, how long it runs.
  */
 
 import { Image } from 'expo-image';
@@ -10,18 +12,14 @@ import { ListMusic, X } from 'lucide-react-native';
 import { memo, useCallback } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View, type ListRenderItemInfo } from 'react-native';
 
-import {
-  AuxButton,
-  Avatar,
-  BLURHASH_SURFACE,
-  EmptyState,
-  Skeleton,
-} from '@/components/ui';
+import { AuxButton, BLURHASH_SURFACE, EmptyState, Skeleton } from '@/components/ui';
 import { useQueue, useRemoveQueueItem, type QueueEntry } from '@/features/rooms/queries';
 import { Colors, Duration, Radius, Space, TOUCH_TARGET, Type } from '@/lib/theme';
 
-const ART_SIZE = 48;
+const ART_SIZE = 40;
 const SKELETON_ROWS = 4;
+/** Two mono digits plus air, so 01..99 never reflows the row. */
+const INDEX_WIDTH = 18;
 
 export type QueueListProps = {
   roomId: string | null;
@@ -67,10 +65,11 @@ export function QueueList({ roomId, isHost, currentUserId, onAddTrack }: QueueLi
       <View style={styles.skeletonWrap}>
         {Array.from({ length: SKELETON_ROWS }, (_, index) => (
           <View key={index} style={styles.row}>
+            <View style={styles.indexSpacer} />
             <Skeleton width={ART_SIZE} height={ART_SIZE} radius={Radius.sm} />
             <View style={styles.meta}>
               <Skeleton width="70%" height={16} />
-              <Skeleton width="45%" height={13} />
+              <Skeleton width="45%" height={12} />
             </View>
           </View>
         ))}
@@ -91,7 +90,14 @@ export function QueueList({ roomId, isHost, currentUserId, onAddTrack }: QueueLi
           icon={ListMusic}
           title="Nothing queued"
           description="Whatever anyone adds plays next. Go first."
-          action={<AuxButton label="Add a track" onPress={onAddTrack} variant="accent" size="sm" />}
+          action={
+            /*
+              Primary, not accent: an empty queue is the one moment nothing is
+              playing, and the artboards draw empty-state CTAs without the live
+              colour ("Find a lounge" is a ghost pill, "Back to Home" is ink).
+            */
+            <AuxButton label="Add a track" onPress={onAddTrack} variant="primary" size="sm" />
+          }
         />
       }
     />
@@ -112,7 +118,8 @@ const QueueRow = memo(function QueueRow({ entry, index, canRemove, onRemove }: Q
 
   return (
     <View style={styles.row}>
-      <Text style={styles.position}>{index + 1}</Text>
+      {/* A position is a measurement, so it is mono like every other number. */}
+      <Text style={styles.index}>{(index + 1).toString().padStart(2, '0')}</Text>
 
       {track.artwork_url ? (
         <Image
@@ -132,17 +139,12 @@ const QueueRow = memo(function QueueRow({ entry, index, canRemove, onRemove }: Q
         <Text numberOfLines={1} style={styles.title}>
           {track.title}
         </Text>
-        <Text numberOfLines={1} style={styles.artist}>
-          {track.artist} · {formatDuration(track.duration_ms)}
+        <Text numberOfLines={1} style={styles.subtitle}>
+          {`${track.artist} · ${entry.addedByName} added`}
         </Text>
-
-        <View style={styles.credit}>
-          <Avatar uri={entry.addedByAvatar} name={entry.addedByName} size={18} />
-          <Text numberOfLines={1} style={styles.creditText}>
-            {entry.addedByName} added this
-          </Text>
-        </View>
       </View>
+
+      <Text style={styles.length}>{formatDuration(track.duration_ms)}</Text>
 
       {canRemove ? (
         <Pressable
@@ -150,7 +152,7 @@ const QueueRow = memo(function QueueRow({ entry, index, canRemove, onRemove }: Q
           accessibilityLabel={`Remove ${track.title} from the queue`}
           onPress={() => onRemove(entry.id)}
           style={({ pressed }) => [styles.remove, pressed && styles.removePressed]}>
-          <X size={20} color={Colors.muted} />
+          <X size={20} strokeWidth={1.6} color={Colors.muted} />
         </Pressable>
       ) : null}
     </View>
@@ -159,26 +161,32 @@ const QueueRow = memo(function QueueRow({ entry, index, canRemove, onRemove }: Q
 
 const styles = StyleSheet.create({
   list: {
+    paddingTop: Space.lg,
     paddingBottom: Space.xxl,
-    gap: Space.sm,
+    gap: Space.md,
   },
   skeletonWrap: {
-    gap: Space.sm,
-    paddingTop: Space.sm,
+    paddingTop: Space.lg,
+    gap: Space.md,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Space.md,
-    paddingVertical: Space.sm,
-    minHeight: TOUCH_TARGET + Space.md,
+    minHeight: ART_SIZE + Space.md,
   },
-  position: {
-    ...Type.caption,
+  index: {
+    ...Type.mono,
     color: Colors.muted,
-    width: 18,
-    textAlign: 'center',
-    fontVariant: ['tabular-nums'],
+    width: INDEX_WIDTH,
+    flexGrow: 0,
+    flexShrink: 0,
+  },
+  /** Holds the index column open in the loading state without a text style. */
+  indexSpacer: {
+    width: INDEX_WIDTH,
+    flexGrow: 0,
+    flexShrink: 0,
   },
   art: {
     width: ART_SIZE,
@@ -191,26 +199,22 @@ const styles = StyleSheet.create({
   },
   meta: {
     flex: 1,
-    gap: 2,
+    minWidth: 0,
+    gap: 1,
   },
   title: {
     ...Type.bodyStrong,
     color: Colors.text,
   },
-  artist: {
+  subtitle: {
     ...Type.caption,
     color: Colors.muted,
   },
-  credit: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space.sm,
-    marginTop: Space.xs,
-  },
-  creditText: {
-    ...Type.caption,
+  length: {
+    ...Type.mono,
     color: Colors.muted,
-    flexShrink: 1,
+    flexGrow: 0,
+    flexShrink: 0,
   },
   remove: {
     width: TOUCH_TARGET,
@@ -218,7 +222,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     // Keeps 8px of clear space between the row body and this target.
-    marginLeft: Space.sm,
+    marginLeft: -Space.xs,
+    marginRight: -Space.md,
   },
   removePressed: {
     opacity: 0.6,

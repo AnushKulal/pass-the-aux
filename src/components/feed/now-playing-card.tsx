@@ -10,9 +10,10 @@ import type { FeedEntry } from '@/features/presence/use-lounge-presence';
 import { serverNow } from '@/lib/clock';
 import { Colors, Duration, Radius, Space, Type } from '@/lib/theme';
 
-const AVATAR_SIZE = 40;
-const ARTWORK_SIZE = 56;
-const PROVIDER_BADGE = 18;
+const AVATAR_SIZE = 38;
+const ARTWORK_SIZE = 54;
+const PROVIDER_BADGE = 20;
+const PROVIDER_GLYPH = 12;
 
 /**
  * ProgressBar rounds its fill to whole percent, so on a three-minute track the
@@ -59,6 +60,13 @@ function useServerNow(): number {
   return now;
 }
 
+/** `1:47`. The one number on this row that measures, so it is the one in mono. */
+function timecode(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1_000));
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
 // -------------------------------------------------------------------- the card
 
 export type NowPlayingCardProps = {
@@ -69,12 +77,21 @@ function NowPlayingCardBase({ entry }: NowPlayingCardProps) {
   const router = useRouter();
   const nowMs = useServerNow();
 
+  /*
+    The whole reason this screen is scannable. `isLive` is not "this person has
+    a track loaded", it is "there is a Session here you can walk into" — and it
+    is the only thing on the row allowed to reach for Colors.accent: the ring,
+    the bar, the button. Somebody listening alone gets the same layout in muted,
+    which is what keeps the green meaning anything at all.
+  */
   const isLive = entry.roomId !== null;
   const title = entry.trackTitle ?? 'Getting the aux ready';
   const subtitle = [entry.artist, entry.loungeName].filter(Boolean).join(' · ');
 
-  const progress =
-    entry.durationMs > 0 ? livePositionMs(entry, nowMs) / entry.durationMs : 0;
+  // Interpolated locally against the server clock, so the bar and the timecode
+  // keep moving between presence beats instead of stepping once a heartbeat.
+  const positionMs = livePositionMs(entry, nowMs);
+  const progress = entry.durationMs > 0 ? positionMs / entry.durationMs : 0;
 
   /*
     Provider is signalled by shape, not colour. Spotify green sits a hair off
@@ -109,12 +126,7 @@ function NowPlayingCardBase({ entry }: NowPlayingCardProps) {
   return (
     <GlassCard padded={false}>
       <View style={styles.row}>
-        <Avatar
-          uri={entry.avatarUrl}
-          name={entry.displayName}
-          size={AVATAR_SIZE}
-          live={isLive}
-        />
+        <Avatar uri={entry.avatarUrl} name={entry.displayName} size={AVATAR_SIZE} live={isLive} />
 
         <View style={styles.artwork}>
           <Image
@@ -131,7 +143,7 @@ function NowPlayingCardBase({ entry }: NowPlayingCardProps) {
           />
 
           <View style={styles.providerBadge}>
-            <ProviderIcon size={11} color={Colors.muted} />
+            <ProviderIcon size={PROVIDER_GLYPH} color={Colors.muted} strokeWidth={1.6} />
           </View>
         </View>
 
@@ -144,17 +156,25 @@ function NowPlayingCardBase({ entry }: NowPlayingCardProps) {
           <Text numberOfLines={1} style={styles.subtitle}>
             {subtitle}
           </Text>
-          <ProgressBar progress={progress} height={3} style={styles.progress} />
+          <ProgressBar
+            progress={progress}
+            height={3}
+            color={isLive ? Colors.accent : Colors.muted}
+            style={styles.progress}
+          />
         </View>
 
-        {/* Wrapped because AuxButton sets `alignSelf: 'flex-start'` on itself,
-            which would otherwise beat this row's `alignItems: 'center'` and
-            pin the button to the top of the card. */}
-        {isLive ? (
-          <View>
-            <AuxButton label="Join" onPress={openRoom} variant="accent" size="sm" />
-          </View>
-        ) : null}
+        <View style={styles.rail}>
+          <Text style={styles.timecode}>{timecode(positionMs)}</Text>
+
+          {/* Wrapped because AuxButton sets `alignSelf: 'flex-start'` on itself,
+              which would otherwise beat this rail's `alignItems: 'flex-end'`. */}
+          {isLive ? (
+            <View style={styles.join}>
+              <AuxButton label="Join" onPress={openRoom} variant="accent" size="sm" />
+            </View>
+          ) : null}
+        </View>
       </View>
     </GlassCard>
   );
@@ -173,7 +193,7 @@ const styles = StyleSheet.create({
     // Space.md, not Space.sm: the live Avatar's halo expands 6px past its frame
     // and GlassCard clips its overflow, so it needs room to breathe.
     padding: Space.md,
-    gap: Space.sm,
+    gap: Space.md,
   },
   artwork: {
     width: ARTWORK_SIZE,
@@ -211,7 +231,25 @@ const styles = StyleSheet.create({
     ...Type.caption,
     color: Colors.muted,
   },
+  /*
+    Colors.border for the groove rather than the bar's default surfaceRaised:
+    over glass, a raised fill reads as a second solid block sitting on the card
+    instead of a channel cut into it.
+  */
   progress: {
-    marginTop: Space.xs,
+    marginTop: Space.sm,
+    backgroundColor: Colors.border,
+  },
+  rail: {
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    gap: Space.sm,
+  },
+  timecode: {
+    ...Type.mono,
+    color: Colors.muted,
+  },
+  join: {
+    alignItems: 'flex-end',
   },
 });

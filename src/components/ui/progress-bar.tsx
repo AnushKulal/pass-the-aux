@@ -45,7 +45,9 @@ export function ProgressBar({
 const styles = StyleSheet.create({
   track: {
     width: '100%',
-    backgroundColor: Colors.surfaceRaised,
+    // The unplayed run is a hairline, not a block: it has to read as the ruler
+    // the accent fill is measured against.
+    backgroundColor: Colors.border,
     overflow: 'hidden',
   },
   fill: {

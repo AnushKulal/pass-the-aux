@@ -180,7 +180,15 @@ export function ChatList({ loungeId, roomId, emptyTitle, emptyDescription }: Cha
               <ActivityIndicator size="small" color={Colors.muted} />
             </View>
           ) : !hasNextPage ? (
-            <Text style={styles.logStart}>This is the beginning of the conversation.</Text>
+            /*
+              The top of the log terminates in the same hairline language the
+              day separators use, so "the log ends here" and "a new day starts
+              here" read as one system rather than two unrelated captions.
+            */
+            <View style={styles.logStartBlock}>
+              <View style={styles.logStartRule} />
+              <Text style={styles.logStart}>This is the beginning of the conversation.</Text>
+            </View>
           ) : null
         }
         contentContainerStyle={styles.content}
@@ -247,6 +255,16 @@ const styles = StyleSheet.create({
     paddingVertical: Space.lg,
     alignItems: 'center',
   },
+  logStartBlock: {
+    paddingTop: Space.lg,
+    paddingBottom: Space.lg,
+    gap: Space.md,
+  },
+  logStartRule: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: Colors.border,
+    marginHorizontal: Space.lg,
+  },
   logStart: {
     ...Type.caption,
     // Readable copy, so `muted` — `faint` is under 4.5:1 and is for
@@ -254,7 +272,6 @@ const styles = StyleSheet.create({
     color: Colors.muted,
     textAlign: 'center',
     paddingHorizontal: Space.xl,
-    paddingBottom: Space.lg,
   },
   skeleton: {
     flex: 1,

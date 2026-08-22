@@ -1,57 +1,98 @@
 /**
- * Aux design tokens.
+ * Aux design tokens — "Signal Afterglow".
  *
- * Generated from the ui-ux-pro-max design system:
- *   Community/Forum pattern x Vibrant & Block-based style x OLED dark x glassmorphism.
+ * The artwork lights the room, and one line runs through everyone in it.
+ * Technical precision — the playhead, the drift readouts, the hairlines — sits
+ * inside a warm album-art bloom rather than on cold black.
  *
- * Aux is dark-only by design — it is a night-time, party-context app, and a
- * single palette keeps contrast guarantees provable instead of doubled.
+ * The token NAMES are deliberately unchanged from the previous system so that
+ * every component keeps working; only the values moved. See design/SYSTEM.md
+ * for the design rationale and the artboards it came from.
+ *
+ * Dark only. Aux is a night-time, party-context app, and a single palette keeps
+ * contrast guarantees provable instead of doubled.
  */
 
 import { Platform } from 'react-native';
 
 export const Colors = {
-  /** App background. Near-black indigo: OLED-friendly without being flat #000. */
-  bg: '#0F0F23',
-  /** One step up — cards, sheets, blocks. */
-  surface: '#1E1B4B',
-  /** Two steps up — pressed states, nested cards. */
-  surfaceRaised: '#2A2563',
-  /** Brand indigo: headers, active nav, selection. */
-  primary: '#4338CA',
-  primaryDim: '#312E81',
-  /** The "go" colour: play, live, join. Never used for anything passive. */
-  accent: '#22C55E',
-  accentDim: '#15803D',
-  /** Primary text. */
-  text: '#F8FAFC',
-  /** Secondary text, timestamps, metadata. 4.6:1 on bg — passes AA. */
-  muted: '#A5B4FC',
-  /** Tertiary — placeholders only, never body copy. */
-  faint: '#6B7280',
-  /** Leave, destructive, mic-muted. */
-  danger: '#F43F5E',
-  /** Hairlines. Light enough to read over both bg and glass. */
-  border: 'rgba(255, 255, 255, 0.14)',
-  /** Fill for BlurView surfaces. */
-  glass: 'rgba(255, 255, 255, 0.10)',
-  glassStrong: 'rgba(255, 255, 255, 0.16)',
+  /** Ground. Deep indigo-plum — warm-leaning, never neutral grey, never pure black. */
+  bg: '#0E0A16',
+  /** One step up: list rows, solid blocks. */
+  surface: '#140F1E',
+  /** Two steps up: pressed states, nested cards. */
+  surfaceRaised: '#1C1526',
+  /**
+   * Non-live interactive fill. Drawn from the bloom's violet and darkened until
+   * white text clears 4.5:1 — so primary actions belong to the atmosphere
+   * rather than competing with it.
+   */
+  primary: '#5A3C7A',
+  primaryDim: '#3B2751',
+  /**
+   * THE reserved colour: live, playing, joinable, in sync. It is also the
+   * playhead. Nothing decorative may use it — the Feed is scannable precisely
+   * because this green-cyan means "something is happening here you can join".
+   */
+  accent: '#57E2D5',
+  accentDim: '#2A8F86',
+  /** Primary text. Warm white, not pure. */
+  text: '#F2EDF7',
+  /** Secondary text, timestamps, metadata. 7.1:1 on bg. */
+  muted: '#A79FB8',
+  /** Placeholders and dividers ONLY — fails 4.5:1 for readable copy. */
+  faint: '#6E6681',
+  /** Buffering, adjusting, linked-but-free. Not an error colour. */
+  warn: '#E8B15C',
+  /** Out of sync, leave, destructive. */
+  danger: '#F2657E',
+  /** Hairlines. */
+  border: 'rgba(255, 255, 255, 0.10)',
+  borderBright: 'rgba(255, 255, 255, 0.18)',
+  /** Fill for glass surfaces — always sits over the bloom so it tints. */
+  glass: 'rgba(255, 255, 255, 0.055)',
+  glassStrong: 'rgba(255, 255, 255, 0.09)',
+  /** The faint 25px grid, on Session and Feed only. */
+  grid: 'rgba(255, 255, 255, 0.028)',
   /** Scrim behind modals. */
-  scrim: 'rgba(6, 6, 18, 0.72)',
+  scrim: 'rgba(8, 5, 14, 0.74)',
 } as const;
 
 export type ColorToken = keyof typeof Colors;
 
 /**
- * Righteous carries the music-poster energy for titles; Poppins does the
- * legible work everywhere else. Loaded in the root layout via expo-font.
+ * Atmosphere. Derived from album art, DECORATIVE ONLY — these never carry
+ * meaning, which is exactly what frees `accent` to be semantic. Vary them per
+ * track; they are why every Session looks slightly different.
+ */
+export const Bloom = {
+  a: '#C77FA8',
+  b: '#8B5FB0',
+  c: '#4A6BA0',
+} as const;
+
+/** A radial bloom behind artwork. `size` is the square it occupies. */
+export const bloomGradient = (opacity = 0.4) =>
+  [
+    `rgba(199, 127, 168, ${opacity})`,
+    `rgba(139, 95, 176, ${opacity * 0.55})`,
+    'rgba(14, 10, 22, 0)',
+  ] as const;
+
+/**
+ * Three faces, three jobs. Instrument Serif carries the feeling, Figtree does
+ * the reading, IBM Plex Mono does the measuring — every number that MEASURES
+ * (timecodes, drift, counts, invite codes) is mono. That is the single
+ * strongest signal of this direction.
  */
 export const Fonts = {
-  display: 'Righteous_400Regular',
-  body: 'Poppins_400Regular',
-  bodyMedium: 'Poppins_500Medium',
-  bodySemi: 'Poppins_600SemiBold',
-  bodyBold: 'Poppins_700Bold',
+  display: 'InstrumentSerif_400Regular',
+  displayItalic: 'InstrumentSerif_400Regular_Italic',
+  body: 'Figtree_400Regular',
+  bodyMedium: 'Figtree_500Medium',
+  bodySemi: 'Figtree_600SemiBold',
+  mono: 'IBMPlexMono_400Regular',
+  monoMedium: 'IBMPlexMono_500Medium',
 } as const;
 
 /** 4px base scale. */
@@ -60,15 +101,20 @@ export const Space = {
   sm: 8,
   md: 12,
   lg: 16,
-  xl: 24,
-  xxl: 32,
-  xxxl: 48,
+  xl: 20,
+  xxl: 24,
+  xxxl: 32,
+  huge: 44,
 } as const;
 
 export const Radius = {
-  sm: 8,
+  /** Data chips, small squares. */
+  sm: 6,
+  /** Controls. */
   md: 12,
+  /** Cards. */
   lg: 18,
+  /** Sheets. */
   xl: 26,
   pill: 999,
 } as const;
@@ -86,9 +132,7 @@ export const Duration = {
   slow: 300,
 } as const;
 
-/**
- * Explicit z-scale so overlays never fight. Anything not listed sits at 0.
- */
+/** Explicit z-scale so overlays never fight. Anything not listed sits at 0. */
 export const ZIndex = {
   content: 0,
   miniPlayer: 10,
@@ -99,21 +143,32 @@ export const ZIndex = {
 } as const;
 
 export const Type = {
-  hero: { fontFamily: Fonts.display, fontSize: 34, lineHeight: 40 },
-  title: { fontFamily: Fonts.display, fontSize: 24, lineHeight: 30 },
-  heading: { fontFamily: Fonts.bodySemi, fontSize: 18, lineHeight: 26 },
+  hero: { fontFamily: Fonts.display, fontSize: 40, lineHeight: 44 },
+  display: { fontFamily: Fonts.display, fontSize: 32, lineHeight: 37 },
+  title: { fontFamily: Fonts.display, fontSize: 24, lineHeight: 29 },
+  heading: { fontFamily: Fonts.bodySemi, fontSize: 17, lineHeight: 23 },
   /** 16px floor for body text on mobile. */
   body: { fontFamily: Fonts.body, fontSize: 16, lineHeight: 24 },
   bodyStrong: { fontFamily: Fonts.bodyMedium, fontSize: 16, lineHeight: 24 },
-  label: { fontFamily: Fonts.bodyMedium, fontSize: 14, lineHeight: 20 },
-  caption: { fontFamily: Fonts.body, fontSize: 13, lineHeight: 18 },
+  label: { fontFamily: Fonts.bodyMedium, fontSize: 13.5, lineHeight: 19 },
+  caption: { fontFamily: Fonts.body, fontSize: 12.5, lineHeight: 18 },
+  /** Timecodes, drift, counts. */
+  mono: { fontFamily: Fonts.monoMedium, fontSize: 11.5, lineHeight: 15, letterSpacing: 0.4 },
+  /** Uppercase section eyebrows. */
+  monoLabel: {
+    fontFamily: Fonts.monoMedium,
+    fontSize: 10,
+    lineHeight: 13,
+    letterSpacing: 0.9,
+    textTransform: 'uppercase' as const,
+  },
 } as const;
 
 /**
  * React Native 0.86 deprecated the `pointerEvents` PROP in favour of the
- * `pointerEvents` STYLE. These are module-level constants rather than inline
- * objects so a decorative overlay does not allocate a new style on every
- * render and defeat the memoisation of whatever it sits inside.
+ * `pointerEvents` STYLE. Module-level constants rather than inline objects so a
+ * decorative overlay does not allocate a new style on every render and defeat
+ * the memoisation of whatever it sits inside.
  */
 export const PointerEvents = {
   none: { pointerEvents: 'none' },
@@ -126,14 +181,14 @@ export const PointerEvents = {
  * artwork; Android only understands `elevation`; web uses boxShadow.
  */
 export const shadow = (level: 'sm' | 'md' | 'lg') => {
-  const spec = { sm: [4, 0.24, 2], md: [12, 0.32, 6], lg: [24, 0.4, 12] }[level];
+  const spec = { sm: [4, 0.3, 2], md: [14, 0.36, 6], lg: [30, 0.44, 14] }[level];
   const [radius, opacity, offset] = spec;
 
   return Platform.select({
-    web: { boxShadow: `0 ${offset}px ${radius}px rgba(8, 6, 30, ${opacity})` },
+    web: { boxShadow: `0 ${offset}px ${radius}px rgba(6, 3, 12, ${opacity})` },
     android: { elevation: offset },
     default: {
-      shadowColor: '#08061E',
+      shadowColor: '#06030C',
       shadowOpacity: opacity,
       shadowRadius: radius,
       shadowOffset: { width: 0, height: offset },

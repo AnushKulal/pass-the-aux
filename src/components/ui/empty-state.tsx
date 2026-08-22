@@ -40,12 +40,16 @@ const styles = StyleSheet.create({
     borderRadius: Radius.xl,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Colors.surface,
+    // Glass rather than a solid block, so the badge tints when a Bloom sits
+    // behind it.
+    backgroundColor: Colors.glass,
     borderWidth: 1,
     borderColor: Colors.border,
   },
   title: {
-    ...Type.heading,
+    // Instrument Serif. Empty states are the one place the app speaks, so the
+    // title takes the display face rather than the UI face.
+    ...Type.title,
     color: Colors.text,
     textAlign: 'center',
   },

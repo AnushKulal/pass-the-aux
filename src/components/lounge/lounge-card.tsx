@@ -23,6 +23,7 @@ export type LoungeCardProps = {
 
 const ICON_SIZE = 52;
 const META_ICON = 14;
+const ICON_STROKE = 1.6;
 
 function pluralize(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`;
@@ -71,7 +72,7 @@ function LoungeCardBase({
 
               {showJoined ? (
                 <View style={styles.joined}>
-                  <Check size={12} color={Colors.text} strokeWidth={3} />
+                  <Check size={12} color={Colors.muted} strokeWidth={2.4} />
                   <Text style={styles.joinedLabel}>Joined</Text>
                 </View>
               ) : null}
@@ -93,7 +94,7 @@ function LoungeCardBase({
 
               {memberCount !== undefined ? (
                 <View style={styles.metaItem}>
-                  <Users size={META_ICON} color={Colors.muted} />
+                  <Users size={META_ICON} color={Colors.muted} strokeWidth={ICON_STROKE} />
                   <Text style={styles.metaLabel}>
                     {pluralize(memberCount, 'member', 'members')}
                   </Text>
@@ -102,9 +103,9 @@ function LoungeCardBase({
 
               <View style={styles.metaItem}>
                 {isPublic ? (
-                  <Globe size={META_ICON} color={Colors.muted} />
+                  <Globe size={META_ICON} color={Colors.muted} strokeWidth={ICON_STROKE} />
                 ) : (
-                  <Lock size={META_ICON} color={Colors.muted} />
+                  <Lock size={META_ICON} color={Colors.muted} strokeWidth={ICON_STROKE} />
                 )}
                 <Text style={styles.metaLabel}>{isPublic ? 'Public' : 'Private'}</Text>
               </View>
@@ -113,7 +114,7 @@ function LoungeCardBase({
 
           {/* Muted rather than faint: faint sits under 3:1 on glass, which is
               the floor for a graphic that carries meaning. */}
-          <ChevronRight size={20} color={Colors.muted} />
+          <ChevronRight size={20} color={Colors.muted} strokeWidth={ICON_STROKE} />
         </View>
       </GlassCard>
     </Pressable>
@@ -183,8 +184,9 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   /*
-    Primary, never accent: "Joined" is a state, not a live signal. Green in this
-    app means something is playing right now.
+    Glass, never accent: "Joined" is a state, not a live signal. Green in this
+    app means something is playing right now, and a filled badge next to a live
+    pulse would read as a second, competing status.
   */
   joined: {
     flexDirection: 'row',
@@ -193,12 +195,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: Space.sm,
     paddingVertical: 2,
     borderRadius: Radius.pill,
-    backgroundColor: Colors.primary,
+    backgroundColor: Colors.glass,
+    borderWidth: 1,
+    borderColor: Colors.borderBright,
   },
   joinedLabel: {
     ...Type.caption,
-    fontSize: 12,
-    color: Colors.text,
+    color: Colors.muted,
   },
   description: {
     ...Type.body,
@@ -216,12 +219,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Space.xs,
   },
+  /*
+    Mono, because every one of these is a measurement: how many people are in
+    the room, how many are listening, what kind of room it is. Prose sets in
+    Figtree; anything you could count sets in Plex.
+  */
   metaLabel: {
-    ...Type.label,
+    ...Type.monoLabel,
     color: Colors.muted,
   },
   live: {
-    ...Type.label,
+    ...Type.monoLabel,
     color: Colors.accent,
   },
   skeletonBody: {

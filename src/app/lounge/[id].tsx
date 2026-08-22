@@ -1,3 +1,4 @@
+import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import {
   Globe,
@@ -39,7 +40,16 @@ import {
   useStartSession,
   type LoungeMemberEntry,
 } from '@/features/lounges/queries';
-import { Colors, Space, TOUCH_TARGET, Type } from '@/lib/theme';
+import {
+  Colors,
+  Fonts,
+  PointerEvents,
+  Radius,
+  Space,
+  TOUCH_TARGET,
+  Type,
+  bloomGradient,
+} from '@/lib/theme';
 
 /**
  * The lounge is two views of one community, exactly as a Session is Queue and
@@ -141,9 +151,9 @@ export default function LoungeDetailScreen() {
 
               <View style={styles.aboutMeta}>
                 {lounge.is_public ? (
-                  <Globe size={16} color={Colors.muted} />
+                  <Globe size={16} color={Colors.muted} strokeWidth={1.6} />
                 ) : (
-                  <Lock size={16} color={Colors.muted} />
+                  <Lock size={16} color={Colors.muted} strokeWidth={1.6} />
                 )}
                 <Text style={styles.metaLabel}>
                   {lounge.is_public ? 'Public lounge' : 'Private lounge'}
@@ -151,7 +161,10 @@ export default function LoungeDetailScreen() {
               </View>
 
               {/* The invite code is the lounge's front door — members must be
-                  able to find it without hunting through a menu. */}
+                  able to find it without hunting through a menu. Mono and
+                  tracked wide: eight characters that get read out loud have to
+                  survive being misheard, and mono is the only face here where
+                  0/O and 1/I are visibly different shapes. */}
               {isMember ? (
                 <View style={styles.inviteRow}>
                   <View style={styles.inviteBlock}>
@@ -196,7 +209,7 @@ export default function LoungeDetailScreen() {
           ) : (sessions.data?.length ?? 0) === 0 ? (
             <GlassCard>
               <View style={styles.noSessions}>
-                <Radio size={22} color={Colors.muted} />
+                <Radio size={22} color={Colors.muted} strokeWidth={1.6} />
                 <Text style={styles.noSessionsText}>
                   Nobody is on aux right now. Start a Session and pick the first track.
                 </Text>
@@ -268,6 +281,8 @@ export default function LoungeDetailScreen() {
 
   return (
     <Screen title={lounge?.name ?? 'Lounge'} onBack={handleBack} right={headerActions}>
+      <Bloom />
+
       {detail.isPending ? (
         <DetailSkeleton />
       ) : detail.isError ? (
@@ -290,9 +305,14 @@ export default function LoungeDetailScreen() {
           title="Join to view this lounge"
           description="This lounge is private, or it no longer exists. Redeem its invite code to get in."
           action={
+            /*
+              Primary, not accent: this navigates to Explore, it does not join
+              anything. Explore's own code-submit button is ink on glass in the
+              artboard for the same reason — accent belongs to the join itself.
+            */
             <AuxButton
               label="Enter an invite code"
-              variant="accent"
+              variant="primary"
               onPress={() => router.replace('/explore')}
             />
           }
@@ -376,11 +396,47 @@ function Divider() {
   return <View style={styles.divider} />;
 }
 
+/**
+ * A mono eyebrow, a hairline running out to whatever action sits on the right.
+ * The same rule-plus-label figure the chat log uses for day breaks, so the two
+ * halves of this screen are visibly one system.
+ */
 function SectionTitle({ title, action }: { title: string; action?: ReactNode }) {
   return (
     <View style={styles.sectionTitle}>
       <Text style={styles.sectionLabel}>{title}</Text>
+      <View style={styles.sectionRule} />
       {action}
+    </View>
+  );
+}
+
+/**
+ * The room's light. Decorative only — Bloom colours never carry meaning, which
+ * is precisely what keeps Colors.accent free to mean "live". There is no blur
+ * in React Native, so the softness is faked with two overlapping gradients that
+ * fall off on different axes; the hard top edge is parked above the header.
+ */
+function Bloom() {
+  return (
+    <View
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={[styles.bloom, PointerEvents.none]}>
+      <LinearGradient
+        colors={bloomGradient(0.3)}
+        locations={[0, 0.45, 1]}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+        style={StyleSheet.absoluteFill}
+      />
+      <LinearGradient
+        colors={bloomGradient(0.18)}
+        locations={[0, 0.5, 1]}
+        start={{ x: 0.1, y: 0.1 }}
+        end={{ x: 0.95, y: 0.9 }}
+        style={StyleSheet.absoluteFill}
+      />
     </View>
   );
 }
@@ -408,7 +464,7 @@ function IconAction({
         pressed && styles.iconActionPressed,
         disabled && styles.iconActionDisabled,
       ]}>
-      <Icon size={22} color={Colors.text} />
+      <Icon size={22} color={Colors.text} strokeWidth={1.6} />
     </Pressable>
   );
 }
@@ -483,29 +539,54 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: Space.md,
+    // A hairline promotes the code out of the description block above it
+    // without needing a second card to hold it.
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
+    paddingTop: Space.md,
   },
   inviteBlock: {
     flexShrink: 1,
+    gap: 3,
   },
   inviteLabel: {
-    ...Type.label,
+    ...Type.monoLabel,
     color: Colors.muted,
   },
   inviteCode: {
-    ...Type.title,
+    // No token carries a 24px mono, so it is composed from the mono face and
+    // the title size rather than invented.
+    fontFamily: Fonts.monoMedium,
+    fontSize: Type.title.fontSize,
+    lineHeight: Type.title.lineHeight,
+    letterSpacing: 3.4,
     color: Colors.text,
-    letterSpacing: 2,
   },
   sectionTitle: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     gap: Space.md,
     minHeight: TOUCH_TARGET,
   },
   sectionLabel: {
-    ...Type.heading,
-    color: Colors.text,
+    ...Type.monoLabel,
+    color: Colors.muted,
+  },
+  sectionRule: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: Colors.border,
+  },
+  bloom: {
+    position: 'absolute',
+    // Parked above the header so its hard top edge never lands on the screen —
+    // what shows is only the falloff, which is the whole point of a bloom.
+    top: -180,
+    left: -Space.huge,
+    right: -Space.huge,
+    height: 380,
+    borderRadius: Radius.pill,
+    overflow: 'hidden',
   },
   sessionList: {
     gap: Space.md,

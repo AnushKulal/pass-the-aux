@@ -1,15 +1,16 @@
 import { makeRedirectUri } from 'expo-auth-session';
 import { Redirect } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import { Globe, Headphones, Music } from 'lucide-react-native';
+import { Globe, Music } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 
 import { AuxButton, GlassCard, SheetTabs, TextField, useToast } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
-import { Colors, Fonts, Radius, Space, Type } from '@/lib/theme';
+import { Bloom, Colors, PointerEvents, Space, Type } from '@/lib/theme';
 
 // Hands the redirect URL back to `openAuthSessionAsync` and closes the popup.
 // No-op on native, required on web.
@@ -142,6 +143,24 @@ export default function SignInScreen() {
 
   return (
     <SafeAreaView style={styles.root} edges={['top', 'bottom', 'left', 'right']}>
+      {/*
+        Signature 1, dialled right down. No artwork has been loaded this early
+        in the app, so the bloom only has to keep the ground from reading as
+        flat black behind the wordmark.
+      */}
+      <View style={[styles.bloom, PointerEvents.none]}>
+        <Svg width="100%" height="100%">
+          <Defs>
+            <RadialGradient id="signInBloom" cx="50%" cy="14%" rx="62%" ry="86%">
+              <Stop offset="0" stopColor={Bloom.a} stopOpacity={0.22} />
+              <Stop offset="0.45" stopColor={Bloom.b} stopOpacity={0.13} />
+              <Stop offset="0.78" stopColor={Colors.bg} stopOpacity={0} />
+            </RadialGradient>
+          </Defs>
+          <Rect x="0" y="0" width="100%" height="100%" fill="url(#signInBloom)" />
+        </Svg>
+      </View>
+
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -150,84 +169,92 @@ export default function SignInScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
           <View style={styles.brand}>
-            <View style={styles.mark}>
-              {/* Not the accent: a brand mark is decorative, and the green has
-                  to keep meaning live/play/join. Colors.text rather than
-                  Colors.primary — indigo on the surface fill reads at ~2:1. */}
-              <Headphones size={26} color={Colors.text} />
-            </View>
             <Text style={styles.wordmark}>aux</Text>
             <Text style={styles.tagline}>Pass the aux.</Text>
           </View>
 
-          <SheetTabs tabs={MODES} active={mode} onChange={changeMode} />
+          {/* Elastic rather than a centred column: the wordmark holds the top
+              and the credentials rise to meet the keyboard. */}
+          <View style={styles.gap} />
 
-          <View style={styles.form}>
-            <TextField
-              label="Email"
-              value={email}
-              onChangeText={setEmail}
-              placeholder="you@example.com"
-              autoCapitalize="none"
-              autoComplete="email"
-              keyboardType="email-address"
-              error={submitted ? emailProblem : undefined}
-            />
+          <View style={styles.block}>
+            {/*
+              Segmented, per the artboard: a pill track with 44px word-label
+              segments. The underline variant would set "Create account" as an
+              11.5px mono readout and underline it in accent, and neither is
+              right — this is readable copy, and picking a form mode is not live.
+            */}
+            <SheetTabs tabs={MODES} active={mode} onChange={changeMode} variant="segmented" />
 
-            <TextField
-              label="Password"
-              value={password}
-              onChangeText={setPassword}
-              placeholder={mode === 'signup' ? `At least ${MIN_PASSWORD} characters` : 'Your password'}
-              secureTextEntry
-              autoCapitalize="none"
-              autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-              error={submitted ? passwordProblem : undefined}
-            />
+            <View style={styles.form}>
+              <TextField
+                label="Email"
+                value={email}
+                onChangeText={setEmail}
+                placeholder="you@example.com"
+                autoCapitalize="none"
+                autoComplete="email"
+                keyboardType="email-address"
+                error={submitted ? emailProblem : undefined}
+              />
 
+              <TextField
+                label="Password"
+                value={password}
+                onChangeText={setPassword}
+                placeholder={mode === 'signup' ? `At least ${MIN_PASSWORD} characters` : 'Your password'}
+                secureTextEntry
+                autoCapitalize="none"
+                autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                error={submitted ? passwordProblem : undefined}
+              />
+            </View>
+
+            {/* Deliberately the primary fill and never the accent: signing in
+                is not a live state. */}
             <AuxButton
               label={mode === 'signup' ? 'Create account' : 'Sign in'}
               onPress={() => {
                 void submit();
               }}
               fullWidth
-              size="lg"
               loading={busy === 'email'}
               disabled={busy !== null && busy !== 'email'}
             />
           </View>
 
-          <View style={styles.divider}>
-            <View style={styles.rule} />
-            <Text style={styles.dividerLabel}>or</Text>
-            <View style={styles.rule} />
+          <View style={styles.block}>
+            <View style={styles.divider}>
+              <View style={styles.rule} />
+              <Text style={styles.dividerLabel}>or</Text>
+              <View style={styles.rule} />
+            </View>
+
+            <AuxButton
+              label="Continue with Google"
+              icon={Globe}
+              variant="ghost"
+              fullWidth
+              onPress={() => {
+                void continueWithGoogle();
+              }}
+              loading={busy === 'google'}
+              disabled={busy !== null && busy !== 'google'}
+            />
           </View>
 
-          <AuxButton
-            label="Continue with Google"
-            icon={Globe}
-            variant="ghost"
-            size="lg"
-            fullWidth
-            onPress={() => {
-              void continueWithGoogle();
-            }}
-            loading={busy === 'google'}
-            disabled={busy !== null && busy !== 'google'}
-          />
+          <View style={styles.gap} />
 
-          <GlassCard style={styles.note}>
-            <View style={styles.noteRow}>
-              <Music size={20} color={Colors.muted} />
-              <View style={styles.noteBody}>
-                <Text style={styles.noteTitle}>Spotify is not a sign-in method</Text>
-                <Text style={styles.noteText}>
-                  Aux plays through YouTube out of the box, so you never need a Spotify account. If you
-                  have Premium, you can link it later from Settings, Connections to play in Spotify
-                  instead.
-                </Text>
-              </View>
+          <GlassCard>
+            <View style={styles.noteHead}>
+              <Music size={18} color={Colors.muted} strokeWidth={1.6} />
+              <Text style={styles.noteTitle}>Spotify is not a sign-in method</Text>
             </View>
+            <Text style={styles.noteText}>
+              Aux plays through YouTube out of the box, so you never need a Spotify account. If you
+              have Premium, you can link it later from Settings, Connections to play in Spotify
+              instead.
+            </Text>
           </GlassCard>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -305,43 +332,47 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
   },
+  bloom: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    height: 366,
+  },
   content: {
     flexGrow: 1,
-    justifyContent: 'center',
     width: '100%',
     maxWidth: 480,
     alignSelf: 'center',
-    paddingHorizontal: Space.lg,
-    paddingVertical: Space.xxxl,
-    gap: Space.xl,
+    paddingHorizontal: Space.xl,
+    paddingTop: Space.xxl,
+    paddingBottom: Space.xl,
+    gap: Space.lg,
   },
   brand: {
     alignItems: 'center',
     gap: Space.sm,
   },
-  mark: {
-    width: 56,
-    height: 56,
-    borderRadius: Radius.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    marginBottom: Space.xs,
-  },
   wordmark: {
     ...Type.hero,
-    fontFamily: Fonts.display,
     color: Colors.text,
-    letterSpacing: 1,
+    letterSpacing: 0.4,
   },
   tagline: {
     ...Type.body,
     color: Colors.muted,
   },
+  /** Collapses first when the keyboard takes the bottom half of the screen. */
+  gap: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minHeight: Space.sm,
+  },
+  block: {
+    gap: Space.md,
+  },
   form: {
-    gap: Space.lg,
+    gap: Space.md,
   },
   divider: {
     flexDirection: 'row',
@@ -354,26 +385,22 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.border,
   },
   dividerLabel: {
-    ...Type.caption,
+    ...Type.label,
     color: Colors.muted,
   },
-  note: {
-    marginTop: Space.sm,
-  },
-  noteRow: {
+  noteHead: {
     flexDirection: 'row',
-    gap: Space.md,
-  },
-  noteBody: {
-    flex: 1,
-    gap: Space.xs,
+    alignItems: 'center',
+    gap: Space.sm,
   },
   noteTitle: {
     ...Type.bodyStrong,
     color: Colors.text,
+    flex: 1,
   },
   noteText: {
     ...Type.body,
     color: Colors.muted,
+    marginTop: Space.xs,
   },
 });

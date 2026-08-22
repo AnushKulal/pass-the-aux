@@ -12,10 +12,14 @@ export type GlassCardProps = {
 };
 
 /**
- * The app's primary surface: a frosted block over the indigo background.
+ * Signature element #5 — the glass panel. Colors.glass fill, one hairline
+ * border, Radius.lg, over the indigo-plum ground.
  *
  * Blur is treated as decoration, never as the thing that makes text readable —
- * see the opaque floor below.
+ * see the opaque floor below. That floor also means a Bloom placed *behind* a
+ * card cannot tint it; to get the artboard's lit-from-within panels, render
+ * `<Bloom />` as the first child instead, exactly the way the artboard nests its
+ * bloom div inside the Feed row. `overflow: hidden` clips it to the radius.
  */
 export function GlassCard({ children, style, intensity = 40, padded = true }: GlassCardProps) {
   return (
