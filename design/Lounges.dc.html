@@ -1,0 +1,217 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Figtree:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #57E2D5; } a:hover { color: #8bede4; }
+    .aux-row { cursor: pointer; }
+    @keyframes auxHalo { from { opacity: .45; transform: scale(.4); } to { opacity: 0; transform: scale(1); } }
+    .aux-halo { animation: auxHalo 1400ms cubic-bezier(.16,.84,.44,1) infinite; }
+    @media (prefers-reduced-motion: reduce) { .aux-halo { display: none; } }
+  </style>
+</helmet>
+
+<div style="width: 375px; height: 812px; background: #0E0A16; color: #F2EDF7; font-family: Figtree, system-ui, sans-serif; overflow: hidden; position: relative; display: flex; flex-direction: column;">
+
+  <!-- Atmosphere: fainter here — the artwork is two screens away, this is only the doorways to it -->
+  <div style="position: absolute; left: 50%; top: -150px; transform: translateX(-50%); width: 440px; height: 340px; background: radial-gradient(circle, rgba(199,127,168,.24) 0%, rgba(139,95,176,.13) 45%, rgba(14,10,22,0) 70%); filter: blur(34px); pointer-events: none;"></div>
+
+  <!-- Header -->
+  <div style="position: relative; padding: 16px 20px 0; display: flex; align-items: center; min-height: 44px;">
+    <span style="font-family: 'Instrument Serif', Georgia, serif; font-size: 24px; line-height: 1.2;">Lounges</span>
+  </div>
+
+  <!-- Header actions -->
+  <div style="position: relative; padding: 12px 20px 0; display: flex; align-items: center; gap: 12px;">
+    <div onClick="{{ noop }}" class="aux-row" style="min-height: 44px; padding: 0 16px; border-radius: 999px; border: 1px solid rgba(255,255,255,.18); display: flex; align-items: center; gap: 8px;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F2EDF7" stroke-width="1.8" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+      <span style="font-size: 16px; font-weight: 500;">Create</span>
+    </div>
+    <div onClick="{{ openCode }}" class="aux-row" style="min-height: 44px; padding: 0 16px; border-radius: 999px; border: 1px solid rgba(255,255,255,.18); display: flex; align-items: center; gap: 8px;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F2EDF7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 18v3c0 .6.4 1 1 1h4v-3h3v-3h2l1.4-1.4a6.5 6.5 0 1 0-4-4Z"></path><circle cx="16.5" cy="7.5" r=".7" fill="#F2EDF7"></circle></svg>
+      <span style="font-size: 16px; font-weight: 500;">Join with code</span>
+    </div>
+  </div>
+
+  <!-- The list -->
+  <sc-if value="{{ hasLounges }}" hint-placeholder-val="{{ true }}">
+    <div style="position: relative; padding: 16px 20px 0; display: flex; flex-direction: column; gap: 12px;">
+      <sc-for list="{{ items }}" as="l" hint-placeholder-count="5">
+        <div onClick="{{ l.open }}" class="aux-row" style="border-radius: 18px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); padding: 14px 16px; display: flex; align-items: center; gap: 12px;">
+          <div style="width: 52px; height: 52px; border-radius: 14px; background: {{ l.art }}; border: 1.5px solid {{ l.ring }}; box-shadow: {{ l.shadow }}; flex: none;"></div>
+          <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+            <div style="font-size: 17px; font-weight: 600; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ l.name }}</div>
+            <div style="font-size: 16px; line-height: 1.5; color: #A79FB8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ l.desc }}</div>
+            <div style="display: flex; align-items: center; gap: 12px; margin-top: 2px;">
+              <div style="display: {{ l.liveDisplay }}; align-items: center; gap: 8px;">
+                <span style="position: relative; width: 7px; height: 7px; flex: none;">
+                  <span class="aux-halo" style="position: absolute; left: -5px; top: -5px; width: 17px; height: 17px; border-radius: 50%; background: #57E2D5;"></span>
+                  <span style="position: absolute; left: 0; top: 0; width: 7px; height: 7px; border-radius: 50%; background: #57E2D5;"></span>
+                </span>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #57E2D5;">{{ l.liveLabel }}</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path></svg>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">{{ l.members }}</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="display: {{ l.globeDisplay }};"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="display: {{ l.lockDisplay }};"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">{{ l.visibility }}</span>
+              </div>
+            </div>
+          </div>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6E6681" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex: none;"><path d="M9 18l6-6-6-6"></path></svg>
+        </div>
+      </sc-for>
+    </div>
+  </sc-if>
+
+  <!-- Empty — the first thing a new account sees -->
+  <sc-if value="{{ empty }}" hint-placeholder-val="{{ false }}">
+    <div style="position: relative; padding: 200px 32px 0; display: flex; flex-direction: column; align-items: center; gap: 12px;">
+      <div style="width: 56px; height: 56px; border-radius: 18px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); display: grid; place-items: center;">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+      </div>
+      <div style="font-family: 'Instrument Serif', Georgia, serif; font-size: 24px; line-height: 1.2; margin-top: 4px;">No lounges yet</div>
+      <div style="font-size: 16px; line-height: 1.5; color: #A79FB8; text-align: center;">Create one or join with a code.</div>
+      <div onClick="{{ noop }}" class="aux-row" style="margin-top: 8px; min-height: 52px; padding: 0 22px; border-radius: 999px; background: #F2EDF7; display: flex; align-items: center; gap: 9px;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0E0A16" stroke-width="1.9" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+        <span style="font-size: 16px; font-weight: 600; color: #0E0A16;">Create a lounge</span>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- Tab bar — matches Feed.dc.html -->
+  <div style="position: absolute; left: 0; right: 0; bottom: 0; height: 82px; box-sizing: border-box; background: rgba(18,13,28,.86); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); border-top: 1px solid rgba(255,255,255,.10); padding: 10px 8px 21px; display: flex; align-items: flex-start;">
+
+    <div onClick="{{ goHome }}" class="aux-row" style="flex: 1; height: 50px; display: flex; flex-direction: column; align-items: center; gap: 4px; color: {{ homeInk }};">
+      <div style="width: 44px; height: 32px; border-radius: 11px; display: grid; place-items: center; background: {{ homePill }};">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"></path><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
+      </div>
+      <span style="font-size: 12.5px; line-height: 14px; font-weight: 500;">Home</span>
+    </div>
+
+    <div onClick="{{ goExplore }}" class="aux-row" style="flex: 1; height: 50px; display: flex; flex-direction: column; align-items: center; gap: 4px; color: {{ exploreInk }};">
+      <div style="width: 44px; height: 32px; border-radius: 11px; display: grid; place-items: center; background: {{ explorePill }};">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon></svg>
+      </div>
+      <span style="font-size: 12.5px; line-height: 14px; font-weight: 500;">Explore</span>
+    </div>
+
+    <div onClick="{{ goLounges }}" class="aux-row" style="flex: 1; height: 50px; display: flex; flex-direction: column; align-items: center; gap: 4px; color: {{ loungesInk }};">
+      <div style="width: 44px; height: 32px; border-radius: 11px; display: grid; place-items: center; background: {{ loungesPill }};">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+      </div>
+      <span style="font-size: 12.5px; line-height: 14px; font-weight: 500;">Lounges</span>
+    </div>
+
+    <div onClick="{{ goProfile }}" class="aux-row" style="flex: 1; height: 50px; display: flex; flex-direction: column; align-items: center; gap: 4px; color: {{ profileInk }};">
+      <div style="width: 44px; height: 32px; border-radius: 11px; display: grid; place-items: center; background: {{ profilePill }};">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+      </div>
+      <span style="font-size: 12.5px; line-height: 14px; font-weight: 500;">Profile</span>
+    </div>
+
+  </div>
+
+  <!-- Join with a code -->
+  <sc-if value="{{ codeOpen }}" hint-placeholder-val="{{ false }}">
+    <div style="position: absolute; left: 0; top: 0; right: 0; bottom: 0; background: rgba(14,10,22,.78); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 20px;">
+      <div onClick="{{ closeCode }}" class="aux-row" style="position: absolute; left: 0; top: 0; right: 0; bottom: 0;"></div>
+      <div style="position: relative; width: 100%; border-radius: 26px; background: #140F1E; border: 1px solid rgba(255,255,255,.18); padding: 20px; display: flex; flex-direction: column; gap: 12px;">
+        <div style="font-family: 'Instrument Serif', Georgia, serif; font-size: 24px; line-height: 1.2;">Join with a code</div>
+        <div style="font-size: 16px; line-height: 1.5; color: #A79FB8;">Ask someone in the lounge for its invite code — eight characters.</div>
+        <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 4px;">
+          <span style="font-size: 13.5px; font-weight: 500; color: #A79FB8;">Invite code</span>
+          <div style="min-height: 48px; border-radius: 12px; background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.18); padding: 0 14px; display: flex; align-items: center;">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 16px; letter-spacing: .16em; color: #6E6681;">A1B2C3D4</span>
+          </div>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 4px;">
+          <div onClick="{{ closeCode }}" class="aux-row" style="min-height: 44px; padding: 0 18px; border-radius: 999px; border: 1px solid rgba(255,255,255,.18); display: flex; align-items: center;">
+            <span style="font-size: 16px; font-weight: 500;">Cancel</span>
+          </div>
+          <div onClick="{{ closeCode }}" class="aux-row" style="min-height: 44px; padding: 0 22px; border-radius: 999px; background: rgba(87,226,213,.14); border: 1px solid rgba(87,226,213,.34); display: flex; align-items: center;">
+            <span style="font-size: 16px; font-weight: 500; color: #57E2D5;">Join</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"empty":{"editor":"boolean","default":false,"section":"Prototype"}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { code: false, tab: 'lounges' };
+  }
+
+  renderVals() {
+    const empty = this.props.empty === true || this.props.empty === 'true';
+    const LIVE = '#57E2D5';
+
+    // A live Session is the only thing on this screen that earns the live colour.
+    const raw = [
+      { name: 'Basement FM',         desc: 'Four floors down.', sessions: 2, listeners: 7, members: 7, pub: true, art: 'linear-gradient(140deg,#C77FA8,#8B5FB0)' },
+      { name: 'Late Night Rotation', desc: 'Nothing before midnight.',        sessions: 1, listeners: 0, members: 34, pub: true,  art: 'linear-gradient(140deg,#8B5FB0,#4A3670)' },
+      { name: 'Sunday Static',       desc: 'Slow songs, long days.',    sessions: 0, listeners: 0, members: 8,  pub: false, art: 'linear-gradient(140deg,#4A6BA0,#2E4470)' },
+      { name: 'Rooftop Hours',       desc: 'Sets and long drives.',    sessions: 0, listeners: 0, members: 21, pub: true,  art: 'linear-gradient(140deg,#C77FA8,#7A4A68)' },
+      { name: 'Dorm 4B',             desc: 'First one there picks.', sessions: 0, listeners: 0, members: 6,  pub: false, art: 'linear-gradient(140deg,#8B5FB0,#4A6BA0)' },
+    ];
+
+    const items = raw.map((l) => {
+      const live = l.sessions > 0;
+      return {
+        name: l.name,
+        desc: l.desc,
+        art: l.art,
+        ring: live ? LIVE : 'rgba(255,255,255,.10)',
+        shadow: live
+          ? '0 0 0 4px rgba(87,226,213,.09), 0 10px 26px rgba(87,226,213,.16)'
+          : '0 8px 22px rgba(0,0,0,.30)',
+        liveDisplay: live ? 'flex' : 'none',
+        liveLabel: l.listeners > 0 ? l.listeners + ' LISTENING' : 'LIVE NOW',
+        members: l.members === 1 ? '1 MEMBER' : l.members + ' MEMBERS',
+        visibility: l.pub ? 'PUBLIC' : 'PRIVATE',
+        globeDisplay: l.pub ? 'block' : 'none',
+        lockDisplay: l.pub ? 'none' : 'block',
+        open: () => {},
+      };
+    });
+
+    const tab = this.state.tab;
+    const pill = (k) => (tab === k ? 'rgba(255,255,255,.085)' : 'transparent');
+    const ink = (k) => (tab === k ? '#F2EDF7' : '#A79FB8');
+
+    return {
+      items,
+      homeInk: ink('home'), homePill: pill('home'),
+      exploreInk: ink('explore'), explorePill: pill('explore'),
+      loungesInk: ink('lounges'), loungesPill: pill('lounges'),
+      profileInk: ink('profile'), profilePill: pill('profile'),
+      goHome: () => this.setState({ tab: 'home' }),
+      goExplore: () => this.setState({ tab: 'explore' }),
+      goLounges: () => this.setState({ tab: 'lounges' }),
+      goProfile: () => this.setState({ tab: 'profile' }),
+      empty,
+      hasLounges: !empty,
+      codeOpen: this.state.code,
+      openCode: () => this.setState({ code: true }),
+      closeCode: () => this.setState({ code: false }),
+      noop: () => {},
+    };
+  }
+}
+</script>
+</body>
+</html>

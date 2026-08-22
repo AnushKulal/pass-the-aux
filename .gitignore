@@ -47,3 +47,7 @@ example
 # generated native folders
 /ios
 /android
+
+# Scratch output from the design canvas tooling
+.dcpreview/
+design/.preview-tmp/

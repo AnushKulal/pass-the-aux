@@ -1,0 +1,146 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Figtree:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #57E2D5; } a:hover { color: #8bede4; }
+    .aux-row { cursor: pointer; }
+    .aux-field { font-family: Figtree, system-ui, sans-serif; }
+    .aux-field::placeholder { color: #6E6681; }
+    .aux-field:focus { outline: none; border-color: rgba(255,255,255,.18); background: rgba(255,255,255,.09); }
+  </style>
+</helmet>
+
+<div style="width: 375px; height: 812px; background: #0E0A16; color: #F2EDF7; font-family: Figtree, system-ui, sans-serif; overflow: hidden; position: relative; display: flex; flex-direction: column;">
+
+  <!-- Atmosphere: nothing is playing yet, so the room is only half lit -->
+  <div style="position: absolute; left: 50%; top: -160px; transform: translateX(-50%); width: 440px; height: 340px; background: radial-gradient(circle, rgba(199,127,168,.22) 0%, rgba(139,95,176,.12) 45%, rgba(14,10,22,0) 70%); filter: blur(34px); pointer-events: none;"></div>
+
+  <!-- Header -->
+  <div style="position: relative; padding: 16px 20px 0; display: flex; align-items: center; gap: 4px; min-height: 44px;">
+    <div onClick="{{ noop }}" class="aux-row" style="width: 44px; height: 44px; margin-left: -12px; display: grid; place-items: center; flex: none;">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F2EDF7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+    </div>
+    <span style="font-family: 'Instrument Serif', Georgia, serif; font-size: 24px; line-height: 1.2;">Start a Session</span>
+  </div>
+
+  <!-- Name it -->
+  <div style="position: relative; padding: 24px 20px 0; display: flex; flex-direction: column; gap: 8px;">
+    <div style="display: flex; align-items: baseline; justify-content: space-between;">
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #6E6681;">NAME IT</span>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #6E6681;">MAX 50</span>
+    </div>
+    <input class="aux-field" type="text" placeholder="Friday night" maxlength="50" style="width: 100%; box-sizing: border-box; min-height: 56px; padding: 0 16px; border-radius: 12px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); color: #F2EDF7; font-size: 16px; line-height: 1.5;" />
+  </div>
+
+  <!-- Which lounge? -->
+  <div style="position: relative; padding: 30px 20px 0; display: flex; flex-direction: column; gap: 10px;">
+    <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #6E6681;">WHICH LOUNGE?</span>
+
+    <sc-if value="{{ hasLounges }}" hint-placeholder-val="{{ true }}">
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <sc-for list="{{ lounges }}" as="l" hint-placeholder-count="3">
+          <div onClick="{{ l.pick }}" class="aux-row" style="display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 12px 16px; border-radius: 12px; background: {{ l.bg }}; border: 1px solid {{ l.border }};">
+            <div style="width: 36px; height: 36px; border-radius: 10px; background: {{ l.art }}; flex: none;"></div>
+            <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;">
+              <span style="font-size: 16px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ l.name }}</span>
+              <span style="font-size: 13.5px; color: #A79FB8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ l.desc }}</span>
+            </div>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#F2EDF7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex: none; opacity: {{ l.checkOpacity }};"><polyline points="20 6 9 17 4 12"/></svg>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ noLounges }}" hint-placeholder-val="{{ false }}">
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 40px 24px;">
+        <div style="width: 64px; height: 64px; border-radius: 26px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); display: grid; place-items: center;">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        </div>
+        <span style="font-size: 17px; font-weight: 600; text-align: center;">No lounges yet</span>
+        <span style="font-size: 16px; line-height: 1.5; color: #A79FB8; text-align: center; max-width: 300px;">A Session lives inside a lounge. Join one with an invite code, or start your own.</span>
+        <div onClick="{{ noop }}" class="aux-row" style="min-height: 44px; padding: 0 18px; margin-top: 4px; border-radius: 999px; border: 1px solid rgba(255,255,255,.18); display: flex; align-items: center; justify-content: center;">
+          <span style="font-size: 16px; font-weight: 500;">Find a lounge</span>
+        </div>
+      </div>
+    </sc-if>
+  </div>
+
+  <!-- Go on aux — the only element on this screen allowed the live colour, because it starts something live -->
+  <div style="position: relative; margin-top: auto; padding: 24px 20px 28px; display: flex; flex-direction: column; gap: 14px;">
+    <div onClick="{{ start }}" class="aux-row" style="min-height: 56px; border-radius: 999px; background: #57E2D5; display: flex; align-items: center; justify-content: center; gap: 12px; opacity: {{ startOpacity }}; box-shadow: {{ startGlow }};">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0E0A16" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/></svg>
+      <span style="font-size: 16px; font-weight: 600; color: #0E0A16;">Go on aux</span>
+    </div>
+    <span style="font-size: 16px; line-height: 1.5; color: #A79FB8;">You start as host. Anyone in the lounge can join and add to the queue.</span>
+  </div>
+
+  <!-- Error toast: fires when you reach for the aux without picking a lounge -->
+  <sc-if value="{{ toasting }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ dismissToast }}" class="aux-row" style="position: absolute; left: 16px; right: 16px; top: 70px; display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 12px 16px; border-radius: 12px; background: #241C33; border: 1px solid rgba(255,255,255,.18); box-shadow: 0 12px 24px rgba(8,6,30,.4);">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#F2657E" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex: none;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <span style="flex: 1; font-size: 16px; line-height: 1.5;">Pick a lounge for this Session.</span>
+    </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"lounges":{"editor":"enum","options":["available","none"],"default":"available","section":"Prototype"}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { picked: -1, toasting: false };
+  }
+
+  renderVals() {
+    const hasLounges = (this.props.lounges ?? 'available') === 'available';
+    const picked = this.state.picked;
+
+    const source = [
+      { name: 'Basement FM', desc: 'Where the four of us end up', art: 'linear-gradient(140deg,#C77FA8,#8B5FB0)' },
+      { name: 'Night Shift', desc: 'Music for people awake at 3am', art: 'linear-gradient(140deg,#4A6BA0,#2E4470)' },
+      { name: 'Sunday Static', desc: 'Slow records, no requests', art: 'linear-gradient(140deg,#C77FA8,#7A4A68)' },
+    ];
+
+    const self = this;
+    const lounges = source.map(function (l, i) {
+      const on = i === picked;
+      return {
+        name: l.name,
+        desc: l.desc,
+        art: l.art,
+        // A form selection is passive. It never borrows the live colour.
+        bg: on ? 'rgba(255,255,255,.09)' : 'rgba(255,255,255,.055)',
+        border: on ? 'rgba(255,255,255,.18)' : 'rgba(255,255,255,.10)',
+        checkOpacity: on ? '1' : '0',
+        pick: function () { self.setState({ picked: i, toasting: false }); },
+      };
+    });
+
+    const ready = hasLounges && picked >= 0;
+
+    return {
+      lounges,
+      hasLounges,
+      noLounges: !hasLounges,
+      toasting: this.state.toasting,
+      startOpacity: ready ? '1' : '0.45',
+      startGlow: ready ? '0 10px 30px rgba(87,226,213,.22)' : 'none',
+      start: () => {
+        if (!ready) this.setState({ toasting: true });
+      },
+      dismissToast: () => this.setState({ toasting: false }),
+      noop: () => {},
+    };
+  }
+}
+</script>
+</body>
+</html>

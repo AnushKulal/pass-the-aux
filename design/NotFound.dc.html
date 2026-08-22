@@ -1,0 +1,99 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Figtree:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; }
+    *, *::before, *::after { box-sizing: border-box; }
+    a { color: #57E2D5; } a:hover { color: #8bede4; }
+    .aux-tap { cursor: pointer; }
+  </style>
+</helmet>
+
+<div style="width: 375px; height: 812px; background: #0E0A16; color: #F2EDF7; font-family: Figtree, system-ui, sans-serif; overflow: hidden; position: relative; display: flex; flex-direction: column; padding: 26px 0 24px; gap: 16px;">
+
+  <!-- Colder, further-away bloom: this is the edge of the map -->
+  <div style="position: absolute; left: 50%; top: 208px; transform: translateX(-50%); width: 460px; height: 360px; background: radial-gradient(circle, rgba(139,95,176,.18) 0%, rgba(74,107,160,.10) 46%, rgba(14,10,22,0) 72%); filter: blur(34px); pointer-events: none;"></div>
+
+  <!-- Header -->
+  <div style="position: relative; padding: 0 20px; min-height: 44px; display: flex; align-items: center;">
+    <span style="font-family: 'Instrument Serif', Georgia, serif; font-size: 26px; line-height: 1.2;">Off the map</span>
+  </div>
+
+  <!-- The cut cable. One idea: the line that runs through everyone has been severed,
+       and the playhead standing in the gap is dead — no glow, no live colour. -->
+  <div style="position: relative; flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 24px;">
+
+    <div onClick="{{ tug }}" class="aux-tap" style="width: 375px; flex: none;">
+      <svg width="375" height="168" viewBox="0 0 375 168" fill="none">
+        <g style="transform: {{ tugL }}; transition: transform 260ms cubic-bezier(.2,.8,.2,1);">
+          <path d="M -6 60 C 46 60, 100 74, 152 88" stroke="rgba(255,255,255,.30)" stroke-width="1.6" stroke-linecap="round"/>
+          <path d="M 152 88 c 8 -2, 12 -5, 19 -6" stroke="rgba(255,255,255,.26)" stroke-width="1.1" stroke-linecap="round"/>
+          <path d="M 152 88 c 9 1, 15 3, 21 3" stroke="rgba(255,255,255,.26)" stroke-width="1.1" stroke-linecap="round"/>
+          <path d="M 152 88 c 7 4, 11 8, 16 12" stroke="rgba(255,255,255,.26)" stroke-width="1.1" stroke-linecap="round"/>
+        </g>
+
+        <line x1="188" y1="26" x2="196" y2="26" stroke="rgba(255,255,255,.14)" stroke-width="1"/>
+        <line x1="192" y1="26" x2="192" y2="146" stroke="rgba(255,255,255,.12)" stroke-width="1"/>
+        <line x1="188" y1="146" x2="196" y2="146" stroke="rgba(255,255,255,.14)" stroke-width="1"/>
+        <text x="192" y="162" text-anchor="middle" fill="#6E6681" font-family="'IBM Plex Mono', monospace" font-size="11.5" letter-spacing="0.5">--:--</text>
+
+        <g style="transform: {{ tugR }}; transition: transform 260ms cubic-bezier(.2,.8,.2,1);">
+          <path d="M 226 100 c -8 -3, -13 -5, -20 -6" stroke="rgba(255,255,255,.20)" stroke-width="1.1" stroke-linecap="round"/>
+          <path d="M 226 100 c -9 1, -15 2, -21 2" stroke="rgba(255,255,255,.20)" stroke-width="1.1" stroke-linecap="round"/>
+          <path d="M 226 100 c -7 4, -11 7, -17 10" stroke="rgba(255,255,255,.20)" stroke-width="1.1" stroke-linecap="round"/>
+          <path d="M 226 100 C 256 109, 284 116, 308 118" stroke="rgba(255,255,255,.16)" stroke-width="1.6" stroke-linecap="round"/>
+          <rect x="306" y="110" width="15" height="16" rx="4" fill="#140F1E" stroke="rgba(255,255,255,.22)" stroke-width="1.2"/>
+          <rect x="321" y="113.5" width="32" height="9" rx="4.5" fill="#140F1E" stroke="rgba(255,255,255,.30)" stroke-width="1.2"/>
+          <line x1="334" y1="114" x2="334" y2="122" stroke="rgba(255,255,255,.30)" stroke-width="1.2"/>
+          <line x1="342" y1="114" x2="342" y2="122" stroke="rgba(255,255,255,.30)" stroke-width="1.2"/>
+          <rect x="353" y="114.5" width="9" height="7" rx="3.5" fill="#140F1E" stroke="rgba(255,255,255,.30)" stroke-width="1.2"/>
+        </g>
+      </svg>
+    </div>
+
+    <div style="padding: 0 20px; display: flex; flex-direction: column; align-items: center; gap: 10px;">
+      <div style="font-size: 17px; line-height: 1.35; font-weight: 600; text-align: center;">This link went nowhere</div>
+      <div style="font-size: 16px; line-height: 1.5; color: #A79FB8; text-align: center; max-width: 300px;">The lounge or Session you followed may have ended, or the invite was revoked.</div>
+    </div>
+
+    <div onClick="{{ noop }}" class="aux-tap" style="min-height: 52px; padding: 0 24px; border-radius: 999px; background: #F2EDF7; display: flex; align-items: center; justify-content: center; gap: 9px; flex: none;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0E0A16" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg>
+      <span style="font-size: 16px; font-weight: 600; color: #0E0A16;">Back to Home</span>
+    </div>
+
+  </div>
+
+  <!-- The stamp -->
+  <div style="position: relative; display: flex; justify-content: center;">
+    <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; line-height: 1.3; letter-spacing: .04em; color: #6E6681;">404</span>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { tugged: false };
+  }
+
+  renderVals() {
+    // You can pull the two ends toward each other. They never reach — that is the joke.
+    return {
+      tugL: this.state.tugged ? 'translateX(7px)' : 'translateX(0px)',
+      tugR: this.state.tugged ? 'translateX(-7px)' : 'translateX(0px)',
+      tug: () => this.setState({ tugged: !this.state.tugged }),
+      noop: () => {},
+    };
+  }
+}
+</script>
+</body>
+</html>

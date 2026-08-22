@@ -1,0 +1,26 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html", "title": "Pick a direction", "x": 0, "y": 0, "w": 720, "h": 812 },
+    { "file": "A-Marquee.dc.html", "title": "A · Marquee", "x": 800, "y": 0, "w": 375, "h": 812 },
+    { "file": "B-TapeDeck.dc.html", "title": "B · Tape Deck", "x": 1235, "y": 0, "w": 375, "h": 812 },
+    { "file": "C-Signal.dc.html", "title": "C · Signal", "x": 1670, "y": 0, "w": 375, "h": 812 },
+    { "file": "D-Afterglow.dc.html", "title": "D · Afterglow", "x": 2105, "y": 0, "w": 375, "h": 812 }
+  ],
+  "annotations": [
+    {
+      "id": "why-session",
+      "x": 800,
+      "y": -150,
+      "w": 400,
+      "text": "All four draw the same screen: a Session with 5 people listening to Midnight City, 1:47 in.\n\nSame content, four visual worlds — so you are comparing design, not copy."
+    },
+    {
+      "id": "mix-note",
+      "x": 1670,
+      "y": -150,
+      "w": 380,
+      "text": "C is the only one that designs the sync itself — the playhead runs through every listener with their real drift.\n\nWorth stealing even if you pick another direction."
+    }
+  ],
+  "launch": { "view": "canvas" }
+}

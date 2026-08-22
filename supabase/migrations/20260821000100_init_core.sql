@@ -21,7 +21,11 @@ comment on table public.profiles is 'Public-facing user identity. Mirrors auth.u
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
-security definer set search_path = public
+-- `extensions` is on the path because gen_random_bytes() below is pgcrypto's,
+-- and Supabase installs pgcrypto there rather than into public. Without it the
+-- dedupe loop throws — but ONLY on a username collision, so a fresh database
+-- signs up its first user fine and dies on the second.
+security definer set search_path = public, extensions
 as $$
 declare
   base text;
@@ -50,6 +54,18 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
 
+-- Invite codes need pgcrypto, which lives in the `extensions` schema. Wrapping
+-- the call in its own function pins the search_path once, so the column default
+-- below cannot break depending on who is inserting.
+create or replace function public.new_invite_code()
+returns text
+language sql
+volatile
+security definer set search_path = public, extensions
+as $$
+  select upper(substr(encode(gen_random_bytes(6), 'hex'), 1, 8));
+$$;
+
 -- ---------------------------------------------------------------- lounges
 create table public.lounges (
   id           uuid primary key default gen_random_uuid(),
@@ -59,7 +75,7 @@ create table public.lounges (
   icon_url     text,
   owner_id     uuid not null references public.profiles(id) on delete cascade,
   is_public    boolean not null default true,
-  invite_code  text unique not null default upper(substr(encode(gen_random_bytes(6), 'hex'), 1, 8)),
+  invite_code  text unique not null default public.new_invite_code(),
   created_at   timestamptz not null default now()
 );
 

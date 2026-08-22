@@ -1,0 +1,170 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Figtree:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #57E2D5; } a:hover { color: #8bede4; }
+    .aux-row { cursor: pointer; }
+  </style>
+</helmet>
+
+<div style="width: 375px; height: 812px; background: #0E0A16; color: #F2EDF7; font-family: Figtree, system-ui, sans-serif; overflow: hidden; position: relative; display: flex; flex-direction: column;">
+
+  <!-- Atmosphere: barely there while the lounge is still a form, then the room lights up -->
+  <div style="position: absolute; left: 50%; top: -150px; transform: translateX(-50%); width: 460px; height: 380px; background: {{ bloom }}; filter: blur(34px); pointer-events: none;"></div>
+
+  <!-- Header -->
+  <div style="position: relative; padding: 16px 20px 0; display: flex; align-items: center; gap: 8px; min-height: 44px;">
+    <div onClick="{{ noop }}" class="aux-row" style="width: 44px; height: 44px; margin-left: -12px; display: grid; place-items: center; flex: none;">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F2EDF7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg>
+    </div>
+    <span style="flex: 1; min-width: 0; font-family: 'Instrument Serif', Georgia, serif; font-size: 24px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ title }}</span>
+  </div>
+
+  <!-- THE FORM -->
+  <sc-if value="{{ editing }}" hint-placeholder-val="{{ true }}">
+    <div style="position: relative; padding: 24px 20px 0; display: flex; flex-direction: column; gap: 24px;">
+
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <span style="font-size: 13.5px; font-weight: 500; color: #A79FB8;">Name</span>
+        <div style="min-height: 52px; border-radius: 12px; background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.18); padding: 0 14px; display: flex; align-items: center;">
+          <span style="font-size: 16px; color: #F2EDF7;">Third Floor</span>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <span style="font-size: 13.5px; font-weight: 500; color: #A79FB8;">Description (optional)</span>
+        <div style="min-height: 52px; border-radius: 12px; background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.10); padding: 0 14px; display: flex; align-items: center;">
+          <span style="font-size: 16px; color: #6E6681;">What gets played here?</span>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <span style="font-size: 13.5px; font-weight: 500; color: #A79FB8;">Visibility</span>
+        <div style="height: 52px; border-radius: 999px; background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.10); padding: 3px; display: flex; gap: 4px;">
+          <div onClick="{{ setPublic }}" class="aux-row" style="flex: 1; border-radius: 999px; background: {{ publicBg }}; border: 1px solid {{ publicBorder }}; display: flex; align-items: center; justify-content: center;">
+            <span style="font-size: 16px; font-weight: 500; color: {{ publicInk }};">Public</span>
+          </div>
+          <div onClick="{{ setPrivate }}" class="aux-row" style="flex: 1; border-radius: 999px; background: {{ privateBg }}; border: 1px solid {{ privateBorder }}; display: flex; align-items: center; justify-content: center;">
+            <span style="font-size: 16px; font-weight: 500; color: {{ privateInk }};">Private</span>
+          </div>
+        </div>
+        <div style="display: flex; gap: 8px; align-items: flex-start; padding-top: 2px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 4px; display: {{ globeDisplay }};"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 4px; display: {{ lockDisplay }};"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>
+          <span style="flex: 1; font-size: 16px; line-height: 1.5; color: #A79FB8;">{{ visibilityHint }}</span>
+        </div>
+      </div>
+
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ editing }}" hint-placeholder-val="{{ true }}">
+    <div style="position: relative; margin-top: auto; padding: 20px 20px 22px;">
+      <div onClick="{{ create }}" class="aux-row" style="min-height: 52px; border-radius: 999px; background: #F2EDF7; display: flex; align-items: center; justify-content: center;">
+        <span style="font-size: 16px; font-weight: 600; color: #0E0A16;">Create lounge</span>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- THE MOMENT — a community starts as eight characters somebody has to hand over -->
+  <sc-if value="{{ created }}" hint-placeholder-val="{{ false }}">
+    <div style="position: relative; padding: 76px 20px 0;">
+      <div style="border-radius: 26px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); padding: 24px 20px; display: flex; flex-direction: column; align-items: center; gap: 12px;">
+
+        <div style="width: 56px; height: 56px; border-radius: 18px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.18); display: grid; place-items: center;">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#F2EDF7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21l5.2-9.5 4.3 4.3L3 21z"></path><path d="M14.6 9.4L17 7"></path><path d="M16 3.4V6"></path><path d="M20.6 10H18"></path><circle cx="20.2" cy="4.2" r="1"></circle></svg>
+        </div>
+
+        <div style="font-family: 'Instrument Serif', Georgia, serif; font-size: 26px; line-height: 1.16; text-align: center;">Third Floor is live</div>
+        <div style="font-size: 16px; line-height: 1.5; color: #A79FB8; text-align: center;">Share this code to let people in. You can find it again from the lounge header.</div>
+
+        <div style="width: 100%; margin-top: 4px; border-radius: 12px; background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.18); padding: 16px 12px; display: flex; flex-direction: column; align-items: center; gap: 6px;">
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #6E6681;">INVITE CODE</span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 34px; font-weight: 500; line-height: 1.18; letter-spacing: .14em; color: #F2EDF7;">R8VQ3N6T</span>
+        </div>
+
+        <div onClick="{{ share }}" class="aux-row" style="width: 100%; margin-top: 4px; min-height: 52px; border-radius: 999px; background: #F2EDF7; display: flex; align-items: center; justify-content: center; gap: 9px;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0E0A16" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+          <span style="font-size: 16px; font-weight: 600; color: #0E0A16;">Share invite code</span>
+        </div>
+
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ created }}" hint-placeholder-val="{{ false }}">
+    <div style="position: relative; margin-top: auto; padding: 20px 20px 22px;">
+      <div onClick="{{ noop }}" class="aux-row" style="min-height: 52px; border-radius: 999px; border: 1px solid rgba(255,255,255,.18); display: flex; align-items: center; justify-content: center; gap: 9px;">
+        <span style="font-size: 16px; font-weight: 500;">Open lounge</span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F2EDF7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- Copy confirmation. Nothing is playing yet, so nothing here is live-coloured. -->
+  <sc-if value="{{ copied }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ dismiss }}" class="aux-row" style="position: absolute; left: 20px; right: 20px; top: 16px; border-radius: 14px; background: rgba(30,23,44,.97); border: 1px solid rgba(255,255,255,.18); box-shadow: 0 14px 40px rgba(0,0,0,.45); padding: 13px 14px; display: flex; align-items: center; gap: 10px;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F2EDF7" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="flex: none;"><polyline points="20 6 9 17 4 12"></polyline></svg>
+      <span style="font-size: 16px;">Invite code <span style="font-family: 'IBM Plex Mono', monospace; font-size: 15px; letter-spacing: .1em;">R8VQ3N6T</span> copied</span>
+    </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"created":{"editor":"boolean","default":false,"section":"Prototype"}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { visibility: 'public', made: false, copied: false };
+  }
+
+  renderVals() {
+    const prop = this.props.created;
+    const created = (prop === true || prop === 'true') || this.state.made;
+    const isPublic = this.state.visibility === 'public';
+
+    const INK = '#F2EDF7', MUTED = '#A79FB8';
+    const ON = { bg: 'rgba(255,255,255,.09)', border: 'rgba(255,255,255,.18)', ink: INK };
+    const OFF = { bg: 'transparent', border: 'transparent', ink: MUTED };
+    const pub = isPublic ? ON : OFF;
+    const priv = isPublic ? OFF : ON;
+
+    return {
+      created,
+      editing: !created,
+      title: created ? 'Lounge created' : 'New lounge',
+
+      // Nothing is playing in here yet — the glow only arrives with the lounge.
+      bloom: created
+        ? 'radial-gradient(circle, rgba(199,127,168,.34) 0%, rgba(139,95,176,.18) 45%, rgba(14,10,22,0) 70%)'
+        : 'radial-gradient(circle, rgba(199,127,168,.14) 0%, rgba(139,95,176,.07) 45%, rgba(14,10,22,0) 70%)',
+
+      publicBg: pub.bg, publicBorder: pub.border, publicInk: pub.ink,
+      privateBg: priv.bg, privateBorder: priv.border, privateInk: priv.ink,
+      globeDisplay: isPublic ? 'block' : 'none',
+      lockDisplay: isPublic ? 'none' : 'block',
+      visibilityHint: isPublic
+        ? 'Anyone can find this lounge in Explore and join it.'
+        : 'Invite-only. It stays hidden until someone redeems the code.',
+
+      copied: this.state.copied,
+      setPublic: () => this.setState({ visibility: 'public' }),
+      setPrivate: () => this.setState({ visibility: 'private' }),
+      create: () => this.setState({ made: true }),
+      share: () => this.setState({ copied: true }),
+      dismiss: () => this.setState({ copied: false }),
+      noop: () => {},
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -13,6 +13,7 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.anushkulal.aux",
       "adaptiveIcon": {
         "backgroundColor": "#0F0F23",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -41,6 +42,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "3c252219-3619-434b-9ab4-f0931d09722a"
+      }
+    },
+    "owner": "anush_kulal"
   }
 }

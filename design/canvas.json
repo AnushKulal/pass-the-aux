@@ -1,0 +1,52 @@
+{
+  "pages": [
+    { "id": "screens", "name": "Screens" },
+    { "id": "system", "name": "System" }
+  ],
+  "artboards": [
+    { "file": "Main.dc.html", "title": "Signal Afterglow", "page": "screens", "x": 0, "y": 0, "w": 720, "h": 812 },
+
+    { "file": "SignIn.dc.html",          "title": "Sign in",        "page": "screens", "x": 0,    "y": 902,  "w": 375, "h": 812 },
+    { "file": "ClaimUsername.dc.html",   "title": "Claim username", "page": "screens", "x": 435,  "y": 902,  "w": 375, "h": 812 },
+    { "file": "Feed.dc.html",            "title": "The Feed",       "page": "screens", "x": 870,  "y": 902,  "w": 375, "h": 812 },
+    { "file": "Explore.dc.html",         "title": "Explore",        "page": "screens", "x": 1305, "y": 902,  "w": 375, "h": 812 },
+    { "file": "Lounges.dc.html",         "title": "Lounges",        "page": "screens", "x": 1740, "y": 902,  "w": 375, "h": 812 },
+
+    { "file": "LoungeDetail.dc.html",    "title": "Lounge",         "page": "screens", "x": 0,    "y": 1804, "w": 375, "h": 812 },
+    { "file": "CreateLounge.dc.html",    "title": "Create lounge",  "page": "screens", "x": 435,  "y": 1804, "w": 375, "h": 812 },
+    { "file": "Session.dc.html",         "title": "Session",        "page": "screens", "x": 870,  "y": 1804, "w": 375, "h": 812 },
+    { "file": "CreateSession.dc.html",   "title": "Start a Session","page": "screens", "x": 1305, "y": 1804, "w": 375, "h": 812 },
+    { "file": "Profile.dc.html",         "title": "Profile",        "page": "screens", "x": 1740, "y": 1804, "w": 375, "h": 812 },
+
+    { "file": "Connections.dc.html",     "title": "Connections",    "page": "screens", "x": 0,    "y": 2706, "w": 375, "h": 812 },
+    { "file": "SpotifyCallback.dc.html", "title": "Linking Spotify","page": "screens", "x": 435,  "y": 2706, "w": 375, "h": 812 },
+    { "file": "NotFound.dc.html",        "title": "Not found",      "page": "screens", "x": 870,  "y": 2706, "w": 375, "h": 812 },
+
+    { "file": "Tokens.dc.html",     "title": "Tokens",     "page": "system", "x": 0,   "y": 0, "w": 900, "h": 1200 },
+    { "file": "Components.dc.html", "title": "Components", "page": "system", "x": 960, "y": 0, "w": 900, "h": 1400 }
+  ],
+  "annotations": [
+    {
+      "id": "start-here",
+      "x": 870,
+      "y": 1660,
+      "w": 380,
+      "text": "Start here.\n\nThe Session is the hero and the only screen where the sync engine is visible — the playhead crosses every listener, and each dot sits at their real drift. Out of sync is something you see, not something you read.\n\nFlip role and sync above the frame."
+    },
+    {
+      "id": "wired",
+      "x": 0,
+      "y": 760,
+      "w": 400,
+      "text": "These are wired, not flat. Tabs switch, sheets open, toggles toggle. Where a screen has meaningfully different states — linked-free vs premium, empty vs full, host vs passenger — they are switchable from the chips above each frame."
+    },
+    {
+      "id": "one-colour",
+      "x": 2175,
+      "y": 902,
+      "w": 340,
+      "text": "The aqua #57E2D5 appears only where something is live, playing, joinable or in sync.\n\nIf you see it anywhere passive — a selected form row, a decorative icon, a success tick — that is a bug, and worth telling me about."
+    }
+  ],
+  "launch": { "view": "canvas", "page": "screens" }
+}

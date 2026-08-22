@@ -1,0 +1,238 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Figtree:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #57E2D5; } a:hover { color: #8bede4; }
+    .aux-row { cursor: pointer; }
+  </style>
+</helmet>
+
+<div style="width: 375px; height: 812px; background: #0E0A16; color: #F2EDF7; font-family: Figtree, system-ui, sans-serif; overflow: hidden; position: relative; display: flex; flex-direction: column;">
+
+  <!-- Atmosphere: the artwork lighting the room -->
+  <div style="position: absolute; left: 50%; top: -110px; transform: translateX(-50%); width: 460px; height: 420px; background: radial-gradient(circle, rgba(199,127,168,.40) 0%, rgba(139,95,176,.22) 42%, rgba(14,10,22,0) 70%); filter: blur(30px); pointer-events: none;"></div>
+  <div style="position: absolute; inset: 0; background-image: linear-gradient(rgba(255,255,255,.028) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.028) 1px, transparent 1px); background-size: 25px 25px; pointer-events: none;"></div>
+
+  <!-- Header -->
+  <div style="position: relative; padding: 20px 20px 0; display: flex; align-items: center; justify-content: space-between;">
+    <div style="display: flex; align-items: center; gap: 10px; min-height: 44px;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; letter-spacing: .04em; color: #A79FB8;">Basement FM</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 7px; padding: 5px 10px; border-radius: 999px; background: rgba(87,226,213,.14); border: 1px solid rgba(87,226,213,.3);">
+      <span style="width: 6px; height: 6px; border-radius: 50%; background: #57E2D5;"></span>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #57E2D5;">5 LISTENING</span>
+    </div>
+  </div>
+
+  <!-- Artwork + title -->
+  <div style="position: relative; padding: 26px 20px 0; display: flex; gap: 16px; align-items: flex-start;">
+    <div style="width: 96px; height: 96px; border-radius: 12px; background: linear-gradient(150deg, #C77FA8 0%, #8B5FB0 48%, #4A3670 100%); box-shadow: 0 14px 40px rgba(199,127,168,.28); flex: none;"></div>
+    <div style="flex: 1; min-width: 0; padding-top: 2px;">
+      <div style="font-family: 'Instrument Serif', Georgia, serif; font-size: 30px; line-height: 1.14; letter-spacing: -.005em;">Midnight City</div>
+      <div style="font-size: 14px; color: #A79FB8; margin-top: 6px;">M83</div>
+      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #6E6681; margin-top: 10px;">ON AUX &middot; PRIYA</div>
+    </div>
+  </div>
+
+  <!-- Waveform with the playhead -->
+  <div style="position: relative; padding: 22px 20px 0;">
+    <div style="position: relative; height: 54px;">
+      <div style="display: flex; align-items: center; gap: 2px; height: 100%;">
+        <sc-for list="{{ bars }}" as="bar" hint-placeholder-count="24">
+          <div style="flex: 1; border-radius: 1px; height: {{ bar.h }}; background: {{ bar.fill }};"></div>
+        </sc-for>
+      </div>
+      <div style="position: absolute; left: 43%; top: -8px; bottom: -8px; width: 1px; background: #57E2D5; box-shadow: 0 0 10px rgba(87,226,213,.6);"></div>
+    </div>
+    <div style="display: flex; justify-content: space-between; margin-top: 10px; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; letter-spacing: .04em; color: #6E6681;">
+      <span style="color: #A79FB8;">1:47</span><span>4:03</span>
+    </div>
+  </div>
+
+  <!-- Transport — host sees controls, everyone else asks for the aux -->
+  <sc-if value="{{ isHost }}" hint-placeholder-val="{{ true }}">
+    <div style="position: relative; padding: 18px 20px 0; display: flex; align-items: center; justify-content: center; gap: 26px;">
+      <div onClick="{{ noop }}" class="aux-row" style="width: 44px; height: 44px; display: grid; place-items: center;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg>
+      </div>
+      <div onClick="{{ togglePlay }}" class="aux-row" style="width: 64px; height: 64px; border-radius: 50%; background: rgba(87,226,213,.14); border: 1px solid rgba(87,226,213,.34); display: grid; place-items: center;">
+        <sc-if value="{{ playing }}" hint-placeholder-val="{{ true }}">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="#57E2D5"><rect x="6.5" y="4" width="4" height="16" rx="1.2"/><rect x="13.5" y="4" width="4" height="16" rx="1.2"/></svg>
+        </sc-if>
+        <sc-if value="{{ paused }}" hint-placeholder-val="{{ false }}">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="#57E2D5"><polygon points="7 4 19 12 7 20 7 4"/></svg>
+        </sc-if>
+      </div>
+      <div onClick="{{ noop }}" class="aux-row" style="width: 44px; height: 44px; display: grid; place-items: center;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#F2EDF7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
+      </div>
+    </div>
+  </sc-if>
+  <sc-if value="{{ isPassenger }}" hint-placeholder-val="{{ false }}">
+    <div style="position: relative; padding: 18px 20px 0;">
+      <div onClick="{{ noop }}" class="aux-row" style="min-height: 44px; border-radius: 999px; border: 1px solid rgba(255,255,255,.18); display: flex; align-items: center; justify-content: center; gap: 9px;">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#F2EDF7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+        <span style="font-size: 14px; font-weight: 500;">Request the aux</span>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- The signature: one line through everyone -->
+  <div style="position: relative; padding: 24px 20px 0;">
+    <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #6E6681; margin-bottom: 12px;">ON THE LINE</div>
+    <div style="position: relative; display: flex; flex-direction: column; gap: 11px;">
+      <div style="position: absolute; left: 43%; top: -4px; bottom: -4px; width: 1px; background: rgba(87,226,213,.55); box-shadow: 0 0 8px rgba(87,226,213,.45);"></div>
+      <sc-for list="{{ people }}" as="p" hint-placeholder-count="4">
+        <div style="display: flex; align-items: center; gap: 11px; position: relative;">
+          <div style="width: 30px; height: 30px; border-radius: 50%; background: {{ p.art }}; border: 1.5px solid {{ p.ring }}; flex: none;"></div>
+          <span style="font-size: 13.5px; font-weight: 500; width: 54px; flex: none; color: {{ p.nameColor }};">{{ p.name }}</span>
+          <div style="flex: 1; height: 1px; background: rgba(255,255,255,.10); position: relative;">
+            <div style="position: absolute; left: {{ p.dot }}; top: -3px; width: 7px; height: 7px; border-radius: 50%; background: {{ p.dotColor }};"></div>
+          </div>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: .04em; width: 52px; text-align: right; color: {{ p.driftColor }};">{{ p.drift }}</span>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <!-- Queue / Chat -->
+  <div style="position: relative; margin-top: 22px; border-top: 1px solid rgba(255,255,255,.10); padding: 14px 20px 0; display: flex; gap: 22px;">
+    <div onClick="{{ showQueue }}" class="aux-row" style="min-height: 30px;">
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; letter-spacing: .04em; color: {{ queueColor }}; border-bottom: 1px solid {{ queueUnderline }}; padding-bottom: 8px;">QUEUE/6</span>
+    </div>
+    <div onClick="{{ showChat }}" class="aux-row" style="min-height: 30px;">
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; letter-spacing: .04em; color: {{ chatColor }}; border-bottom: 1px solid {{ chatUnderline }}; padding-bottom: 8px;">CHAT/23</span>
+    </div>
+  </div>
+
+  <sc-if value="{{ onQueue }}" hint-placeholder-val="{{ true }}">
+    <div style="position: relative; padding: 16px 20px 0; display: flex; flex-direction: column; gap: 12px;">
+      <sc-for list="{{ queue }}" as="q" hint-placeholder-count="3">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #4A4459; width: 14px; flex: none;">{{ q.n }}</span>
+          <div style="width: 36px; height: 36px; border-radius: 6px; background: {{ q.art }}; flex: none;"></div>
+          <div style="flex: 1; min-width: 0;">
+            <div style="font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ q.title }}</div>
+            <div style="font-size: 12.5px; color: #A79FB8; margin-top: 1px;">{{ q.sub }}</div>
+          </div>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #6E6681;">{{ q.len }}</span>
+        </div>
+      </sc-for>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ onChat }}" hint-placeholder-val="{{ false }}">
+    <div style="position: relative; padding: 16px 20px 0; display: flex; flex-direction: column; gap: 14px;">
+      <sc-for list="{{ messages }}" as="m" hint-placeholder-count="3">
+        <div style="display: flex; gap: 10px; align-items: flex-start;">
+          <div style="width: 28px; height: 28px; border-radius: 50%; background: {{ m.art }}; flex: none;"></div>
+          <div style="flex: 1; min-width: 0;">
+            <div style="display: flex; align-items: baseline; gap: 8px;">
+              <span style="font-size: 13.5px; font-weight: 500;">{{ m.who }}</span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #6E6681;">{{ m.at }}</span>
+            </div>
+            <div style="font-size: 14px; color: #D6CFE0; margin-top: 2px;">{{ m.body }}</div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </sc-if>
+
+  <!-- Add -->
+  <div style="position: relative; margin-top: auto; padding: 14px 20px 22px;">
+    <div onClick="{{ noop }}" class="aux-row" style="min-height: 46px; border-radius: 999px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); display: flex; align-items: center; justify-content: center; gap: 9px;">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#57E2D5" stroke-width="1.8" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      <span style="font-size: 14px; font-weight: 500;">Add to queue</span>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"role":{"editor":"enum","options":["host","passenger"],"default":"host","section":"Prototype"},"sync":{"editor":"enum","options":["in sync","adjusting","out of sync"],"default":"in sync","section":"Prototype"}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { tab: 'queue', playing: true };
+  }
+
+  renderVals() {
+    const role = this.props.role ?? 'host';
+    const sync = this.props.sync ?? 'in sync';
+    const LIVE = '#57E2D5', WARN = '#E8B15C', STOP = '#F2657E', MUTED = '#A79FB8', FAINT = '#6E6681';
+
+    // The waveform: played bars carry the live colour, the rest recede.
+    const heights = [22,44,66,38,80,54,30,70,92,60,34,76,50,26,64,40,84,48,58,36,72,44,28,56];
+    const bars = heights.map((h, i) => ({
+      h: h + '%',
+      fill: i / heights.length < 0.43 ? 'rgba(87,226,213,.55)' : 'rgba(255,255,255,.13)',
+    }));
+
+    // Drift is real data in this design — each listener sits where they actually are.
+    const drifts = {
+      'in sync':     [{ d: 'on aux', c: LIVE, off: 0 }, { d: '+12ms', c: FAINT, off: -2 }, { d: '−31ms', c: FAINT, off: 3 }, { d: '+8ms', c: FAINT, off: -1 }],
+      'adjusting':   [{ d: 'on aux', c: LIVE, off: 0 }, { d: '+210ms', c: WARN, off: -9 }, { d: '−180ms', c: WARN, off: 8 }, { d: '+64ms', c: FAINT, off: -3 }],
+      'out of sync': [{ d: 'on aux', c: LIVE, off: 0 }, { d: '+1.9s', c: STOP, off: -26 }, { d: 'buffering', c: WARN, off: 14 }, { d: '−2.4s', c: STOP, off: 30 }],
+    }[sync];
+
+    const names = ['Priya', 'Anush', 'Dev', 'Tara'];
+    const arts = [
+      'linear-gradient(140deg,#C77FA8,#8B5FB0)',
+      'linear-gradient(140deg,#8B5FB0,#4A3670)',
+      'linear-gradient(140deg,#4A6BA0,#2E4470)',
+      'linear-gradient(140deg,#C77FA8,#7A4A68)',
+    ];
+
+    const people = names.map((name, i) => ({
+      name,
+      art: arts[i],
+      ring: i === 0 ? LIVE : 'rgba(255,255,255,.14)',
+      nameColor: i === 0 ? '#F2EDF7' : MUTED,
+      drift: drifts[i].d,
+      driftColor: drifts[i].c,
+      dotColor: drifts[i].c === FAINT ? MUTED : drifts[i].c,
+      // Positioned relative to the playhead at 43% — the offset IS the drift.
+      dot: 'calc(43% - 3.5px + ' + drifts[i].off + 'px)',
+    }));
+
+    const onQueue = this.state.tab === 'queue';
+
+    return {
+      bars, people, onQueue,
+      onChat: !onQueue,
+      isHost: role === 'host',
+      isPassenger: role !== 'host',
+      playing: this.state.playing,
+      paused: !this.state.playing,
+      queueColor: onQueue ? '#F2EDF7' : FAINT,
+      chatColor: onQueue ? FAINT : '#F2EDF7',
+      queueUnderline: onQueue ? LIVE : 'transparent',
+      chatUnderline: onQueue ? 'transparent' : LIVE,
+      queue: [
+        { n: '01', title: 'Instant Crush', sub: 'Daft Punk · Anush added', len: '5:37', art: 'linear-gradient(140deg,#8B5FB0,#4A3670)' },
+        { n: '02', title: 'Nightcall', sub: 'Kavinsky · Tara added', len: '4:18', art: 'linear-gradient(140deg,#C77FA8,#7A4A68)' },
+        { n: '03', title: 'Sunset', sub: 'The Midnight · Dev added', len: '6:02', art: 'linear-gradient(140deg,#4A6BA0,#2E4470)' },
+      ],
+      messages: [
+        { who: 'Anush', at: '01:12', body: 'this is the one', art: 'linear-gradient(140deg,#8B5FB0,#4A3670)' },
+        { who: 'Tara', at: '01:14', body: 'put nightcall after', art: 'linear-gradient(140deg,#C77FA8,#7A4A68)' },
+        { who: 'Dev', at: '01:15', body: 'queued it', art: 'linear-gradient(140deg,#4A6BA0,#2E4470)' },
+      ],
+      showQueue: () => this.setState({ tab: 'queue' }),
+      showChat: () => this.setState({ tab: 'chat' }),
+      togglePlay: () => this.setState({ playing: !this.state.playing }),
+      noop: () => {},
+    };
+  }
+}
+</script>
+</body>
+</html>

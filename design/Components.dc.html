@@ -1,0 +1,651 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Figtree:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #57E2D5; } a:hover { color: #8bede4; }
+    .hit { cursor: pointer; }
+    @keyframes auxHalo { from { opacity: .6; transform: scale(1); } to { opacity: 0; transform: scale(1.3); } }
+    @keyframes auxPulse { from { opacity: .45; transform: scale(.4); } to { opacity: 0; transform: scale(1); } }
+    @keyframes auxSkel { 0% { opacity: .4; } 50% { opacity: .8; } 100% { opacity: .4; } }
+    @keyframes auxSpin { to { transform: rotate(360deg); } }
+    .halo { animation: auxHalo 1600ms cubic-bezier(.25,.46,.45,.94) infinite; }
+    .pulse { animation: auxPulse 1400ms cubic-bezier(.25,.46,.45,.94) infinite; }
+  </style>
+</helmet>
+
+<div style="width: 900px; height: 1400px; background: #0E0A16; color: #F2EDF7; font-family: Figtree, system-ui, sans-serif; overflow: hidden; position: relative; display: flex; flex-direction: column; padding: 12px 22px 10px; box-sizing: border-box; gap: 7px;">
+
+  <!-- Atmosphere: the artwork lighting the room, dialled right down for a sheet -->
+  <div style="position: absolute; left: -80px; top: -210px; width: 700px; height: 460px; background: radial-gradient(circle, rgba(199,127,168,.30) 0%, rgba(139,95,176,.15) 42%, rgba(14,10,22,0) 70%); filter: blur(40px); pointer-events: none;"></div>
+  <div style="position: absolute; right: -140px; bottom: -240px; width: 620px; height: 470px; background: radial-gradient(circle, rgba(74,107,160,.24) 0%, rgba(139,95,176,.10) 45%, rgba(14,10,22,0) 72%); filter: blur(44px); pointer-events: none;"></div>
+
+  <!-- Masthead -->
+  <div style="position: relative; display: flex; align-items: baseline; justify-content: space-between; gap: 20px; flex: none;">
+    <div style="display: flex; align-items: baseline; gap: 11px;">
+      <span style="font-family: 'Instrument Serif', Georgia, serif; font-size: 26px; line-height: 1;">Aux</span>
+      <span style="width: 1px; height: 14px; background: rgba(255,255,255,.18); transform: translateY(2px);"></span>
+      <span style="font-size: 15px; font-weight: 500; color: #A79FB8;">Component sheet</span>
+    </div>
+    <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .04em; color: #A79FB8;">SIGNAL AFTERGLOW &middot; 900 &times; 1400 &middot; TRUE SIZE</span>
+  </div>
+
+  <!-- FOUNDATION -->
+  <div style="position: relative; display: flex; align-items: center; gap: 12px; flex: none;">
+    <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">FOUNDATION</span>
+    <span style="flex: 1; height: 1px; background: rgba(255,255,255,.10);"></span>
+  </div>
+
+  <!-- F1 — the button matrix -->
+  <div style="position: relative; flex: none; border: 1px solid rgba(255,255,255,.10); border-radius: 14px; background: rgba(255,255,255,.018); padding: 10px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px;">
+    <div style="display: flex; align-items: flex-start; gap: 18px;">
+
+      <div style="flex: 1; min-width: 0; display: grid; grid-template-columns: 32px repeat(4, 1fr); column-gap: 10px; row-gap: 5px; align-items: center;">
+        <sc-for list="{{ matrix }}" as="b" hint-placeholder-count="20">
+          <div style="justify-self: start; box-sizing: border-box; display: flex; align-items: center; justify-content: center; height: {{ b.h }}; padding: 0 {{ b.px }}; border-radius: {{ b.r }}; background: {{ b.bg }}; border: 1px solid {{ b.bd }}; color: {{ b.fg }}; font-family: {{ b.ff }}; font-size: {{ b.fs }}; font-weight: {{ b.fw }}; letter-spacing: {{ b.ls }}; white-space: nowrap;">{{ b.t }}</div>
+        </sc-for>
+      </div>
+
+      <div style="width: 190px; flex: none; display: flex; flex-direction: column; gap: 7px; padding-top: 13px;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <div style="height: 52px; padding: 0 24px; border-radius: 999px; background: #F2EDF7; border: 1px solid transparent; color: #0E0A16; font-size: 16px; font-weight: 500; display: flex; align-items: center; opacity: .45;">Create</div>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">DISABLED</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <div style="height: 52px; padding: 0 24px; border-radius: 999px; background: #57E2D5; border: 1px solid transparent; color: #0E0A16; font-size: 16px; font-weight: 500; display: flex; align-items: center; gap: 8px; opacity: .45;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0E0A16" stroke-width="1.6" stroke-linecap="round" style="animation: {{ spinAnim }}; transform-origin: 50% 50%;"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+            <span>Join</span>
+          </div>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">LOADING</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <div style="position: relative; height: 52px; padding: 0 24px; border-radius: 999px; background: #F2EDF7; border: 1px solid transparent; color: #0E0A16; font-size: 16px; font-weight: 500; display: flex; align-items: center; overflow: hidden;">
+            <span style="position: relative;">Create</span>
+            <span style="position: absolute; left: 0; top: 0; right: 0; bottom: 0; background: rgba(14,10,22,.20);"></span>
+          </div>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">PRESSED</span>
+        </div>
+      </div>
+
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 4px;">
+      <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px;">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">BUTTON</span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .04em; color: #A79FB8;">sm 44 &middot; md 52 &middot; lg 58 &middot; r999 &middot; 1px border on every intent</span>
+      </div>
+      <div style="border-left: 1px solid rgba(255,255,255,.18); padding-left: 9px; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; line-height: 1.35; color: #A79FB8;">Bright fills take the ground as their label &mdash; #F2EDF7 on --live is 1.4:1, #0E0A16 is 12.4:1.</div>
+    </div>
+  </div>
+
+  <!-- F2 — text field, avatar, glass panel, skeleton -->
+  <div style="position: relative; display: flex; gap: 8px; flex: none; align-items: stretch;">
+
+    <div style="width: 366px; flex: none; border: 1px solid rgba(255,255,255,.10); border-radius: 14px; background: rgba(255,255,255,.018); padding: 10px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px;">
+      <div style="flex: 1; display: flex; gap: 10px;">
+        <div style="flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; flex-direction: column; gap: 3px;">
+            <span style="font-size: 13.5px; line-height: 1.3; font-weight: 500; color: #A79FB8;">Invite code</span>
+            <div style="min-height: 48px; box-sizing: border-box; padding: 11px 12px; border-radius: 12px; border: 1.5px solid rgba(255,255,255,.10); background: rgba(255,255,255,.055); font-size: 16px; color: #6E6681;">A1B2C3D4</div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 3px;">
+            <span style="font-size: 13.5px; line-height: 1.3; font-weight: 500; color: #A79FB8;">Search lounges</span>
+            <div style="min-height: 48px; box-sizing: border-box; padding: 11px 12px; border-radius: 12px; border: 1.5px solid #F2EDF7; background: rgba(255,255,255,.09); font-size: 16px; color: #F2EDF7; display: flex; align-items: center;">basement<span style="width: 1.5px; height: 19px; background: #F2EDF7; margin-left: 2px;"></span></div>
+          </div>
+        </div>
+        <div style="flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; flex-direction: column; gap: 3px;">
+            <span style="font-size: 13.5px; line-height: 1.3; font-weight: 500; color: #A79FB8;">Username</span>
+            <div style="min-height: 48px; box-sizing: border-box; padding: 11px 12px; border-radius: 12px; border: 1.5px solid rgba(255,255,255,.10); background: rgba(255,255,255,.055); font-size: 16px; color: #F2EDF7;">anush</div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 3px;">
+            <span style="font-size: 13.5px; line-height: 1.3; font-weight: 500; color: #A79FB8;">Invite code</span>
+            <div style="min-height: 48px; box-sizing: border-box; padding: 11px 12px; border-radius: 12px; border: 1.5px solid #F2657E; background: rgba(255,255,255,.09); font-size: 16px; color: #F2EDF7;">A1B2C3D4</div>
+            <span style="font-size: 13.5px; line-height: 1.3; font-weight: 500; color: #F2657E;">Could not join.</span>
+          </div>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 10px;">
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">TEXT FIELD</span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .04em; color: #A79FB8;">min-h 48 &middot; r12 &middot; 1.5px</span>
+        </div>
+        <div style="border-left: 1px solid rgba(255,255,255,.18); padding-left: 9px; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; line-height: 1.35; color: #A79FB8;">Focus is an ink border, never --live. Only the colour changes. Helper and error share one slot.</div>
+      </div>
+    </div>
+
+    <div style="flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 8px;">
+      <div style="display: flex; gap: 8px; align-items: stretch;">
+
+        <div style="flex: 1 1 0; min-width: 0; border: 1px solid rgba(255,255,255,.10); border-radius: 14px; background: rgba(255,255,255,.018); padding: 10px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px;">
+          <div style="flex: 1; display: flex; align-items: center; justify-content: space-around; gap: 8px; padding: 2px 0 0;">
+            <div style="display: flex; flex-direction: column; align-items: center; gap: 7px;">
+              <div style="width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(140deg,#4A6BA0,#2E4470); display: grid; place-items: center; font-size: 15px; font-weight: 600; color: #F2EDF7;">D</div>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">PLAIN</span>
+            </div>
+            <div style="display: flex; flex-direction: column; align-items: center; gap: 7px;">
+              <div style="position: relative; width: 40px; height: 40px;">
+                <sc-if value="{{ animated }}" hint-placeholder-val="{{ true }}">
+                  <div class="halo" style="position: absolute; left: -6px; top: -6px; right: -6px; bottom: -6px; border-radius: 50%; border: 1.5px solid #57E2D5; pointer-events: none;"></div>
+                </sc-if>
+                <div style="position: absolute; left: 0; top: 0; width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(140deg,#C77FA8,#8B5FB0); border: 1.5px solid #57E2D5; box-sizing: border-box; display: grid; place-items: center; font-size: 15px; font-weight: 600; color: #F2EDF7;">P</div>
+              </div>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #57E2D5;">LIVE</span>
+            </div>
+            <div style="display: flex; flex-direction: column; align-items: center; gap: 7px;">
+              <div style="width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(140deg,#C77FA8,#7A4A68); border: 1.5px solid #F2EDF7; box-sizing: border-box; display: grid; place-items: center; font-size: 15px; font-weight: 600; color: #F2EDF7;">T</div>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">SPEAKING</span>
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px;">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">AVATAR</span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .04em; color: #A79FB8;">40 &middot; ring 1.5 &middot; halo +6</span>
+            </div>
+            <div style="border-left: 1px solid rgba(255,255,255,.18); padding-left: 9px; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; line-height: 1.35; color: #A79FB8;">Speaking rings in ink.</div>
+          </div>
+        </div>
+
+        <div style="flex: 1 1 0; min-width: 0; border: 1px solid rgba(255,255,255,.10); border-radius: 14px; background: rgba(255,255,255,.018); padding: 10px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px;">
+          <div style="flex: 1; position: relative; display: flex; align-items: center;">
+            <div style="position: absolute; left: 14px; top: -14px; width: 170px; height: 118px; background: radial-gradient(circle, rgba(199,127,168,.44) 0%, rgba(139,95,176,.20) 45%, rgba(14,10,22,0) 72%); filter: blur(26px); pointer-events: none;"></div>
+            <div style="position: relative; width: 100%; border-radius: 18px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); padding: 14px 16px; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+              <span style="font-size: 13.5px; font-weight: 500; color: #F2EDF7;">Basement FM</span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; letter-spacing: .04em; color: #A79FB8;">QUEUE/6</span>
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 4px;">
+            <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px;">
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">GLASS PANEL</span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .04em; color: #A79FB8;">--panel &middot; --hairline &middot; r18</span>
+            </div>
+            <div style="border-left: 1px solid rgba(255,255,255,.18); padding-left: 9px; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; line-height: 1.35; color: #A79FB8;">Needs the bloom behind it.</div>
+          </div>
+        </div>
+
+      </div>
+
+      <div style="flex: 1; border: 1px solid rgba(255,255,255,.10); border-radius: 14px; background: rgba(255,255,255,.018); padding: 10px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px;">
+        <div style="flex: 1; display: flex; align-items: center; gap: 10px; opacity: {{ skelOpacity }}; animation: {{ skelAnim }};">
+          <div style="width: 40px; height: 40px; border-radius: 50%; background: rgba(255,255,255,.09); flex: none;"></div>
+          <div style="flex: 1; display: flex; flex-direction: column; gap: 8px;">
+            <div style="width: 75%; height: 16px; border-radius: 6px; background: rgba(255,255,255,.09);"></div>
+            <div style="width: 50%; height: 12px; border-radius: 6px; background: rgba(255,255,255,.09);"></div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 10px;">
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">SKELETON &middot; FEED ROW</span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .04em; color: #A79FB8;">--panel-strong &middot; opacity .4&harr;.8 / 1800ms, pinned to .6 when motion is reduced</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- F3 — empty state, toast, segmented tabs, progress -->
+  <div style="position: relative; display: flex; gap: 8px; flex: none; align-items: stretch;">
+
+    <div style="flex: 1.2 1 0; min-width: 0; border: 1px solid rgba(255,255,255,.10); border-radius: 14px; background: rgba(255,255,255,.018); padding: 10px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px;">
+      <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center;">
+        <div style="width: 64px; height: 64px; border-radius: 26px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); display: grid; place-items: center;">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/></svg>
+        </div>
+        <div style="font-family: 'Instrument Serif', Georgia, serif; font-size: 22px; line-height: 1.15; color: #F2EDF7;">Nobody is listening yet</div>
+        <div style="font-size: 16px; line-height: 1.4; color: #A79FB8; max-width: 320px;">Start a Session and someone will join.</div>
+      </div>
+      <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 10px;">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">EMPTY STATE</span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .04em; color: #A79FB8;">badge 64 r26 &middot; body &le;320</span>
+      </div>
+    </div>
+
+    <div style="flex: 1.25 1 0; min-width: 0; border: 1px solid rgba(255,255,255,.10); border-radius: 14px; background: rgba(255,255,255,.018); padding: 10px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px;">
+      <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 6px;">
+        <div style="min-height: 44px; box-sizing: border-box; display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-radius: 12px; background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.10); box-shadow: 0 12px 24px rgba(6,4,14,.40);">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex: none;"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+          <span style="font-size: 16px; color: #F2EDF7;">You left the lounge</span>
+        </div>
+        <div style="min-height: 44px; box-sizing: border-box; display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-radius: 12px; background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.10); box-shadow: 0 12px 24px rgba(6,4,14,.40);">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#F2657E" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex: none;"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
+          <span style="font-size: 16px; color: #F2EDF7;">Could not join.</span>
+        </div>
+        <div style="min-height: 44px; box-sizing: border-box; display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-radius: 12px; background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.10); box-shadow: 0 12px 24px rgba(6,4,14,.40);">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#F2EDF7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex: none;"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
+          <span style="font-size: 16px; color: #F2EDF7;">Invite sent</span>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 10px;">
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">TOAST</span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .04em; color: #A79FB8;">min-h 44 &middot; r12 &middot; 3 max</span>
+        </div>
+        <div style="border-left: 1px solid rgba(255,255,255,.18); padding-left: 9px; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; line-height: 1.35; color: #A79FB8;">Success is ink, not --live.</div>
+      </div>
+    </div>
+
+    <div style="flex: 1 1 0; min-width: 0; border: 1px solid rgba(255,255,255,.10); border-radius: 14px; background: rgba(255,255,255,.018); padding: 10px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px;">
+      <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 12px;">
+        <div style="display: flex; gap: 8px; padding: 4px; border-radius: 999px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10);">
+          <div onClick="{{ showQueue }}" class="hit" style="flex: 1; min-height: 44px; border-radius: 999px; display: flex; align-items: center; justify-content: center; background: {{ queueFill }}; color: {{ queueInk }}; font-size: 15px; font-weight: 500;">Queue</div>
+          <div onClick="{{ showChat }}" class="hit" style="flex: 1; min-height: 44px; border-radius: 999px; display: flex; align-items: center; justify-content: center; background: {{ chatFill }}; color: {{ chatInk }}; font-size: 15px; font-weight: 500;">Chat</div>
+        </div>
+        <div style="display: flex; gap: 22px; border-top: 1px solid rgba(255,255,255,.10);">
+          <div onClick="{{ showQueue }}" class="hit" style="min-height: 44px; display: flex; align-items: center;">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; letter-spacing: .04em; color: {{ queueInk }}; border-bottom: 1px solid {{ queueRule }}; padding-bottom: 7px;">QUEUE/6</span>
+          </div>
+          <div onClick="{{ showChat }}" class="hit" style="min-height: 44px; display: flex; align-items: center;">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; letter-spacing: .04em; color: {{ chatInk }}; border-bottom: 1px solid {{ chatRule }}; padding-bottom: 7px;">CHAT/23</span>
+          </div>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px;">
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">SEGMENTED TABS</span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .04em; color: #A79FB8;">tab 44 &middot; gap 8</span>
+        </div>
+        <div style="border-left: 1px solid rgba(255,255,255,.18); padding-left: 9px; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; line-height: 1.35; color: #A79FB8;">Selected is --panel.</div>
+      </div>
+    </div>
+
+    <div style="flex: 1 1 0; min-width: 0; border: 1px solid rgba(255,255,255,.10); border-radius: 14px; background: rgba(255,255,255,.018); padding: 10px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px;">
+      <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 8px;">
+        <div style="display: flex; flex-direction: column; gap: 5px;">
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">FEED 3PX</span>
+          <div style="height: 3px; border-radius: 999px; background: rgba(255,255,255,.10); overflow: hidden;"><div style="width: 43%; height: 100%; border-radius: 999px; background: #57E2D5;"></div></div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 5px;">
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">SESSION 6PX</span>
+          <div style="height: 6px; border-radius: 999px; background: rgba(255,255,255,.10); overflow: hidden;"><div style="width: 43%; height: 100%; border-radius: 999px; background: #57E2D5;"></div></div>
+          <div style="display: flex; justify-content: space-between; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; letter-spacing: .04em; color: #A79FB8;"><span>1:47</span><span>4:03</span></div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 5px;">
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">PLAYHEAD</span>
+          <div style="position: relative; height: 14px;">
+            <div style="position: absolute; left: 0; right: 0; top: 6px; height: 1px; background: rgba(255,255,255,.10);"></div>
+            <div style="position: absolute; left: 43%; top: 0; bottom: 0; width: 1px; background: #57E2D5; box-shadow: 0 0 10px rgba(87,226,213,.6);"></div>
+          </div>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px;">
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">PROGRESS</span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .04em; color: #A79FB8;">track --hairline</span>
+        </div>
+        <div style="border-left: 1px solid rgba(255,255,255,.18); padding-left: 9px; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; line-height: 1.35; color: #A79FB8;">Fill is --live.</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- PRODUCT -->
+  <div style="position: relative; display: flex; align-items: center; gap: 12px; flex: none;">
+    <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">PRODUCT</span>
+    <span style="flex: 1; height: 1px; background: rgba(255,255,255,.10);"></span>
+  </div>
+
+  <!-- P1 — the Feed row, both states -->
+  <div style="position: relative; display: flex; gap: 8px; flex: none; align-items: stretch;">
+
+    <div style="flex: 1 1 0; min-width: 0; border: 1px solid rgba(255,255,255,.10); border-radius: 14px; background: rgba(255,255,255,.018); padding: 10px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px;">
+      <div style="position: relative; width: 100%; height: 82px; box-sizing: border-box; border-radius: 18px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); overflow: hidden; display: flex; align-items: center; gap: 10px; padding: 12px;">
+        <div style="position: absolute; left: 40px; top: -34px; width: 220px; height: 150px; background: radial-gradient(circle, rgba(199,127,168,.40) 0%, rgba(139,95,176,.18) 45%, rgba(14,10,22,0) 72%); filter: blur(28px); pointer-events: none;"></div>
+        <div style="position: relative; width: 40px; height: 40px; flex: none;">
+          <sc-if value="{{ animated }}" hint-placeholder-val="{{ true }}">
+            <div class="halo" style="position: absolute; left: -6px; top: -6px; right: -6px; bottom: -6px; border-radius: 50%; border: 1.5px solid #57E2D5; pointer-events: none;"></div>
+          </sc-if>
+          <div style="position: absolute; left: 0; top: 0; width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(140deg,#C77FA8,#8B5FB0); border: 1.5px solid #57E2D5; box-sizing: border-box; display: grid; place-items: center; font-size: 15px; font-weight: 600; color: #F2EDF7;">P</div>
+        </div>
+        <div style="position: relative; width: 56px; height: 56px; flex: none;">
+          <div style="width: 56px; height: 56px; border-radius: 12px; background: linear-gradient(150deg,#C77FA8 0%,#8B5FB0 48%,#4A3670 100%); box-shadow: 0 8px 22px rgba(199,127,168,.26);"></div>
+          <div style="position: absolute; right: -4px; bottom: -4px; width: 18px; height: 18px; border-radius: 50%; background: #0E0A16; border: 1px solid rgba(255,255,255,.10); display: grid; place-items: center;">
+            <sc-if value="{{ isSpotify }}" hint-placeholder-val="{{ true }}">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round"><path d="M2 10v3"/><path d="M6 6v11"/><path d="M10 3v18"/><path d="M14 8v7"/><path d="M18 5v13"/><path d="M22 10v3"/></svg>
+            </sc-if>
+            <sc-if value="{{ isYoutube }}" hint-placeholder-val="{{ false }}">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M7 21h10"/><path d="m10.5 8 4 3-4 3z"/></svg>
+            </sc-if>
+          </div>
+        </div>
+        <div style="position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;">
+          <div style="font-size: 16px; font-weight: 500; color: #F2EDF7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Midnight City</div>
+          <div style="display: flex; align-items: baseline; gap: 8px;">
+            <span style="flex: 1; min-width: 0; font-size: 12.5px; color: #A79FB8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">M83 &middot; Basement FM</span>
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; letter-spacing: .04em; color: #A79FB8; flex: none;">1:47</span>
+          </div>
+          <div style="height: 3px; margin-top: 4px; border-radius: 999px; background: rgba(255,255,255,.10); overflow: hidden;"><div style="width: 43%; height: 100%; border-radius: 999px; background: #57E2D5;"></div></div>
+        </div>
+        <div style="position: relative; flex: none; height: 44px; padding: 0 16px; border-radius: 999px; background: #57E2D5; border: 1px solid transparent; color: #0E0A16; font-size: 16px; font-weight: 500; display: flex; align-items: center;">Join</div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 10px;">
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">FEED ROW &middot; LIVE, JOINABLE</span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .04em; color: #A79FB8;">358 &times; 82 &middot; r18 &middot; pad 12</span>
+        </div>
+        <div style="border-left: 1px solid rgba(255,255,255,.18); padding-left: 9px; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; line-height: 1.35; color: #A79FB8;">Ring, halo and Join arrive together or not at all.</div>
+      </div>
+    </div>
+
+    <div style="flex: 1 1 0; min-width: 0; border: 1px solid rgba(255,255,255,.10); border-radius: 14px; background: rgba(255,255,255,.018); padding: 10px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px;">
+      <div style="position: relative; width: 100%; height: 82px; box-sizing: border-box; border-radius: 18px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); overflow: hidden; display: flex; align-items: center; gap: 10px; padding: 12px;">
+        <div style="position: absolute; left: 40px; top: -34px; width: 220px; height: 150px; background: radial-gradient(circle, rgba(74,107,160,.30) 0%, rgba(139,95,176,.12) 45%, rgba(14,10,22,0) 72%); filter: blur(28px); pointer-events: none;"></div>
+        <div style="position: relative; width: 40px; height: 40px; flex: none; border-radius: 50%; background: linear-gradient(140deg,#4A6BA0,#2E4470); display: grid; place-items: center; font-size: 15px; font-weight: 600; color: #F2EDF7;">D</div>
+        <div style="position: relative; width: 56px; height: 56px; flex: none;">
+          <div style="width: 56px; height: 56px; box-sizing: border-box; border-radius: 12px; background: #140F1E; border: 1px solid rgba(255,255,255,.10);"></div>
+          <div style="position: absolute; right: -4px; bottom: -4px; width: 18px; height: 18px; border-radius: 50%; background: #0E0A16; border: 1px solid rgba(255,255,255,.10); display: grid; place-items: center;">
+            <sc-if value="{{ isSpotify }}" hint-placeholder-val="{{ true }}">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round"><path d="M2 10v3"/><path d="M6 6v11"/><path d="M10 3v18"/><path d="M14 8v7"/><path d="M18 5v13"/><path d="M22 10v3"/></svg>
+            </sc-if>
+            <sc-if value="{{ isYoutube }}" hint-placeholder-val="{{ false }}">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M7 21h10"/><path d="m10.5 8 4 3-4 3z"/></svg>
+            </sc-if>
+          </div>
+        </div>
+        <div style="position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;">
+          <div style="font-size: 16px; font-weight: 500; color: #F2EDF7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Getting the aux ready</div>
+          <div style="display: flex; align-items: baseline; gap: 8px;">
+            <span style="flex: 1; min-width: 0; font-size: 12.5px; color: #A79FB8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Basement FM</span>
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; letter-spacing: .04em; color: #A79FB8; flex: none;">0:00</span>
+          </div>
+          <div style="height: 3px; margin-top: 4px; border-radius: 999px; background: rgba(255,255,255,.10); overflow: hidden;"><div style="width: 0%; height: 100%; border-radius: 999px; background: #57E2D5;"></div></div>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 10px;">
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">FEED ROW &middot; SOLO, NO TRACK, NO ART</span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .04em; color: #A79FB8;">358 &times; 82</span>
+        </div>
+        <div style="border-left: 1px solid rgba(255,255,255,.18); padding-left: 9px; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; line-height: 1.35; color: #A79FB8;">Empty art is flat --ground-2; the bar stays at 0%.</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- P2 — lounge card, session card -->
+  <div style="position: relative; display: flex; gap: 8px; flex: none; align-items: stretch;">
+
+    <div style="flex: 1 1 0; min-width: 0; border: 1px solid rgba(255,255,255,.10); border-radius: 14px; background: rgba(255,255,255,.018); padding: 10px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px;">
+      <div style="position: relative; width: 100%; box-sizing: border-box; border-radius: 18px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); padding: 16px; display: flex; align-items: center; gap: 12px;">
+        <div style="position: relative; width: 52px; height: 52px; flex: none;">
+          <sc-if value="{{ animated }}" hint-placeholder-val="{{ true }}">
+            <div class="halo" style="position: absolute; left: -6px; top: -6px; right: -6px; bottom: -6px; border-radius: 50%; border: 1.5px solid #57E2D5; pointer-events: none;"></div>
+          </sc-if>
+          <div style="position: absolute; left: 0; top: 0; width: 52px; height: 52px; border-radius: 50%; background: linear-gradient(140deg,#8B5FB0,#4A3670); border: 1.5px solid #57E2D5; box-sizing: border-box; display: grid; place-items: center; font-size: 20px; font-weight: 600; color: #F2EDF7;">BF</div>
+        </div>
+        <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+          <div style="font-size: 17px; font-weight: 600; color: #F2EDF7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Basement FM</div>
+          <div style="font-size: 16px; color: #A79FB8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Nothing before midnight.</div>
+          <div style="display: flex; align-items: center; gap: 12px; margin-top: 2px;">
+            <div style="display: flex; align-items: center; gap: 4px;">
+              <span style="position: relative; width: 18px; height: 18px; display: grid; place-items: center; flex: none;">
+                <sc-if value="{{ animated }}" hint-placeholder-val="{{ true }}">
+                  <span class="pulse" style="position: absolute; width: 18px; height: 18px; border-radius: 50%; background: #57E2D5;"></span>
+                </sc-if>
+                <span style="position: relative; width: 7px; height: 7px; border-radius: 50%; background: #57E2D5;"></span>
+              </span>
+              <span style="font-size: 13.5px; font-weight: 500; color: #57E2D5;">4 listening</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 4px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              <span style="font-size: 13.5px; font-weight: 500; color: #A79FB8;">12 members</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 4px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+              <span style="font-size: 13.5px; font-weight: 500; color: #A79FB8;">Public</span>
+            </div>
+          </div>
+        </div>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex: none;"><path d="m9 18 6-6-6-6"/></svg>
+      </div>
+      <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 10px;">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">LOUNGE CARD</span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .04em; color: #A79FB8;">r18 &middot; pad 16 &middot; avatar 52 &middot; 114 with a blurb, 86 without</span>
+      </div>
+    </div>
+
+    <div style="flex: 1 1 0; min-width: 0; border: 1px solid rgba(255,255,255,.10); border-radius: 14px; background: rgba(255,255,255,.018); padding: 10px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px;">
+      <div style="flex: 1; display: flex; align-items: center;">
+        <div style="position: relative; width: 100%; box-sizing: border-box; border-radius: 18px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); padding: 16px; display: flex; align-items: center; gap: 12px;">
+          <div style="width: 44px; height: 44px; flex: none; border-radius: 12px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); display: grid; place-items: center;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#57E2D5" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/></svg>
+          </div>
+          <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;">
+            <div style="display: flex; align-items: center; gap: 4px;">
+              <span style="position: relative; width: 18px; height: 18px; display: grid; place-items: center; flex: none;">
+                <sc-if value="{{ animated }}" hint-placeholder-val="{{ true }}">
+                  <span class="pulse" style="position: absolute; width: 18px; height: 18px; border-radius: 50%; background: #57E2D5;"></span>
+                </sc-if>
+                <span style="position: relative; width: 7px; height: 7px; border-radius: 50%; background: #57E2D5;"></span>
+              </span>
+              <span style="font-size: 16px; font-weight: 500; color: #F2EDF7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Friday night</span>
+            </div>
+            <div style="font-size: 16px; color: #A79FB8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Midnight City &mdash; M83</div>
+            <div style="font-size: 12.5px; color: #A79FB8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Priya is on aux</div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 4px; flex: none;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5a9 9 0 0 1 18 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3"/></svg>
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; letter-spacing: .04em; color: #A79FB8;">5</span>
+          </div>
+        </div>
+      </div>
+      <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 10px;">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">SESSION CARD</span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .04em; color: #A79FB8;">r18 &middot; badge 44 r12 &middot; 104 with a track, 84 without</span>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- P3 — member row, queue row, chat message, participant line-row -->
+  <div style="position: relative; display: flex; gap: 8px; flex: none; align-items: stretch;">
+
+    <div style="flex: 1 1 0; min-width: 0; border: 1px solid rgba(255,255,255,.10); border-radius: 14px; background: rgba(255,255,255,.018); padding: 10px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px;">
+      <div style="flex: 1; display: flex; flex-direction: column; justify-content: center;">
+        <div style="min-height: 44px; padding: 8px 0; box-sizing: border-box; display: flex; align-items: center; gap: 10px;">
+          <div style="width: 40px; height: 40px; flex: none; border-radius: 50%; background: linear-gradient(140deg,#8B5FB0,#4A3670); display: grid; place-items: center; font-size: 15px; font-weight: 600; color: #F2EDF7;">A</div>
+          <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px;">
+            <span style="font-size: 16px; font-weight: 500; color: #F2EDF7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Anush</span>
+            <span style="font-size: 13.5px; font-weight: 500; color: #A79FB8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">@anush</span>
+          </div>
+          <span style="flex: none; padding: 4px 10px; border-radius: 999px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); font-size: 12.5px; color: #F2EDF7;">You</span>
+          <span style="flex: none; padding: 4px 10px; border-radius: 999px; background: rgba(255,255,255,.09); font-size: 12.5px; color: #F2EDF7;">Owner</span>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px;">
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">MEMBER ROW</span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .04em; color: #A79FB8;">44 &middot; avatar 40</span>
+        </div>
+        <div style="border-left: 1px solid rgba(255,255,255,.18); padding-left: 9px; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; line-height: 1.35; color: #A79FB8;">Chips never take --live.</div>
+      </div>
+    </div>
+
+    <div style="flex: 1.05 1 0; min-width: 0; border: 1px solid rgba(255,255,255,.10); border-radius: 14px; background: rgba(255,255,255,.018); padding: 10px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px;">
+      <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 12px;">
+        <sc-for list="{{ queue }}" as="q" hint-placeholder-count="2">
+          <div style="min-height: 44px; display: flex; align-items: center; gap: 9px;">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; letter-spacing: .04em; color: #A79FB8; width: 17px; flex: none;">{{ q.n }}</span>
+            <div style="width: 36px; height: 36px; border-radius: 6px; background: {{ q.art }}; flex: none;"></div>
+            <div style="flex: 1; min-width: 0;">
+              <div style="font-size: 16px; font-weight: 500; color: #F2EDF7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ q.title }}</div>
+              <div style="font-size: 12.5px; color: #A79FB8; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ q.sub }}</div>
+            </div>
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; letter-spacing: .04em; color: #A79FB8; flex: none;">{{ q.len }}</span>
+            <div style="width: 44px; height: 44px; flex: none; display: grid; place-items: center;">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px;">
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">QUEUE ROW</span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .04em; color: #A79FB8;">art 36 r6</span>
+        </div>
+        <div style="border-left: 1px solid rgba(255,255,255,.18); padding-left: 9px; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; line-height: 1.35; color: #A79FB8;">Remove only if yours.</div>
+      </div>
+    </div>
+
+    <div style="flex: 1 1 0; min-width: 0; border: 1px solid rgba(255,255,255,.10); border-radius: 14px; background: rgba(255,255,255,.018); padding: 10px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px;">
+      <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 2px;">
+        <div style="display: flex; gap: 12px; padding: 3px 0;">
+          <div style="width: 36px; height: 36px; flex: none; border-radius: 50%; background: linear-gradient(140deg,#C77FA8,#7A4A68); display: grid; place-items: center; font-size: 14px; font-weight: 600; color: #F2EDF7;">T</div>
+          <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;">
+            <div style="display: flex; align-items: baseline; gap: 8px;">
+              <span style="font-size: 13.5px; font-weight: 500; color: #F2EDF7;">Tara</span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">01:14</span>
+            </div>
+            <div style="font-size: 16px; line-height: 1.4; color: #F2EDF7;">put nightcall after</div>
+          </div>
+        </div>
+        <div style="display: flex; gap: 12px; padding: 3px 0;">
+          <div style="width: 36px; flex: none;"></div>
+          <div style="flex: 1; min-width: 0; font-size: 16px; line-height: 1.4; color: #F2EDF7;">this one drags a bit</div>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px;">
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">CHAT MESSAGE</span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .04em; color: #A79FB8;">gutter 48</span>
+        </div>
+        <div style="border-left: 1px solid rgba(255,255,255,.18); padding-left: 9px; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; line-height: 1.35; color: #A79FB8;">Runs break at 5 min.</div>
+      </div>
+    </div>
+
+    <div style="flex: 1.2 1 0; min-width: 0; border: 1px solid rgba(255,255,255,.10); border-radius: 14px; background: rgba(255,255,255,.018); padding: 10px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px;">
+      <div style="flex: 1; display: flex; flex-direction: column; justify-content: center;">
+        <div style="position: relative; display: flex; flex-direction: column; gap: 9px;">
+          <div style="position: absolute; left: 43%; top: -6px; bottom: -6px; width: 1px; background: #57E2D5; box-shadow: 0 0 10px rgba(87,226,213,.6);"></div>
+          <sc-for list="{{ people }}" as="p" hint-placeholder-count="3">
+            <div style="display: flex; align-items: center; gap: 9px; position: relative;">
+              <div style="width: 30px; height: 30px; border-radius: 50%; background: {{ p.art }}; border: 1.5px solid {{ p.ring }}; box-sizing: border-box; flex: none;"></div>
+              <span style="font-size: 13.5px; font-weight: 500; width: 42px; flex: none; color: {{ p.nameColor }}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ p.name }}</span>
+              <div style="flex: 1; height: 1px; background: rgba(255,255,255,.10); position: relative;">
+                <div style="position: absolute; left: {{ p.dot }}; top: -3px; width: 7px; height: 7px; border-radius: 50%; background: {{ p.dotColor }};"></div>
+              </div>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; letter-spacing: .04em; width: 48px; text-align: right; flex: none; color: {{ p.driftColor }};">{{ p.drift }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px;">
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">PARTICIPANT LINE-ROW</span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .04em; color: #A79FB8;">row 30 &middot; 250ms</span>
+        </div>
+        <div style="border-left: 1px solid rgba(255,255,255,.18); padding-left: 9px; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; line-height: 1.35; color: #A79FB8;">The playhead crosses it.</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- P4 — the states note -->
+  <div style="position: relative; flex: none; border: 1px solid rgba(255,255,255,.10); border-radius: 14px; background: rgba(255,255,255,.018); padding: 9px 12px; box-sizing: border-box; display: flex; align-items: center; gap: 14px;">
+    <div style="display: flex; align-items: center; gap: 7px; flex: none;">
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8;">STATES WE ALWAYS DESIGN</span>
+      <span style="padding: 3px 8px; border-radius: 6px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #F2EDF7;">LOADING</span>
+      <span style="padding: 3px 8px; border-radius: 6px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #F2EDF7;">EMPTY</span>
+      <span style="padding: 3px 8px; border-radius: 6px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #F2EDF7;">ERROR</span>
+    </div>
+    <span style="width: 1px; align-self: stretch; background: rgba(255,255,255,.10); flex: none;"></span>
+    <div style="flex: 1; font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; line-height: 1.35; color: #A79FB8;">Every screen that fetches gets all three, drawn not described. A skeleton is not an empty state, nor an error.</div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"motion":{"editor":"enum","options":["animated","reduced"],"default":"animated","section":"Prototype"},"provider":{"editor":"enum","options":["spotify","youtube"],"default":"spotify","section":"Prototype"}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { tab: 'queue' };
+  }
+
+  renderVals() {
+    const INK = '#F2EDF7', INK2 = '#A79FB8', LIVE = '#57E2D5', WARN = '#E8B15C', GROUND = '#0E0A16';
+    const MONO = "'IBM Plex Mono', monospace";
+    const UI = 'Figtree, system-ui, sans-serif';
+
+    const animated = (this.props.motion ?? 'animated') === 'animated';
+    const provider = this.props.provider ?? 'spotify';
+
+    // The button matrix: rows are sizes, columns are intents.
+    // Bright fills take the ground as their label; only ghost carries the ink.
+    const intents = [
+      { name: 'PRIMARY', label: 'Create', bg: INK, fg: GROUND, bd: 'transparent' },
+      { name: 'LIVE', label: 'Join', bg: LIVE, fg: GROUND, bd: 'transparent' },
+      { name: 'GHOST', label: 'Cancel', bg: 'transparent', fg: INK, bd: 'rgba(255,255,255,.18)' },
+      { name: 'STOP', label: 'Leave', bg: '#F2657E', fg: GROUND, bd: 'transparent' }
+    ];
+    const sizes = [
+      { name: 'SM', h: '44px', px: '16px' },
+      { name: 'MD', h: '52px', px: '24px' },
+      { name: 'LG', h: '58px', px: '32px' }
+    ];
+
+    const tag = (t) => ({
+      t: t, h: '14px', px: '0px', r: '0px', bg: 'transparent', bd: 'transparent',
+      fg: INK2, ff: MONO, fs: '10px', fw: '500', ls: '.09em'
+    });
+
+    const matrix = [tag('')];
+    intents.forEach((i) => matrix.push(tag(i.name)));
+    sizes.forEach((s) => {
+      matrix.push(tag(s.name));
+      intents.forEach((i) => matrix.push({
+        t: i.label, h: s.h, px: s.px, r: '999px',
+        bg: i.bg, bd: i.bd, fg: i.fg, ff: UI, fs: '16px', fw: '500', ls: '0'
+      }));
+    });
+
+    // Drift is real data: each dot sits where that listener actually is,
+    // measured against the playhead at 43%.
+    const drifts = [
+      { name: 'Priya', art: 'linear-gradient(140deg,#C77FA8,#8B5FB0)', ring: LIVE, drift: 'on aux', c: LIVE, off: 0 },
+      { name: 'Anush', art: 'linear-gradient(140deg,#8B5FB0,#4A3670)', ring: 'rgba(255,255,255,.14)', drift: '+12ms', c: INK2, off: -2 },
+      { name: 'Dev', art: 'linear-gradient(140deg,#4A6BA0,#2E4470)', ring: 'rgba(255,255,255,.14)', drift: '+310ms', c: WARN, off: 9 }
+    ];
+    const people = drifts.map((d, i) => ({
+      name: d.name,
+      art: d.art,
+      ring: d.ring,
+      nameColor: i === 0 ? INK : INK2,
+      drift: d.drift,
+      driftColor: d.c,
+      dotColor: d.c,
+      dot: 'calc(43% - 3.5px + ' + d.off + 'px)'
+    }));
+
+    const onQueue = this.state.tab === 'queue';
+
+    return {
+      matrix: matrix,
+      people: people,
+      animated: animated,
+      isSpotify: provider === 'spotify',
+      isYoutube: provider !== 'spotify',
+      spinAnim: animated ? 'auxSpin 900ms linear infinite' : 'none',
+      skelAnim: animated ? 'auxSkel 1800ms ease-in-out infinite' : 'none',
+      skelOpacity: animated ? '1' : '.6',
+      queueFill: onQueue ? 'rgba(255,255,255,.09)' : 'transparent',
+      chatFill: onQueue ? 'transparent' : 'rgba(255,255,255,.09)',
+      queueInk: onQueue ? INK : INK2,
+      chatInk: onQueue ? INK2 : INK,
+      queueRule: onQueue ? LIVE : 'transparent',
+      chatRule: onQueue ? 'transparent' : LIVE,
+      queue: [
+        { n: '01', title: 'Instant Crush', sub: 'Daft Punk · Anush added', len: '5:37', art: 'linear-gradient(140deg,#8B5FB0,#4A3670)' },
+        { n: '02', title: 'Nightcall', sub: 'Kavinsky · Tara added', len: '4:18', art: 'linear-gradient(140deg,#C77FA8,#7A4A68)' }
+      ],
+      showQueue: () => this.setState({ tab: 'queue' }),
+      showChat: () => this.setState({ tab: 'chat' })
+    };
+  }
+}
+</script>
+</body>
+</html>

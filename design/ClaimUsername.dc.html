@@ -1,0 +1,161 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Figtree:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; }
+    *, *::before, *::after { box-sizing: border-box; }
+    a { color: #57E2D5; } a:hover { color: #8bede4; }
+    .aux-tap { cursor: pointer; }
+  </style>
+</helmet>
+
+<div style="width: 375px; height: 812px; background: #0E0A16; color: #F2EDF7; font-family: Figtree, system-ui, sans-serif; overflow: hidden; position: relative; display: flex; flex-direction: column; padding: 26px 20px 22px; gap: 20px;">
+
+  <!-- Faint bloom, low and to the left, so the preview glass picks up colour -->
+  <div style="position: absolute; left: -90px; top: 96px; width: 400px; height: 330px; background: radial-gradient(circle, rgba(199,127,168,.20) 0%, rgba(139,95,176,.12) 45%, rgba(14,10,22,0) 72%); filter: blur(34px); pointer-events: none;"></div>
+
+  <!-- Title + lede -->
+  <div style="position: relative; display: flex; flex-direction: column; gap: 10px;">
+    <div style="min-height: 44px; display: flex; align-items: center;">
+      <span style="font-family: 'Instrument Serif', Georgia, serif; font-size: 26px; line-height: 1.2;">Your handle</span>
+    </div>
+    <div style="font-size: 16px; line-height: 1.5; color: #A79FB8;">You are in. Pick the name people will see when you take the aux.</div>
+  </div>
+
+  <!-- Live preview -->
+  <div style="position: relative; border-radius: 18px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); padding: 14px; display: flex; align-items: center; gap: 16px;">
+    <div style="width: 72px; height: 72px; border-radius: 50%; background: linear-gradient(140deg,#8B5FB0,#4A3670); border: 1.5px solid rgba(255,255,255,.14); flex: none; display: grid; place-items: center;">
+      <span style="font-size: 26px; font-weight: 600; color: #F2EDF7;">A</span>
+    </div>
+    <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+      <div style="font-size: 17px; line-height: 1.35; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Anush</div>
+      <div style="font-size: 16px; line-height: 1.5; color: #A79FB8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">@anush</div>
+    </div>
+  </div>
+
+  <!-- Fields -->
+  <div style="position: relative; display: flex; flex-direction: column; gap: 16px;">
+
+    <!-- Username -->
+    <div style="display: flex; flex-direction: column; gap: 6px;">
+      <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px;">
+        <span style="font-size: 13.5px; line-height: 1.4; font-weight: 500; color: #A79FB8;">Username</span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; line-height: 1.3; letter-spacing: .04em; color: #A79FB8;">{{ count }}</span>
+      </div>
+      <div onClick="{{ focusUsername }}" class="aux-tap" style="min-height: 48px; border-radius: 12px; padding: 0 14px; display: flex; align-items: center; background: {{ userBg }}; border: 1px solid {{ userBorder }};">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 16px; color: #A79FB8; letter-spacing: -.02em;">@</span>
+        <span style="font-size: 16px; color: #F2EDF7;">anush</span>
+      </div>
+
+      <!-- Availability. Deliberately NOT the live colour: available is warm white. -->
+      <div style="min-height: 24px; display: flex; align-items: center;">
+        <sc-if value="{{ isChecking }}" hint-placeholder-val="{{ false }}">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round"><path d="M12 3a9 9 0 1 0 9 9"/></svg>
+            <span style="font-size: 13.5px; line-height: 1.4; font-weight: 500; color: #A79FB8;">Checking…</span>
+          </div>
+        </sc-if>
+        <sc-if value="{{ isAvailable }}" hint-placeholder-val="{{ true }}">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F2EDF7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            <span style="font-size: 13.5px; line-height: 1.4; font-weight: 500; color: #F2EDF7;">@anush is yours</span>
+          </div>
+        </sc-if>
+        <sc-if value="{{ isTaken }}" hint-placeholder-val="{{ false }}">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F2657E" stroke-width="1.6" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            <span style="font-size: 13.5px; line-height: 1.4; font-weight: 500; color: #F2657E;">@anush is taken</span>
+          </div>
+        </sc-if>
+      </div>
+
+      <div style="font-size: 13.5px; line-height: 1.4; color: #A79FB8;">3 to 20 characters. Lowercase letters, numbers and underscores only.</div>
+    </div>
+
+    <!-- Display name -->
+    <div style="display: flex; flex-direction: column; gap: 6px;">
+      <div style="font-size: 13.5px; line-height: 1.4; font-weight: 500; color: #A79FB8;">Display name</div>
+      <div onClick="{{ focusDisplay }}" class="aux-tap" style="min-height: 48px; border-radius: 12px; padding: 0 14px; display: flex; align-items: center; background: {{ displayBg }}; border: 1px solid {{ displayBorder }};">
+        <span style="font-size: 16px; color: #F2EDF7;">Anush</span>
+      </div>
+    </div>
+
+    <!-- Avatar URL -->
+    <div style="display: flex; flex-direction: column; gap: 6px;">
+      <div style="font-size: 13.5px; line-height: 1.4; font-weight: 500; color: #A79FB8;">Avatar URL</div>
+      <div onClick="{{ focusAvatar }}" class="aux-tap" style="min-height: 48px; border-radius: 12px; padding: 0 14px; display: flex; align-items: center; background: {{ avatarBg }}; border: 1px solid {{ avatarBorder }};">
+        <span style="font-size: 16px; color: #6E6681;">https://...</span>
+      </div>
+    </div>
+
+  </div>
+
+  <div style="flex: 1 1 0; min-height: 0;"></div>
+
+  <!-- Actions -->
+  <div style="position: relative; display: flex; flex-direction: column; gap: 12px;">
+    <div onClick="{{ noop }}" class="aux-tap" style="min-height: 52px; border-radius: 999px; background: {{ saveBg }}; display: flex; align-items: center; justify-content: center;">
+      <span style="font-size: 16px; font-weight: 600; color: #0E0A16;">Save</span>
+    </div>
+    <div onClick="{{ noop }}" class="aux-tap" style="min-height: 50px; border-radius: 999px; border: 1px solid rgba(255,255,255,.18); display: flex; align-items: center; justify-content: center;">
+      <span style="font-size: 16px; font-weight: 500; color: #F2EDF7;">Skip for now</span>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"state":{"editor":"enum","options":["checking","available","taken"],"default":"available","section":"Prototype"}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { focus: 'username' };
+  }
+
+  renderVals() {
+    const state = this.props.state ?? 'available';
+    const focus = this.state.focus;
+
+    const IDLE_BG = 'rgba(255,255,255,.055)', FOCUS_BG = 'rgba(255,255,255,.09)';
+    const IDLE_LINE = 'rgba(255,255,255,.10)', FOCUS_LINE = 'rgba(255,255,255,.28)';
+
+    // "taken" lives in the hint row, never as a field error — same as the build.
+    const fill = (field) => focus === field ? FOCUS_BG : IDLE_BG;
+    const border = (field) => focus === field ? FOCUS_LINE : IDLE_LINE;
+
+    const handle = 'anush';
+    const pad = (n) => (n < 10 ? '0' + n : String(n));
+
+    return {
+      isChecking: state === 'checking',
+      isAvailable: state === 'available',
+      isTaken: state === 'taken',
+
+      count: pad(handle.length) + '/20',
+
+      userBg: fill('username'),
+      userBorder: border('username'),
+      displayBg: fill('display'),
+      displayBorder: border('display'),
+      avatarBg: fill('avatar'),
+      avatarBorder: border('avatar'),
+
+      // Save is inert while the lookup is still running.
+      saveBg: state === 'checking' ? 'rgba(242,237,247,.45)' : '#F2EDF7',
+
+      focusUsername: () => this.setState({ focus: 'username' }),
+      focusDisplay: () => this.setState({ focus: 'display' }),
+      focusAvatar: () => this.setState({ focus: 'avatar' }),
+      noop: () => {},
+    };
+  }
+}
+</script>
+</body>
+</html>

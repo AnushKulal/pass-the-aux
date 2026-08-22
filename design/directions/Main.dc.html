@@ -1,0 +1,82 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Anton&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #FF4A1C; } a:hover { color: #ff6a44; }
+  </style>
+</helmet>
+
+<div style="width: 720px; height: 812px; background: #0B0B0C; color: #F2EFE6; font-family: Archivo, system-ui, sans-serif; padding: 56px 56px 0; box-sizing: border-box; display: flex; flex-direction: column; gap: 28px;">
+
+  <div style="display: flex; flex-direction: column; gap: 10px;">
+    <div style="font-size: 12px; letter-spacing: 0.22em; text-transform: uppercase; color: #8A8578;">Aux &middot; Redesign from scratch</div>
+    <div style="font-family: Anton, Impact, sans-serif; font-size: 62px; line-height: 0.94; letter-spacing: -0.01em; text-transform: uppercase;">Pick a<br>direction</div>
+    <div style="font-size: 15px; line-height: 1.55; color: #B5B0A3; max-width: 460px;">Four visual worlds for the same product. Each one draws the Session screen &mdash; the party itself &mdash; because that is where Aux either feels like something or doesn&rsquo;t. Tell me a letter and I&rsquo;ll build the whole app in it.</div>
+  </div>
+
+  <div style="height: 1px; background: #26241F;"></div>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 26px;">
+
+    <div style="display: flex; flex-direction: column; gap: 7px;">
+      <div style="display: flex; align-items: baseline; gap: 10px;">
+        <span style="font-family: Anton, Impact, sans-serif; font-size: 30px; color: #FF4A1C;">A</span>
+        <span style="font-size: 18px; font-weight: 700; letter-spacing: -0.01em;">Marquee</span>
+      </div>
+      <div style="font-size: 13.5px; line-height: 1.5; color: #B5B0A3;">Gig-poster typography. The track title is the interface &mdash; set enormous, art kept small. Risograph duotone on black.</div>
+      <div style="font-size: 12px; line-height: 1.45; color: #7C776B;"><span style="color:#F2EFE6;">Trade-off:</span> loud and memorable, but long track titles fight the layout.</div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 7px;">
+      <div style="display: flex; align-items: baseline; gap: 10px;">
+        <span style="font-family: Anton, Impact, sans-serif; font-size: 30px; color: #FFA62B;">B</span>
+        <span style="font-size: 18px; font-weight: 700; letter-spacing: -0.01em;">Tape Deck</span>
+      </div>
+      <div style="font-size: 13.5px; line-height: 1.5; color: #B5B0A3;">Physical hi-fi. Brushed metal, amber meters, transport keys you can almost feel. Sync reads as a needle.</div>
+      <div style="font-size: 12px; line-height: 1.45; color: #7C776B;"><span style="color:#F2EFE6;">Trade-off:</span> warm and tactile; skeuomorphism dates faster than flat.</div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 7px;">
+      <div style="display: flex; align-items: baseline; gap: 10px;">
+        <span style="font-family: Anton, Impact, sans-serif; font-size: 30px; color: #4FD1E0;">C</span>
+        <span style="font-size: 18px; font-weight: 700; letter-spacing: -0.01em;">Signal</span>
+      </div>
+      <div style="font-size: 13.5px; line-height: 1.5; color: #B5B0A3;">Makes the invisible visible. One playhead line runs through everyone&rsquo;s avatar &mdash; you can literally see you are together.</div>
+      <div style="font-size: 12px; line-height: 1.45; color: #7C776B;"><span style="color:#F2EFE6;">Trade-off:</span> the only one that designs the sync itself; reads technical, less cosy.</div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 7px;">
+      <div style="display: flex; align-items: baseline; gap: 10px;">
+        <span style="font-family: Anton, Impact, sans-serif; font-size: 30px; color: #E8A0BF;">D</span>
+        <span style="font-size: 18px; font-weight: 700; letter-spacing: -0.01em;">Afterglow</span>
+      </div>
+      <div style="font-size: 13.5px; line-height: 1.5; color: #B5B0A3;">The artwork floods the room. Huge bloom, almost no chrome, everything soft. Closest to 1am on a sofa.</div>
+      <div style="font-size: 12px; line-height: 1.45; color: #7C776B;"><span style="color:#F2EFE6;">Trade-off:</span> gorgeous with good art, mushy with bad art &mdash; and contrast needs care.</div>
+    </div>
+
+  </div>
+
+  <div style="height: 1px; background: #26241F;"></div>
+
+  <div style="display: flex; gap: 26px; font-size: 12.5px; line-height: 1.5; color: #7C776B;">
+    <div style="flex: 1;"><span style="color: #F2EFE6; font-weight: 600;">Constant across all four</span><br>Dark. One reserved &ldquo;live&rdquo; colour. Album art survives being ugly. 44px targets, 16px body, 4.5:1 contrast.</div>
+    <div style="flex: 1;"><span style="color: #F2EFE6; font-weight: 600;">What I need from you</span><br>A letter. Or take one direction&rsquo;s type and another&rsquo;s colour &mdash; mixing is fine and often better than picking.</div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

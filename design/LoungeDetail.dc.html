@@ -1,0 +1,297 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Figtree:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #57E2D5; } a:hover { color: #8bede4; }
+    .aux-row { cursor: pointer; }
+    @keyframes auxHalo { from { opacity: .45; transform: scale(.4); } to { opacity: 0; transform: scale(1); } }
+    .aux-halo { animation: auxHalo 1400ms cubic-bezier(.16,.84,.44,1) infinite; }
+    @media (prefers-reduced-motion: reduce) { .aux-halo { display: none; } }
+  </style>
+</helmet>
+
+<div style="width: 375px; height: 812px; background: #0E0A16; color: #F2EDF7; font-family: Figtree, system-ui, sans-serif; overflow: hidden; position: relative; display: flex; flex-direction: column;">
+
+  <!-- Atmosphere: two Sessions are burning in here, so the room is lit -->
+  <div style="position: absolute; left: 50%; top: -140px; transform: translateX(-50%); width: 460px; height: 380px; background: radial-gradient(circle, rgba(199,127,168,.30) 0%, rgba(139,95,176,.16) 45%, rgba(14,10,22,0) 70%); filter: blur(32px); pointer-events: none;"></div>
+
+  <!-- Header -->
+  <div style="position: relative; padding: 16px 20px 0; display: flex; align-items: center; gap: 8px; min-height: 44px;">
+    <div onClick="{{ noop }}" class="aux-row" style="width: 44px; height: 44px; margin-left: -12px; display: grid; place-items: center; flex: none;">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F2EDF7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg>
+    </div>
+    <span style="flex: 1; min-width: 0; font-family: 'Instrument Serif', Georgia, serif; font-size: 24px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Basement FM</span>
+    <div onClick="{{ shareAction }}" class="aux-row" style="width: 44px; height: 44px; display: grid; place-items: center; flex: none; opacity: {{ actionOpacity }};">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#F2EDF7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+    </div>
+    <div onClick="{{ noop }}" class="aux-row" style="width: 44px; height: 44px; margin-right: -10px; display: grid; place-items: center; flex: none; opacity: {{ actionOpacity }};">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="#F2EDF7" stroke="none"><circle cx="12" cy="5" r="1.5"></circle><circle cx="12" cy="12" r="1.5"></circle><circle cx="12" cy="19" r="1.5"></circle></svg>
+    </div>
+  </div>
+
+  <!-- The invite code lives above the tabs: it is never one tap out of reach -->
+  <sc-if value="{{ member }}" hint-placeholder-val="{{ true }}">
+    <div style="position: relative; padding: 14px 20px 0;">
+      <div style="border-radius: 18px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+        <div style="font-size: 16px; line-height: 1.5;">Four floors down.</div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+          <span style="font-size: 13.5px; font-weight: 500; color: #A79FB8;">Public lounge</span>
+        </div>
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid rgba(255,255,255,.10); padding-top: 12px;">
+          <div style="display: flex; flex-direction: column; gap: 3px; min-width: 0;">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #6E6681;">INVITE CODE</span>
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 24px; font-weight: 500; letter-spacing: .14em; line-height: 1.2; color: #F2EDF7;">M4K7QD2P</span>
+          </div>
+          <div onClick="{{ shareAction }}" class="aux-row" style="min-height: 44px; padding: 0 16px; border-radius: 999px; border: 1px solid rgba(255,255,255,.18); display: flex; align-items: center; gap: 8px; flex: none;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F2EDF7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+            <span style="font-size: 16px; font-weight: 500;">Share</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- Tabs -->
+  <sc-if value="{{ member }}" hint-placeholder-val="{{ true }}">
+    <div style="position: relative; margin-top: 18px; border-top: 1px solid rgba(255,255,255,.10); padding: 14px 20px 0; display: flex; gap: 20px;">
+      <div onClick="{{ showSessions }}" class="aux-row" style="min-height: 30px;">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; letter-spacing: .04em; color: {{ sessionsColor }}; border-bottom: 1px solid {{ sessionsUnderline }}; padding-bottom: 8px;">{{ sessionsLabel }}</span>
+      </div>
+      <div onClick="{{ showMembers }}" class="aux-row" style="min-height: 30px;">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; letter-spacing: .04em; color: {{ membersColor }}; border-bottom: 1px solid {{ membersUnderline }}; padding-bottom: 8px;">MEMBERS/7</span>
+      </div>
+      <div onClick="{{ showChat }}" class="aux-row" style="min-height: 30px;">
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; letter-spacing: .04em; color: {{ chatColor }}; border-bottom: 1px solid {{ chatUnderline }}; padding-bottom: 8px;">CHAT/48</span>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- SESSIONS — rooms you can walk into -->
+  <sc-if value="{{ showSessionList }}" hint-placeholder-val="{{ true }}">
+    <div style="position: relative; height: 494px; flex: 1; min-height: 0; padding: 16px 20px 0; display: flex; flex-direction: column; gap: 12px;">
+      <sc-for list="{{ sessions }}" as="s" hint-placeholder-count="2">
+        <div onClick="{{ s.open }}" class="aux-row" style="border-radius: 18px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); padding: 16px; display: flex; align-items: center; gap: 12px;">
+          <div style="width: 44px; height: 44px; border-radius: 12px; background: rgba(87,226,213,.14); border: 1px solid rgba(87,226,213,.30); display: grid; place-items: center; flex: none;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#57E2D5" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"></circle><path d="M4.93 19.07a10 10 0 0 1 0-14.14"></path><path d="M7.76 16.24a6 6 0 0 1 0-8.48"></path><path d="M16.24 7.76a6 6 0 0 1 0 8.48"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>
+          </div>
+          <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="position: relative; width: 7px; height: 7px; flex: none;">
+                <span class="aux-halo" style="position: absolute; left: -5px; top: -5px; width: 17px; height: 17px; border-radius: 50%; background: #57E2D5;"></span>
+                <span style="position: absolute; left: 0; top: 0; width: 7px; height: 7px; border-radius: 50%; background: #57E2D5;"></span>
+              </span>
+              <span style="font-size: 16px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ s.name }}</span>
+            </div>
+            <div style="font-size: 16px; line-height: 1.5; color: #A79FB8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ s.track }}</div>
+            <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8; margin-top: 2px;">{{ s.aux }}</div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 6px; flex: none;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"></path><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3z"></path><path d="M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"></path></svg>
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; letter-spacing: .04em; color: #A79FB8;">{{ s.listeners }}</span>
+          </div>
+        </div>
+      </sc-for>
+      <div style="flex: 1;"></div>
+      <div onClick="{{ noop }}" class="aux-row" style="margin-bottom: 22px; min-height: 52px; border-radius: 999px; background: rgba(87,226,213,.14); border: 1px solid rgba(87,226,213,.34); display: flex; align-items: center; justify-content: center; gap: 9px;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#57E2D5" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"></circle><path d="M4.93 19.07a10 10 0 0 1 0-14.14"></path><path d="M7.76 16.24a6 6 0 0 1 0-8.48"></path><path d="M16.24 7.76a6 6 0 0 1 0 8.48"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>
+        <span style="font-size: 16px; font-weight: 500; color: #57E2D5;">Start a Session</span>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- SESSIONS, none running — the room is quiet, which is a prompt and not an error -->
+  <sc-if value="{{ showSessionEmpty }}" hint-placeholder-val="{{ false }}">
+    <div style="position: relative; height: 494px; flex: 1; min-height: 0; padding: 16px 20px 0; display: flex; flex-direction: column;">
+      <div style="border-radius: 18px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); padding: 20px; display: flex; flex-direction: column; gap: 12px;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"></circle><path d="M4.93 19.07a10 10 0 0 1 0-14.14"></path><path d="M7.76 16.24a6 6 0 0 1 0-8.48"></path><path d="M16.24 7.76a6 6 0 0 1 0 8.48"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>
+        <div style="font-size: 16px; line-height: 1.5; color: #A79FB8;">Nobody is on aux right now. Start a Session and pick the first track.</div>
+      </div>
+      <div style="flex: 1;"></div>
+      <div onClick="{{ noop }}" class="aux-row" style="margin-bottom: 22px; min-height: 52px; border-radius: 999px; background: rgba(87,226,213,.14); border: 1px solid rgba(87,226,213,.34); display: flex; align-items: center; justify-content: center; gap: 9px;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#57E2D5" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"></circle><path d="M4.93 19.07a10 10 0 0 1 0-14.14"></path><path d="M7.76 16.24a6 6 0 0 1 0-8.48"></path><path d="M16.24 7.76a6 6 0 0 1 0 8.48"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>
+        <span style="font-size: 16px; font-weight: 500; color: #57E2D5;">Start a Session</span>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- MEMBERS — role chips carry meaning, so none of them may be the live colour -->
+  <sc-if value="{{ onMembers }}" hint-placeholder-val="{{ false }}">
+    <div style="position: relative; height: 494px; flex: 1; min-height: 0; padding: 8px 20px 0; display: flex; flex-direction: column;">
+      <sc-for list="{{ people }}" as="p" hint-placeholder-count="7">
+        <div style="display: flex; align-items: center; gap: 10px; padding: 8px 0; min-height: 44px; border-bottom: 1px solid rgba(255,255,255,.10);">
+          <div style="width: 40px; height: 40px; border-radius: 50%; background: {{ p.art }}; border: 1px solid rgba(255,255,255,.10); flex: none;"></div>
+          <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px;">
+            <span style="font-size: 16px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ p.name }}</span>
+            <span style="font-size: 13.5px; font-weight: 500; color: #A79FB8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ p.handle }}</span>
+          </div>
+          <div style="display: {{ p.youDisplay }}; align-items: center; padding: 4px 11px; border-radius: 999px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.18); flex: none;">
+            <span style="font-size: 12.5px; font-weight: 500; color: #F2EDF7;">You</span>
+          </div>
+          <div style="display: flex; align-items: center; padding: 4px 11px; border-radius: 999px; background: {{ p.chipBg }}; border: 1px solid {{ p.chipBorder }}; flex: none;">
+            <span style="font-size: 12.5px; font-weight: 500; color: {{ p.chipInk }};">{{ p.role }}</span>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </sc-if>
+
+  <!-- CHAT — the lounge-wide conversation, composer pinned -->
+  <sc-if value="{{ onChat }}" hint-placeholder-val="{{ false }}">
+    <div style="position: relative; height: 494px; flex: 1; min-height: 0; display: flex; flex-direction: column;">
+      <div style="flex: 1; min-height: 0; overflow: hidden; padding: 18px 20px 12px; display: flex; flex-direction: column; justify-content: flex-end; gap: 14px;">
+        <sc-for list="{{ messages }}" as="m" hint-placeholder-count="7">
+          <div style="display: flex; gap: 10px; align-items: flex-start;">
+            <div style="width: 28px; height: 28px; border-radius: 50%; background: {{ m.art }}; flex: none;"></div>
+            <div style="flex: 1; min-width: 0;">
+              <div style="display: flex; align-items: baseline; gap: 8px;">
+                <span style="font-size: 13.5px; font-weight: 500;">{{ m.who }}</span>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .04em; color: #6E6681;">{{ m.at }}</span>
+              </div>
+              <div style="font-size: 16px; line-height: 1.5; color: #D6CFE0; margin-top: 2px;">{{ m.body }}</div>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+      <div style="border-top: 1px solid rgba(255,255,255,.10); background: #0E0A16; padding: 10px 20px 20px; display: flex; align-items: center; gap: 8px;">
+        <div style="flex: 1; min-height: 44px; border-radius: 18px; background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.10); padding: 0 14px; display: flex; align-items: center;">
+          <span style="font-size: 16px; color: #6E6681;">Message the lounge</span>
+        </div>
+        <div onClick="{{ noop }}" class="aux-row" style="width: 44px; height: 44px; border-radius: 999px; background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.10); display: grid; place-items: center; flex: none;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l3 9-3 9 19-9z"></path><path d="M6 12h16"></path></svg>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- NOT A MEMBER — normal, not an error. No invite code here: that is the members' to hand over. -->
+  <sc-if value="{{ notMember }}" hint-placeholder-val="{{ false }}">
+    <div style="position: relative; padding: 196px 32px 0; display: flex; flex-direction: column; align-items: center; gap: 12px;">
+      <div style="width: 56px; height: 56px; border-radius: 18px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); display: grid; place-items: center;">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+      </div>
+      <div style="font-family: 'Instrument Serif', Georgia, serif; font-size: 24px; line-height: 1.2; margin-top: 4px;">Join Basement FM</div>
+      <div style="font-size: 16px; line-height: 1.5; color: #A79FB8; text-align: center;">Four floors down.</div>
+      <div style="display: flex; align-items: center; gap: 8px; margin-top: 2px;">
+        <span style="position: relative; width: 7px; height: 7px; flex: none;">
+          <span class="aux-halo" style="position: absolute; left: -5px; top: -5px; width: 17px; height: 17px; border-radius: 50%; background: #57E2D5;"></span>
+          <span style="position: absolute; left: 0; top: 0; width: 7px; height: 7px; border-radius: 50%; background: #57E2D5;"></span>
+        </span>
+        <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #57E2D5;">7 LISTENING</span>
+      </div>
+      <div onClick="{{ join }}" class="aux-row" style="margin-top: 10px; min-height: 52px; padding: 0 24px; border-radius: 999px; background: rgba(87,226,213,.14); border: 1px solid rgba(87,226,213,.34); display: flex; align-items: center; gap: 9px;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#57E2D5" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg>
+        <span style="font-size: 16px; font-weight: 500; color: #57E2D5;">Join lounge</span>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- Copy confirmation. Copying is not "live", so it is never the live colour. -->
+  <sc-if value="{{ copied }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ dismiss }}" class="aux-row" style="position: absolute; left: 20px; right: 20px; top: 16px; border-radius: 14px; background: rgba(30,23,44,.97); border: 1px solid rgba(255,255,255,.18); box-shadow: 0 14px 40px rgba(0,0,0,.45); padding: 13px 14px; display: flex; align-items: center; gap: 10px;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F2EDF7" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="flex: none;"><polyline points="20 6 9 17 4 12"></polyline></svg>
+      <span style="font-size: 16px;">Invite code <span style="font-family: 'IBM Plex Mono', monospace; font-size: 15px; letter-spacing: .1em;">M4K7QD2P</span> copied</span>
+    </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"member":{"editor":"boolean","default":true,"section":"Prototype"},"sessions":{"editor":"enum","options":["some","none"],"default":"some","section":"Prototype"}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { tab: 'sessions', joined: false, copied: false };
+  }
+
+  renderVals() {
+    const raw = this.props.member;
+    const isMember = (raw === undefined || raw === true || raw === 'true') || this.state.joined;
+    const live = (this.props.sessions === undefined ? 'some' : this.props.sessions) === 'some';
+
+    const INK = '#F2EDF7', MUTED = '#A79FB8', FAINT = '#6E6681';
+    const tab = this.state.tab;
+    const onSessions = isMember && tab === 'sessions';
+
+    // Basement FM has 7 members, and tonight all 7 of them are in one Session or the other.
+    const sessions = [
+      { name: 'Midnight run', track: 'Midnight City — M83', aux: 'PRIYA IS ON AUX', listeners: '5', open: () => {} },
+      { name: 'Late shift', track: 'Nightcall — Kavinsky', aux: 'MO IS ON AUX', listeners: '2', open: () => {} },
+    ];
+
+    const OWNER = { bg: 'rgba(255,255,255,.16)', border: 'transparent', ink: INK };
+    const MOD = { bg: 'rgba(255,255,255,.055)', border: 'rgba(255,255,255,.18)', ink: INK };
+    const MEMBER = { bg: 'transparent', border: 'rgba(255,255,255,.10)', ink: MUTED };
+
+    const roster = [
+      { name: 'Priya', handle: '@priya', role: 'Owner',  chip: OWNER,  you: false, art: 'linear-gradient(140deg,#C77FA8,#8B5FB0)' },
+      { name: 'Dev',   handle: '@dev',   role: 'Mod',    chip: MOD,    you: false, art: 'linear-gradient(140deg,#4A6BA0,#2E4470)' },
+      { name: 'Anush', handle: '@anush', role: 'Member', chip: MEMBER, you: true,  art: 'linear-gradient(140deg,#8B5FB0,#4A3670)' },
+      { name: 'Tara',  handle: '@tara',  role: 'Member', chip: MEMBER, you: false, art: 'linear-gradient(140deg,#C77FA8,#7A4A68)' },
+      { name: 'Mo',    handle: '@mo',    role: 'Member', chip: MEMBER, you: false, art: 'linear-gradient(140deg,#8B5FB0,#4A6BA0)' },
+      { name: 'Sana',  handle: '@sana',  role: 'Member', chip: MEMBER, you: false, art: 'linear-gradient(140deg,#4A6BA0,#7A4A68)' },
+      { name: 'Kiran', handle: '@kiran', role: 'Member', chip: MEMBER, you: false, art: 'linear-gradient(140deg,#C77FA8,#4A3670)' },
+    ];
+
+    const people = roster.map((p) => ({
+      name: p.name,
+      handle: p.handle,
+      role: p.role,
+      art: p.art,
+      chipBg: p.chip.bg,
+      chipBorder: p.chip.border,
+      chipInk: p.chip.ink,
+      youDisplay: p.you ? 'flex' : 'none',
+    }));
+
+    return {
+      member: isMember,
+      notMember: !isMember,
+      actionOpacity: isMember ? '1' : '.35',
+
+      sessions, people,
+      onMembers: isMember && tab === 'members',
+      onChat: isMember && tab === 'chat',
+      showSessionList: onSessions && live,
+      showSessionEmpty: onSessions && !live,
+      sessionsLabel: live ? 'SESSIONS/2' : 'SESSIONS/0',
+
+      // The selected tab is white. A selected tab is not a live thing.
+      sessionsColor: tab === 'sessions' ? INK : FAINT,
+      membersColor: tab === 'members' ? INK : FAINT,
+      chatColor: tab === 'chat' ? INK : FAINT,
+      sessionsUnderline: tab === 'sessions' ? INK : 'transparent',
+      membersUnderline: tab === 'members' ? INK : 'transparent',
+      chatUnderline: tab === 'chat' ? INK : 'transparent',
+
+      messages: [
+        { who: 'Sana', at: '23:28', body: 'bringing the good speaker', art: 'linear-gradient(140deg,#4A6BA0,#7A4A68)' },
+        { who: 'Priya', at: '23:41', body: 'aux is open, someone queue something', art: 'linear-gradient(140deg,#C77FA8,#8B5FB0)' },
+        { who: 'Dev', at: '23:44', body: 'ten minutes out, do not start without me', art: 'linear-gradient(140deg,#4A6BA0,#2E4470)' },
+        { who: 'Tara', at: '23:52', body: 'who put nightcall in', art: 'linear-gradient(140deg,#C77FA8,#7A4A68)' },
+        { who: 'Anush', at: '23:52', body: 'me. it was the correct call', art: 'linear-gradient(140deg,#8B5FB0,#4A3670)' },
+        { who: 'Mo', at: '00:03', body: 'starting a second one, kitchen speakers', art: 'linear-gradient(140deg,#8B5FB0,#4A6BA0)' },
+        { who: 'Priya', at: '00:04', body: 'traitor', art: 'linear-gradient(140deg,#C77FA8,#8B5FB0)' },
+      ],
+
+      copied: this.state.copied,
+      shareAction: () => { if (isMember) { this.setState({ copied: true }); } },
+      dismiss: () => this.setState({ copied: false }),
+      join: () => this.setState({ joined: true }),
+      showSessions: () => this.setState({ tab: 'sessions' }),
+      showMembers: () => this.setState({ tab: 'members' }),
+      showChat: () => this.setState({ tab: 'chat' }),
+      noop: () => {},
+    };
+  }
+}
+</script>
+</body>
+</html>

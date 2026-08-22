@@ -1,0 +1,170 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Figtree:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; }
+    *, *::before, *::after { box-sizing: border-box; }
+    a { color: #57E2D5; } a:hover { color: #8bede4; }
+    .aux-tap { cursor: pointer; }
+  </style>
+</helmet>
+
+<div style="width: 375px; height: 812px; background: #0E0A16; color: #F2EDF7; font-family: Figtree, system-ui, sans-serif; overflow: hidden; position: relative; display: flex; flex-direction: column; padding: 24px 20px 18px; gap: 14px;">
+
+  <!-- Atmosphere: no artwork yet, so the bloom only breathes behind the wordmark -->
+  <div style="position: absolute; left: 50%; top: -104px; transform: translateX(-50%); width: 440px; height: 366px; background: radial-gradient(circle, rgba(199,127,168,.22) 0%, rgba(139,95,176,.13) 45%, rgba(14,10,22,0) 72%); filter: blur(34px); pointer-events: none;"></div>
+
+  <!-- Wordmark -->
+  <div style="position: relative; display: flex; flex-direction: column; align-items: center; gap: 8px;">
+    <div style="font-family: 'Instrument Serif', Georgia, serif; font-size: 44px; line-height: 1.05; letter-spacing: .01em;">aux</div>
+    <div style="font-size: 16px; line-height: 1.5; color: #A79FB8;">Pass the aux.</div>
+  </div>
+
+  <div style="flex: 1 1 0; min-height: 0;"></div>
+
+  <!-- Mode + credentials -->
+  <div style="position: relative; display: flex; flex-direction: column; gap: 12px;">
+
+    <!-- Segmented: drives the submit label, the password placeholder and the password error -->
+    <div style="display: flex; gap: 8px; padding: 4px; border-radius: 999px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10);">
+      <div onClick="{{ pickSignIn }}" class="aux-tap" style="flex: 1; min-height: 44px; border-radius: 999px; display: flex; align-items: center; justify-content: center; background: {{ signInBg }}; box-shadow: inset 0 0 0 1px {{ signInRing }};">
+        <span style="font-size: 15px; font-weight: 500; color: {{ signInColor }};">Sign in</span>
+      </div>
+      <div onClick="{{ pickCreate }}" class="aux-tap" style="flex: 1; min-height: 44px; border-radius: 999px; display: flex; align-items: center; justify-content: center; background: {{ createBg }}; box-shadow: inset 0 0 0 1px {{ createRing }};">
+        <span style="font-size: 15px; font-weight: 500; color: {{ createColor }};">Create account</span>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 12px;">
+
+      <!-- Email -->
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <div style="font-size: 13.5px; line-height: 1.4; font-weight: 500; color: #A79FB8;">Email</div>
+        <div onClick="{{ focusEmail }}" class="aux-tap" style="min-height: 48px; border-radius: 12px; padding: 0 14px; display: flex; align-items: center; background: {{ emailBg }}; border: 1px solid {{ emailBorder }};">
+          <span style="font-size: 16px; color: {{ emailColor }};">{{ emailText }}</span>
+        </div>
+        <sc-if value="{{ isError }}" hint-placeholder-val="{{ false }}">
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F2657E" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <span style="font-size: 13.5px; line-height: 1.4; font-weight: 500; color: #F2657E;">Enter a valid email address.</span>
+          </div>
+        </sc-if>
+      </div>
+
+      <!-- Password -->
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <div style="font-size: 13.5px; line-height: 1.4; font-weight: 500; color: #A79FB8;">Password</div>
+        <div onClick="{{ focusPassword }}" class="aux-tap" style="min-height: 48px; border-radius: 12px; padding: 0 14px; display: flex; align-items: center; background: {{ pwBg }}; border: 1px solid {{ pwBorder }};">
+          <span style="font-size: 16px; letter-spacing: {{ pwSpacing }}; color: {{ pwColor }};">{{ pwText }}</span>
+        </div>
+        <sc-if value="{{ isError }}" hint-placeholder-val="{{ false }}">
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F2657E" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <span style="font-size: 13.5px; line-height: 1.4; font-weight: 500; color: #F2657E;">{{ pwErrorText }}</span>
+          </div>
+        </sc-if>
+      </div>
+
+    </div>
+
+    <!-- Submit. Warm white, never the live colour: signing in is not a live state. -->
+    <div onClick="{{ noop }}" class="aux-tap" style="min-height: 52px; border-radius: 999px; background: #F2EDF7; display: flex; align-items: center; justify-content: center;">
+      <span style="font-size: 16px; font-weight: 600; color: #0E0A16;">{{ submitLabel }}</span>
+    </div>
+
+  </div>
+
+  <!-- or / Google -->
+  <div style="position: relative; display: flex; flex-direction: column; gap: 12px;">
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <div style="flex: 1; height: 1px; background: rgba(255,255,255,.10);"></div>
+      <span style="font-size: 13.5px; line-height: 1.4; color: #A79FB8;">or</span>
+      <div style="flex: 1; height: 1px; background: rgba(255,255,255,.10);"></div>
+    </div>
+    <div onClick="{{ noop }}" class="aux-tap" style="min-height: 52px; border-radius: 999px; border: 1px solid rgba(255,255,255,.18); display: flex; align-items: center; justify-content: center; gap: 10px;">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#F2EDF7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+      <span style="font-size: 16px; font-weight: 500;">Continue with Google</span>
+    </div>
+  </div>
+
+  <div style="flex: 1 1 0; min-height: 0;"></div>
+
+  <!-- The honest Spotify note -->
+  <div style="position: relative; border-radius: 18px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); padding: 14px; display: flex; flex-direction: column; gap: 6px;">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+      <span style="font-size: 16px; line-height: 1.4; font-weight: 500;">Spotify is not a sign-in method</span>
+    </div>
+    <div style="font-size: 16px; line-height: 1.45; color: #A79FB8;">Aux plays through YouTube out of the box, so you never need a Spotify account. If you have Premium, you can link it later from Settings, Connections to play in Spotify instead.</div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"state":{"editor":"enum","options":["default","error"],"default":"default","section":"Prototype"}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { mode: 'signin', focus: 'email' };
+  }
+
+  renderVals() {
+    const isError = (this.props.state ?? 'default') === 'error';
+    const signin = this.state.mode === 'signin';
+    const focus = this.state.focus;
+
+    const INK = '#F2EDF7', MUTED = '#A79FB8', PLACEHOLDER = '#6E6681', STOP = '#F2657E';
+    const IDLE_BG = 'rgba(255,255,255,.055)', FOCUS_BG = 'rgba(255,255,255,.09)';
+    const IDLE_LINE = 'rgba(255,255,255,.10)', FOCUS_LINE = 'rgba(255,255,255,.28)';
+
+    // Error wins over focus on a field border, exactly as the build does.
+    const border = (field) => isError ? STOP : (focus === field ? FOCUS_LINE : IDLE_LINE);
+    const fill = (field) => focus === field ? FOCUS_BG : IDLE_BG;
+
+    // In error the fields carry what the person actually typed:
+    // sign-in fails on an empty password, create-account on a short one.
+    const emailTyped = isError;
+    const pwTyped = isError && !signin;
+
+    return {
+      isError,
+      isSignIn: signin,
+
+      signInBg: signin ? FOCUS_BG : 'transparent',
+      signInRing: signin ? 'rgba(255,255,255,.18)' : 'transparent',
+      signInColor: signin ? INK : MUTED,
+      createBg: signin ? 'transparent' : FOCUS_BG,
+      createRing: signin ? 'transparent' : 'rgba(255,255,255,.18)',
+      createColor: signin ? MUTED : INK,
+
+      submitLabel: signin ? 'Sign in' : 'Create account',
+
+      emailText: emailTyped ? 'anush@gmail' : 'you@example.com',
+      emailColor: emailTyped ? INK : PLACEHOLDER,
+      emailBg: fill('email'),
+      emailBorder: border('email'),
+
+      pwText: pwTyped ? '•••••' : (signin ? 'Your password' : 'At least 8 characters'),
+      pwColor: pwTyped ? INK : PLACEHOLDER,
+      pwSpacing: pwTyped ? '.18em' : 'normal',
+      pwBg: fill('password'),
+      pwBorder: border('password'),
+      pwErrorText: signin ? 'Enter your password.' : 'Use at least 8 characters.',
+
+      pickSignIn: () => this.setState({ mode: 'signin' }),
+      pickCreate: () => this.setState({ mode: 'signup' }),
+      focusEmail: () => this.setState({ focus: 'email' }),
+      focusPassword: () => this.setState({ focus: 'password' }),
+      noop: () => {},
+    };
+  }
+}
+</script>
+</body>
+</html>

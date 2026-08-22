@@ -1,0 +1,239 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Figtree:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #57E2D5; } a:hover { color: #8bede4; }
+    .aux-row { cursor: pointer; }
+    .aux-row:active { opacity: .72; }
+  </style>
+</helmet>
+
+<div style="width: 375px; height: 812px; background: #0E0A16; color: #F2EDF7; font-family: Figtree, system-ui, sans-serif; overflow: hidden; position: relative; display: flex; flex-direction: column;">
+
+  <!-- No artwork on this screen, so the bloom is dialled well back. No grid — grid is Session and Feed only. -->
+  <div style="position: absolute; left: 50%; top: -190px; transform: translateX(-50%); width: 520px; height: 430px; background: radial-gradient(circle, rgba(199,127,168,.22) 0%, rgba(139,95,176,.13) 44%, rgba(14,10,22,0) 70%); filter: blur(30px); pointer-events: none;"></div>
+
+  <!-- Header -->
+  <div style="position: relative; padding: 16px 18px 0; display: flex; align-items: center; min-height: 40px;">
+    <div style="font-family: 'Instrument Serif', Georgia, serif; font-size: 32px; line-height: 1.15; letter-spacing: -.005em;">Explore</div>
+  </div>
+
+  <!-- Join by code. The code itself is the mono readout. -->
+  <div style="position: relative; padding: 18px 18px 0;">
+    <div style="box-sizing: border-box; border-radius: 18px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); padding: 14px;">
+      <div style="font-size: 17px; line-height: 23px; font-weight: 600; color: #F2EDF7;">Have an invite code?</div>
+      <div style="display: flex; align-items: center; gap: 10px; padding-top: 12px;">
+        <div onClick="{{ tapCode }}" class="aux-row" style="flex: 1; min-width: 0; height: 48px; box-sizing: border-box; border-radius: 12px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: {{ codeBg }}; border: 1.5px solid {{ codeBorder }};">
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 16px; letter-spacing: .18em; color: {{ codeInk }}; white-space: nowrap; overflow: hidden;">{{ codeText }}</span>
+          <span style="width: 1.5px; height: 20px; background: #F2EDF7; flex: none; display: {{ caretShow }};"></span>
+          <span style="flex: 1;"></span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #6E6681; flex: none;">{{ codeCount }}</span>
+        </div>
+        <div onClick="{{ tapJoinCode }}" class="aux-row" style="width: 84px; height: 48px; flex: none; border-radius: 999px; background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.18); display: flex; align-items: center; justify-content: center; gap: 8px; opacity: {{ joinOpacity }};">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F2EDF7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="15.5" cy="8.5" r="5.5"/><path d="M11.6 12.4 3 21"/><path d="M6 18h3v3"/></svg>
+          <span style="font-size: 14px; font-weight: 600; color: #F2EDF7;">Join</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Search -->
+  <div style="position: relative; padding: 16px 18px 0;">
+    <div style="font-size: 13.5px; line-height: 18px; font-weight: 500; color: #A79FB8;">Search public lounges</div>
+    <div onClick="{{ tapSearch }}" class="aux-row" style="margin-top: 6px; height: 48px; box-sizing: border-box; border-radius: 12px; display: flex; align-items: center; gap: 10px; padding: 0 12px; background: {{ searchBg }}; border: 1.5px solid {{ searchBorder }};">
+      <span style="flex: none; display: grid; place-items: center; color: {{ searchIcon }};">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      </span>
+      <span style="flex: 1; min-width: 0; font-size: 16px; color: {{ searchInk }}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ searchText }}</span>
+      <span style="width: 1.5px; height: 20px; background: #F2EDF7; flex: none; display: {{ searchCaret }};"></span>
+    </div>
+  </div>
+
+  <!-- Section rule -->
+  <div style="position: relative; padding: 20px 18px 0; display: flex; align-items: center; justify-content: space-between;">
+    <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; line-height: 14px; letter-spacing: .09em; color: #6E6681;">PUBLIC LOUNGES</span>
+    <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; line-height: 14px; letter-spacing: .09em; color: #A79FB8;">{{ resultCount }}</span>
+  </div>
+
+  <!-- Results -->
+  <sc-if value="{{ hasResults }}" hint-placeholder-val="{{ true }}">
+    <div style="position: relative; padding: 12px 18px 0; display: flex; flex-direction: column; gap: 10px;">
+      <sc-for list="{{ lounges }}" as="l" hint-placeholder-count="5">
+        <div onClick="{{ l.open }}" class="aux-row" style="width: 100%; height: 74px; box-sizing: border-box; border-radius: 18px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); display: flex; align-items: center; gap: 12px; padding: 0 12px; overflow: hidden;">
+
+          <div style="width: 46px; height: 46px; flex: none; border-radius: 50%; box-sizing: border-box; display: grid; place-items: center; background: {{ l.art }}; border: 1.5px solid {{ l.ring }}; box-shadow: {{ l.ringGlow }};">
+            <span style="font-size: 15px; font-weight: 600; color: #F2EDF7; letter-spacing: .01em;">{{ l.mark }}</span>
+          </div>
+
+          <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+            <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+              <span style="font-size: 17px; line-height: 23px; font-weight: 600; color: #F2EDF7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ l.name }}</span>
+              <!-- Joined is a state, not a live signal — deliberately not #57E2D5 -->
+              <span style="display: {{ l.joinedShow }}; flex: none; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.18);">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                <span style="font-size: 12.5px; font-weight: 500; color: #A79FB8;">Joined</span>
+              </span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px; min-width: 0;">
+              <span style="display: {{ l.liveShow }}; align-items: center; gap: 5px; flex: none;">
+                <span style="width: 6px; height: 6px; border-radius: 50%; background: #57E2D5; box-shadow: 0 0 8px rgba(87,226,213,.6);"></span>
+                <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; letter-spacing: .04em; color: #57E2D5;">{{ l.listening }}</span>
+              </span>
+              <span style="font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; letter-spacing: .04em; color: #A79FB8; flex: none;">{{ l.members }}</span>
+              <span style="display: flex; align-items: center; gap: 4px; flex: none;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6E6681" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+                <span style="font-size: 12.5px; color: #A79FB8;">Public</span>
+              </span>
+            </div>
+          </div>
+
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6E6681" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex: none;"><path d="m9 18 6-6-6-6"/></svg>
+        </div>
+      </sc-for>
+    </div>
+  </sc-if>
+
+  <!-- Nothing matched -->
+  <sc-if value="{{ noResults }}" hint-placeholder-val="{{ false }}">
+    <div style="position: relative; height: 421px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 0 24px 40px; box-sizing: border-box;">
+      <div style="width: 64px; height: 64px; border-radius: 22px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); display: grid; place-items: center;">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m13.5 8.5-5 5"/><path d="m8.5 8.5 5 5"/><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      </div>
+      <div style="font-family: 'Instrument Serif', Georgia, serif; font-size: 24px; line-height: 1.2; color: #F2EDF7; text-align: center;">Nothing matched</div>
+      <div style="font-size: 16px; line-height: 1.5; color: #A79FB8; text-align: center; max-width: 260px;">No public lounge mentions &quot;neon hours&quot;.</div>
+    </div>
+  </sc-if>
+
+  <!-- ============================================================================
+       TAB BAR — 82px total, identical block to Feed.dc.html. Active tab: Explore.
+       ============================================================================ -->
+  <div style="position: absolute; left: 0; right: 0; bottom: 0; height: 82px; box-sizing: border-box; background: rgba(18,13,28,.86); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); border-top: 1px solid rgba(255,255,255,.10); padding: 10px 8px 21px; display: flex; align-items: flex-start;">
+
+    <div onClick="{{ goHome }}" class="aux-row" style="flex: 1; height: 50px; display: flex; flex-direction: column; align-items: center; gap: 4px; color: {{ homeInk }};">
+      <div style="width: 44px; height: 32px; border-radius: 11px; display: grid; place-items: center; background: {{ homePill }};">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+      </div>
+      <span style="font-size: 12.5px; line-height: 14px; font-weight: 500;">Home</span>
+    </div>
+
+    <div onClick="{{ goExplore }}" class="aux-row" style="flex: 1; height: 50px; display: flex; flex-direction: column; align-items: center; gap: 4px; color: {{ exploreInk }};">
+      <div style="width: 44px; height: 32px; border-radius: 11px; display: grid; place-items: center; background: {{ explorePill }};">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
+      </div>
+      <span style="font-size: 12.5px; line-height: 14px; font-weight: 500;">Explore</span>
+    </div>
+
+    <div onClick="{{ goLounges }}" class="aux-row" style="flex: 1; height: 50px; display: flex; flex-direction: column; align-items: center; gap: 4px; color: {{ loungesInk }};">
+      <div style="width: 44px; height: 32px; border-radius: 11px; display: grid; place-items: center; background: {{ loungesPill }};">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      </div>
+      <span style="font-size: 12.5px; line-height: 14px; font-weight: 500;">Lounges</span>
+    </div>
+
+    <div onClick="{{ goProfile }}" class="aux-row" style="flex: 1; height: 50px; display: flex; flex-direction: column; align-items: center; gap: 4px; color: {{ profileInk }};">
+      <div style="width: 44px; height: 32px; border-radius: 11px; display: grid; place-items: center; background: {{ profilePill }};">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      </div>
+      <span style="font-size: 12.5px; line-height: 14px; font-weight: 500;">Profile</span>
+    </div>
+
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"list":{"editor":"enum","options":["results","empty"],"default":"results","section":"Prototype"}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    // focus: null | code | search   codeOn: has an 8-character code been typed
+    this.state = { tab: 'explore', focus: null, codeOn: false, tapped: null };
+  }
+
+  renderVals() {
+    const mode = this.props.list ?? 'results';
+    const showResults = mode !== 'empty';
+
+    const LIVE = '#57E2D5', INK = '#F2EDF7', INK2 = '#A79FB8', FAINT = '#6E6681';
+    const IDLE_BG = 'rgba(255,255,255,.045)';
+    const IDLE_BORDER = 'rgba(255,255,255,.10)';
+    // Focus is neutral white-on-glass. The reserved colour never marks a form state.
+    const FOCUS_BG = 'rgba(255,255,255,.09)';
+    const FOCUS_BORDER = 'rgba(255,255,255,.34)';
+
+    const src = [
+      { mark: 'BF', name: 'Basement FM', art: 'linear-gradient(140deg,#C77FA8,#8B5FB0)', joined: true,  listening: '5 listening', members: '42 members' },
+      { mark: 'NH', name: 'Neon Hours',  art: 'linear-gradient(140deg,#8B5FB0,#4A3670)', joined: false, listening: '9 listening', members: '316 members' },
+      { mark: 'LS', name: 'Late Shift',  art: 'linear-gradient(140deg,#4A6BA0,#2E4470)', joined: true,  listening: null,          members: '18 members' },
+      { mark: 'SS', name: 'Slow Static', art: 'linear-gradient(140deg,#C77FA8,#7A4A68)', joined: false, listening: null,          members: '87 members' },
+      { mark: 'TD', name: 'Tape Deck',   art: 'linear-gradient(140deg,#7A4A68,#3A2A52)', joined: false, listening: null,          members: '24 members' },
+    ];
+
+    const lounges = src.map((l, i) => ({
+      mark: l.mark,
+      name: l.name,
+      art: l.art,
+      members: l.members,
+      listening: l.listening ?? '',
+      // Green only where a Session is actually running.
+      ring: l.listening ? LIVE : 'rgba(255,255,255,.14)',
+      ringGlow: l.listening ? '0 0 0 3px rgba(87,226,213,.10)' : 'none',
+      liveShow: l.listening ? 'flex' : 'none',
+      joinedShow: l.joined ? 'inline-flex' : 'none',
+      open: () => this.setState({ tapped: 'lounge' + i }),
+    }));
+
+    const focus = this.state.focus;
+    const codeOn = this.state.codeOn;
+    const searchTerm = showResults ? '' : 'neon hours';
+
+    const tab = this.state.tab;
+    const pill = (k) => (tab === k ? 'rgba(255,255,255,.085)' : 'transparent');
+    const ink = (k) => (tab === k ? INK : INK2);
+
+    return {
+      lounges,
+      hasResults: showResults,
+      noResults: !showResults,
+      resultCount: showResults ? '5 RESULTS' : '0 RESULTS',
+
+      codeText: codeOn ? 'K7QP2M4X' : 'A1B2C3D4',
+      codeInk: codeOn ? INK : FAINT,
+      codeCount: codeOn ? '8/8' : '0/8',
+      codeBg: focus === 'code' ? FOCUS_BG : IDLE_BG,
+      codeBorder: focus === 'code' ? FOCUS_BORDER : IDLE_BORDER,
+      caretShow: focus === 'code' ? 'block' : 'none',
+      joinOpacity: codeOn ? '1' : '.45',
+
+      searchText: searchTerm ? searchTerm : 'Name or description',
+      searchInk: searchTerm ? INK : FAINT,
+      searchBg: focus === 'search' || searchTerm ? FOCUS_BG : IDLE_BG,
+      searchBorder: focus === 'search' || searchTerm ? FOCUS_BORDER : IDLE_BORDER,
+      searchIcon: focus === 'search' || searchTerm ? INK : INK2,
+      searchCaret: focus === 'search' ? 'block' : 'none',
+
+      tapCode: () => this.setState({ focus: 'code', codeOn: !this.state.codeOn }),
+      tapSearch: () => this.setState({ focus: 'search' }),
+      tapJoinCode: () => this.setState({ tapped: 'joinCode' }),
+
+      homeInk: ink('home'), homePill: pill('home'),
+      exploreInk: ink('explore'), explorePill: pill('explore'),
+      loungesInk: ink('lounges'), loungesPill: pill('lounges'),
+      profileInk: ink('profile'), profilePill: pill('profile'),
+      goHome: () => this.setState({ tab: 'home' }),
+      goExplore: () => this.setState({ tab: 'explore' }),
+      goLounges: () => this.setState({ tab: 'lounges' }),
+      goProfile: () => this.setState({ tab: 'profile' }),
+    };
+  }
+}
+</script>
+</body>
+</html>

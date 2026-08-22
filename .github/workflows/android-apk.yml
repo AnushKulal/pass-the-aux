@@ -1,0 +1,71 @@
+name: Build Android APK
+
+# Ubuntu runners ship the Android SDK and JDK 17 already, and Actions minutes are
+# free on a public repo — so this avoids both the EAS free-tier build quota and
+# the local Windows toolchain entirely.
+on:
+  workflow_dispatch: # build on demand from the Actions tab
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'design/**'
+      - 'docs/**'
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      # Public by design: the anon key is meant to ship inside the app, and RLS is
+      # what protects the data. The YouTube key and Spotify secret are NOT here —
+      # those are Edge Function secrets and never reach the client bundle.
+      EXPO_PUBLIC_SUPABASE_URL: https://figkjbunwqmbjisoajxe.supabase.co
+      EXPO_PUBLIC_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZpZ2tqYnVud3FtYmppc29hanhlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODczNzMzOTksImV4cCI6MjEwMjk0OTM5OX0.IScMnGpWF_a3cIOfsZ4xrF0pyD4lKarMjnyzrztBl3A
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      # Generates android/ from app.json. Not committed — it is regenerated every
+      # run, so app.json stays the single source of truth for native config.
+      - name: Generate native project
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Build release APK
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Name the APK by commit
+        id: rename
+        run: |
+          SRC=$(find android/app/build/outputs/apk/release -name "*.apk" | head -1)
+          test -n "$SRC" || { echo "no APK produced"; exit 1; }
+          OUT="aux-${GITHUB_SHA::7}.apk"
+          cp "$SRC" "$OUT"
+          echo "path=$OUT" >> "$GITHUB_OUTPUT"
+          ls -la "$OUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aux-apk
+          path: ${{ steps.rename.outputs.path }}
+          retention-days: 30

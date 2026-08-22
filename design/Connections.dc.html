@@ -1,0 +1,151 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Figtree:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #57E2D5; } a:hover { color: #8bede4; }
+    .aux-row { cursor: pointer; }
+  </style>
+</helmet>
+
+<div style="width: 375px; height: 812px; background: #0E0A16; color: #F2EDF7; font-family: Figtree, system-ui, sans-serif; overflow: hidden; position: relative; display: flex; flex-direction: column;">
+
+  <!-- Atmosphere: settings screens sit further from the artwork, so the bloom is barely there -->
+  <div style="position: absolute; left: 50%; top: -170px; transform: translateX(-50%); width: 420px; height: 320px; background: radial-gradient(circle, rgba(199,127,168,.20) 0%, rgba(139,95,176,.11) 45%, rgba(14,10,22,0) 70%); filter: blur(34px); pointer-events: none;"></div>
+
+  <!-- Header -->
+  <div style="position: relative; padding: 16px 20px 0; display: flex; align-items: center; gap: 4px; min-height: 44px;">
+    <div onClick="{{ noop }}" class="aux-row" style="width: 44px; height: 44px; margin-left: -12px; display: grid; place-items: center; flex: none;">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F2EDF7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+    </div>
+    <span style="font-family: 'Instrument Serif', Georgia, serif; font-size: 24px; line-height: 1.2;">Connections</span>
+  </div>
+
+  <!-- The Spotify card -->
+  <div style="position: relative; padding: 14px 20px 0;">
+    <div style="border-radius: 18px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); padding: 16px; display: flex; flex-direction: column; gap: 14px;">
+
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <div style="width: 44px; height: 44px; border-radius: 12px; background: rgba(255,255,255,.09); display: grid; place-items: center; flex: none;">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+        </div>
+        <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 6px;">
+          <span style="font-size: 17px; font-weight: 600; line-height: 1.35;">Spotify</span>
+          <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #A79FB8; padding: 4px 9px; border-radius: 999px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10);">{{ badge }}</span>
+        </div>
+      </div>
+
+      <div style="font-size: 16px; line-height: 1.5; color: #F2EDF7;">{{ body }}</div>
+
+      <!-- Free: the reassurance. Warm, not red. Nothing here is an error. -->
+      <sc-if value="{{ isFree }}" hint-placeholder-val="{{ true }}">
+        <div style="display: flex; gap: 12px; padding: 12px; border-radius: 12px; background: rgba(255,255,255,.055);">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#E8B15C" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          <span style="flex: 1; font-size: 16px; line-height: 1.5; color: #A79FB8;">Nothing is broken and nothing is missing. Search, queueing, chat and sync all work exactly the same — only the audio comes from YouTube.</span>
+        </div>
+      </sc-if>
+
+      <!-- Premium, but the source preference is overriding it -->
+      <sc-if value="{{ showOverride }}" hint-placeholder-val="{{ false }}">
+        <div style="display: flex; gap: 12px; padding: 12px; border-radius: 12px; background: rgba(255,255,255,.055);">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#E8B15C" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          <span style="flex: 1; font-size: 16px; line-height: 1.5; color: #A79FB8;">Playback source is set to Always YouTube below, so Sessions are not using Spotify right now.</span>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isUnlinked }}" hint-placeholder-val="{{ false }}">
+        <div onClick="{{ noop }}" class="aux-row" style="min-height: 52px; border-radius: 999px; background: #F2EDF7; display: flex; align-items: center; justify-content: center;">
+          <span style="font-size: 16px; font-weight: 500; color: #0E0A16;">Connect Spotify</span>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isLinked }}" hint-placeholder-val="{{ true }}">
+        <div onClick="{{ noop }}" class="aux-row" style="min-height: 52px; border-radius: 999px; border: 1px solid rgba(255,255,255,.18); display: flex; align-items: center; justify-content: center; gap: 9px;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F2EDF7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M18.84 12.25l1.72-1.71a5 5 0 0 0-.14-7.07 5 5 0 0 0-6.95 0l-1.72 1.71"/><path d="M5.17 11.75l-1.71 1.71a5 5 0 0 0 .12 7.07 5 5 0 0 0 6.95 0l1.71-1.71"/><line x1="3" y1="3" x2="21" y2="21"/></svg>
+          <span style="font-size: 16px; font-weight: 500;">Disconnect Spotify</span>
+        </div>
+      </sc-if>
+
+    </div>
+  </div>
+
+  <!-- Playback source -->
+  <div style="position: relative; padding: 16px 20px 0; display: flex; flex-direction: column; gap: 8px;">
+    <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: .09em; color: #6E6681;">PLAYBACK SOURCE</div>
+    <div style="font-size: 16px; line-height: 1.5; color: #A79FB8;">How Aux decides where the audio for a Session comes from.</div>
+
+    <div style="display: flex; gap: 8px; padding: 4px; border-radius: 999px; background: #140F1E; border: 1px solid rgba(255,255,255,.10); margin-top: 4px;">
+      <div onClick="{{ pickAuto }}" class="aux-row" style="flex: 1; min-height: 44px; border-radius: 999px; display: flex; align-items: center; justify-content: center; background: {{ autoBg }};">
+        <span style="font-size: 13.5px; font-weight: 500; color: {{ autoInk }}; white-space: nowrap;">Auto (recommended)</span>
+      </div>
+      <div onClick="{{ pickYouTube }}" class="aux-row" style="flex: 1; min-height: 44px; border-radius: 999px; display: flex; align-items: center; justify-content: center; background: {{ ytBg }};">
+        <span style="font-size: 13.5px; font-weight: 500; color: {{ ytInk }}; white-space: nowrap;">Always YouTube</span>
+      </div>
+    </div>
+
+    <div style="font-size: 16px; line-height: 1.5; color: #A79FB8; margin-top: 4px;">{{ sourceDetail }}</div>
+  </div>
+
+  <!-- Footnote -->
+  <div style="position: relative; margin-top: auto; padding: 14px 20px 20px; border-top: 1px solid rgba(255,255,255,.10);">
+    <span style="font-size: 13.5px; line-height: 1.4; font-weight: 500; color: #A79FB8;">Your choice is stored on this device only, so each phone you sign in on can play from a different source.</span>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"state":{"editor":"enum","options":["not linked","linked free","linked premium"],"default":"linked free","section":"Prototype"}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { source: 'auto' };
+  }
+
+  renderVals() {
+    const state = this.props.state ?? 'linked free';
+    const isUnlinked = state === 'not linked';
+    const isFree = state === 'linked free';
+    const isPremium = state === 'linked premium';
+
+    const badge = isUnlinked ? 'NOT CONNECTED' : (isFree ? 'CONNECTED · FREE' : 'CONNECTED · PREMIUM');
+
+    const body = isUnlinked
+      ? 'Aux does not need Spotify. Everything plays through YouTube unless you link a Spotify Premium account here.'
+      : (isFree
+        ? 'Your Spotify account is linked, but Spotify only lets apps control playback on Premium accounts. Aux will play your Sessions through YouTube instead.'
+        : 'Sessions play through the Spotify app on this device. Keep Spotify installed and signed in, and leave it open when you take the aux.');
+
+    const onAuto = this.state.source === 'auto';
+
+    const sourceDetail = onAuto
+      ? 'Plays through Spotify when your account is linked and Premium, YouTube for everyone else.'
+      : 'Ignores Spotify even on Premium. Useful if Spotify keeps handing playback to another device.';
+
+    return {
+      badge,
+      body,
+      sourceDetail,
+      isUnlinked,
+      isFree,
+      isLinked: !isUnlinked,
+      // The override notice is real logic, not decoration: Premium linked, but told to ignore it.
+      showOverride: isPremium && !onAuto,
+      autoBg: onAuto ? 'rgba(255,255,255,.09)' : 'transparent',
+      ytBg: onAuto ? 'transparent' : 'rgba(255,255,255,.09)',
+      autoInk: onAuto ? '#F2EDF7' : '#A79FB8',
+      ytInk: onAuto ? '#A79FB8' : '#F2EDF7',
+      pickAuto: () => this.setState({ source: 'auto' }),
+      pickYouTube: () => this.setState({ source: 'youtube' }),
+      noop: () => {},
+    };
+  }
+}
+</script>
+</body>
+</html>

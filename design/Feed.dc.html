@@ -1,0 +1,238 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Figtree:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; }
+    a { color: #57E2D5; } a:hover { color: #8bede4; }
+    .aux-row { cursor: pointer; }
+    .aux-row:active { opacity: .72; }
+  </style>
+</helmet>
+
+<div style="width: 375px; height: 812px; background: #0E0A16; color: #F2EDF7; font-family: Figtree, system-ui, sans-serif; overflow: hidden; position: relative; display: flex; flex-direction: column;">
+
+  <!-- Atmosphere: the bloom is sampled from ROW 1's artwork (Midnight City / M83), so the Feed is tinted by whatever is playing at the top -->
+  <div style="position: absolute; left: 50%; top: -140px; transform: translateX(-50%); width: 520px; height: 470px; background: radial-gradient(circle, rgba(199,127,168,.40) 0%, rgba(139,95,176,.22) 42%, rgba(14,10,22,0) 70%); filter: blur(30px); pointer-events: none; opacity: {{ bloomOpacity }};"></div>
+  <div style="position: absolute; inset: 0; background-image: linear-gradient(rgba(255,255,255,.028) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.028) 1px, transparent 1px); background-size: 25px 25px; pointer-events: none;"></div>
+
+  <!-- Header -->
+  <div style="position: relative; padding: 16px 18px 0; display: flex; align-items: center; justify-content: space-between; min-height: 40px;">
+    <div style="font-family: 'Instrument Serif', Georgia, serif; font-size: 32px; line-height: 1.15; letter-spacing: -.005em;">Now playing</div>
+    <div style="display: flex; align-items: center; gap: 7px; padding: 5px 10px; border-radius: 999px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10);">
+      <span style="width: 5px; height: 5px; border-radius: 50%; background: #A79FB8;"></span>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; line-height: 14px; letter-spacing: .09em; color: #A79FB8;">{{ headCount }}</span>
+    </div>
+  </div>
+
+  <sc-if value="{{ hasList }}" hint-placeholder-val="{{ true }}">
+  <div style="position: relative; display: flex; flex-direction: column;">
+
+    <!-- Sessions you are already in — one tap back in. Third chip runs off the edge: the strip scrolls. -->
+    <div style="padding: 20px 0 0 18px;">
+      <div style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; line-height: 14px; letter-spacing: .09em; color: #6E6681;">YOUR SESSIONS</div>
+      <div style="display: flex; gap: 10px; padding-top: 10px;">
+        <sc-for list="{{ mine }}" as="s" hint-placeholder-count="3">
+          <div onClick="{{ s.open }}" class="aux-row" style="width: 156px; height: 62px; flex: none; box-sizing: border-box; border-radius: 14px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 0 12px; overflow: hidden;">
+            <div style="display: flex; align-items: center; gap: 7px;">
+              <span style="width: 6px; height: 6px; border-radius: 50%; flex: none; background: #57E2D5; box-shadow: 0 0 8px rgba(87,226,213,.6);"></span>
+              <span style="font-size: 15px; font-weight: 500; color: #F2EDF7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ s.track }}</span>
+            </div>
+            <span style="font-size: 12.5px; color: #A79FB8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ s.lounge }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <!-- Section rule: the green count is the only place the screen explains its own colour -->
+    <div style="padding: 22px 18px 0; display: flex; align-items: center; justify-content: space-between;">
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; line-height: 14px; letter-spacing: .09em; color: #6E6681;">LISTENING NOW</span>
+      <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10px; line-height: 14px; letter-spacing: .09em; color: #57E2D5;">2 JOINABLE</span>
+    </div>
+
+    <!-- The list. Every bar sits at a different point — that difference is the screen. -->
+    <div style="padding: 14px 18px 0; display: flex; flex-direction: column; gap: 12px;">
+      <sc-for list="{{ rows }}" as="r" hint-placeholder-count="5">
+        <div class="aux-row" onClick="{{ r.open }}" style="width: 100%; height: 94px; box-sizing: border-box; border-radius: 18px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); display: flex; align-items: center; gap: 10px; padding: 0 10px; position: relative; overflow: hidden;">
+
+          <!-- Avatar + live ring -->
+          <div style="width: 38px; height: 38px; flex: none; border-radius: 50%; box-sizing: border-box; display: grid; place-items: center; background: {{ r.av }}; border: 1.5px solid {{ r.ring }}; box-shadow: {{ r.ringGlow }};">
+            <span style="font-size: 14px; font-weight: 600; color: #F2EDF7;">{{ r.initial }}</span>
+          </div>
+
+          <!-- Album art + provider glyph -->
+          <div style="width: 54px; height: 54px; flex: none; position: relative;">
+            <div style="width: 54px; height: 54px; border-radius: 11px; background: {{ r.art }}; box-shadow: {{ r.artGlow }};"></div>
+            <div style="position: absolute; right: -5px; bottom: -5px; width: 20px; height: 20px; border-radius: 999px; background: #0E0A16; border: 1px solid rgba(255,255,255,.10); display: grid; place-items: center;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="display: {{ r.gAudio }};"><path d="M2 10v3"/><path d="M6 6v11"/><path d="M10 3v18"/><path d="M14 8v7"/><path d="M18 5v13"/><path d="M22 10v3"/></svg>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="display: {{ r.gTv }};"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M7 21h10"/><path d="M10.5 9.2l4.2 2.6-4.2 2.6z"/></svg>
+            </div>
+          </div>
+
+          <!-- Title / artist · lounge / progress -->
+          <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;">
+            <div style="font-size: 16px; line-height: 22px; font-weight: 500; color: #F2EDF7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ r.title }}</div>
+            <div style="font-size: 13px; line-height: 18px; color: #A79FB8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ r.sub }}</div>
+            <div style="margin-top: 7px; height: 3px; border-radius: 999px; background: rgba(255,255,255,.10); overflow: hidden;">
+              <div style="height: 3px; border-radius: 999px; width: {{ r.pct }}; background: {{ r.barFill }}; box-shadow: {{ r.barGlow }};"></div>
+            </div>
+          </div>
+
+          <!-- Right rail: mono timecode, and Join only when there is a Session to join -->
+          <div style="flex: none; width: {{ r.railW }}; display: flex; flex-direction: column; align-items: flex-end; justify-content: center;">
+            <span style="font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; line-height: 14px; letter-spacing: .04em; color: #A79FB8;">{{ r.at }}</span>
+            <div onClick="{{ r.join }}" class="aux-row" style="display: {{ r.joinShow }}; margin-top: 8px; width: 56px; height: 44px; border-radius: 999px; background: #57E2D5; align-items: center; justify-content: center; box-shadow: 0 4px 16px rgba(87,226,213,.24);">
+              <span style="font-size: 14px; font-weight: 600; color: #0E0A16;">Join</span>
+            </div>
+          </div>
+
+        </div>
+      </sc-for>
+    </div>
+
+  </div>
+  </sc-if>
+
+  <!-- Empty: verbatim from the app -->
+  <sc-if value="{{ isEmpty }}" hint-placeholder-val="{{ false }}">
+    <div style="position: relative; height: 674px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 0 24px 40px; box-sizing: border-box;">
+      <div style="width: 64px; height: 64px; border-radius: 22px; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.10); display: grid; place-items: center;">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#A79FB8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"/><path d="M4.93 19.07a10 10 0 0 1 0-14.14"/><path d="M7.76 16.24a6 6 0 0 1 0-8.49"/><path d="M16.24 7.76a6 6 0 0 1 0 8.49"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+      </div>
+      <div style="font-family: 'Instrument Serif', Georgia, serif; font-size: 24px; line-height: 1.2; color: #F2EDF7; text-align: center;">Nobody is listening yet</div>
+      <div style="font-size: 16px; line-height: 1.5; color: #A79FB8; text-align: center; max-width: 250px;">Start a Session and someone will join.</div>
+    </div>
+  </sc-if>
+
+  <!-- ============================================================================
+       TAB BAR — 82px total, pinned to the bottom of the 375x812 frame.
+       1px hairline + 10px pad-top + 50px item band + 21px home-indicator clearance.
+       Copy this block verbatim onto Explore / Lounges / Profile; change only which
+       tab is active. Icon box 24px, stroke-width 1.6. Never uses #57E2D5.
+       ============================================================================ -->
+  <div style="position: absolute; left: 0; right: 0; bottom: 0; height: 82px; box-sizing: border-box; background: rgba(18,13,28,.86); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); border-top: 1px solid rgba(255,255,255,.10); padding: 10px 8px 21px; display: flex; align-items: flex-start;">
+
+    <div onClick="{{ goHome }}" class="aux-row" style="flex: 1; height: 50px; display: flex; flex-direction: column; align-items: center; gap: 4px; color: {{ homeInk }};">
+      <div style="width: 44px; height: 32px; border-radius: 11px; display: grid; place-items: center; background: {{ homePill }};">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+      </div>
+      <span style="font-size: 12.5px; line-height: 14px; font-weight: 500;">Home</span>
+    </div>
+
+    <div onClick="{{ goExplore }}" class="aux-row" style="flex: 1; height: 50px; display: flex; flex-direction: column; align-items: center; gap: 4px; color: {{ exploreInk }};">
+      <div style="width: 44px; height: 32px; border-radius: 11px; display: grid; place-items: center; background: {{ explorePill }};">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
+      </div>
+      <span style="font-size: 12.5px; line-height: 14px; font-weight: 500;">Explore</span>
+    </div>
+
+    <div onClick="{{ goLounges }}" class="aux-row" style="flex: 1; height: 50px; display: flex; flex-direction: column; align-items: center; gap: 4px; color: {{ loungesInk }};">
+      <div style="width: 44px; height: 32px; border-radius: 11px; display: grid; place-items: center; background: {{ loungesPill }};">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      </div>
+      <span style="font-size: 12.5px; line-height: 14px; font-weight: 500;">Lounges</span>
+    </div>
+
+    <div onClick="{{ goProfile }}" class="aux-row" style="flex: 1; height: 50px; display: flex; flex-direction: column; align-items: center; gap: 4px; color: {{ profileInk }};">
+      <div style="width: 44px; height: 32px; border-radius: 11px; display: grid; place-items: center; background: {{ profilePill }};">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      </div>
+      <span style="font-size: 12.5px; line-height: 14px; font-weight: 500;">Profile</span>
+    </div>
+
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script data-props='{"empty":{"editor":"boolean","default":false,"section":"Prototype"}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { tab: 'home', tapped: null };
+  }
+
+  renderVals() {
+    const raw = this.props.empty;
+    const isEmpty = raw === true || raw === 'true' || raw === 'empty';
+
+    const LIVE = '#57E2D5', INK = '#F2EDF7', INK2 = '#A79FB8';
+
+    // One world, shared with Session.dc.html: Priya on aux in Basement FM,
+    // the same four tracks, the same four gradients.
+    const src = [
+      { initial: 'P', title: 'Midnight City', sub: 'M83 · Basement FM',
+        av: 'linear-gradient(140deg,#C77FA8,#8B5FB0)', art: 'linear-gradient(140deg,#C77FA8,#8B5FB0)',
+        artGlow: '0 8px 22px rgba(199,127,168,.34)', at: '1:47', pct: 43, live: true, yt: false },
+      { initial: 'D', title: 'Nightcall', sub: 'Kavinsky · Basement FM',
+        av: 'linear-gradient(140deg,#4A6BA0,#2E4470)', art: 'linear-gradient(140deg,#C77FA8,#7A4A68)',
+        artGlow: '0 8px 20px rgba(199,127,168,.20)', at: '3:02', pct: 71, live: true, yt: true },
+      { initial: 'T', title: 'Sunset', sub: 'The Midnight · Late Shift',
+        av: 'linear-gradient(140deg,#C77FA8,#7A4A68)', art: 'linear-gradient(140deg,#4A6BA0,#2E4470)',
+        artGlow: '0 8px 20px rgba(74,107,160,.22)', at: '0:38', pct: 11, live: false, yt: false },
+      { initial: 'A', title: 'Instant Crush', sub: 'Daft Punk · Basement FM',
+        av: 'linear-gradient(140deg,#8B5FB0,#4A3670)', art: 'linear-gradient(140deg,#8B5FB0,#4A3670)',
+        artGlow: '0 8px 20px rgba(139,95,176,.22)', at: '4:52', pct: 87, live: false, yt: false },
+      // Real fallback state from the app: no track resolved yet.
+      { initial: 'S', title: 'Getting the aux ready', sub: 'Late Shift',
+        av: 'linear-gradient(140deg,#7A4A68,#3A2A52)', art: '#1E1730',
+        artGlow: 'none', at: '0:00', pct: 0, live: false, yt: false },
+    ];
+
+    const rows = src.map((r, i) => ({
+      initial: r.initial,
+      title: r.title,
+      sub: r.sub,
+      av: r.av,
+      art: r.art,
+      artGlow: r.artGlow,
+      at: r.at,
+      pct: r.pct + '%',
+      // The reserved colour marks who you can join. Solo listeners stay quiet.
+      ring: r.live ? LIVE : 'rgba(255,255,255,.14)',
+      ringGlow: r.live ? '0 0 0 3px rgba(87,226,213,.10)' : 'none',
+      barFill: r.live ? LIVE : INK2,
+      barGlow: r.live ? '0 0 8px rgba(87,226,213,.5)' : 'none',
+      joinShow: r.live ? 'flex' : 'none',
+      railW: r.live ? '56px' : '38px',
+      gAudio: r.yt ? 'none' : 'block',
+      gTv: r.yt ? 'block' : 'none',
+      open: () => this.setState({ tapped: 'row' + i }),
+      join: () => this.setState({ tapped: 'join' + i }),
+    }));
+
+    const mine = [
+      { track: 'Sunset', lounge: 'Basement FM' },
+      { track: 'Instant Crush', lounge: 'Late Shift' },
+      { track: 'Midnight City', lounge: 'Neon Hours' },
+    ].map((s, i) => ({ track: s.track, lounge: s.lounge, open: () => this.setState({ tapped: 'sess' + i }) }));
+
+    const tab = this.state.tab;
+    const pill = (k) => (tab === k ? 'rgba(255,255,255,.085)' : 'transparent');
+    const ink = (k) => (tab === k ? INK : INK2);
+
+    return {
+      rows, mine,
+      hasList: !isEmpty,
+      isEmpty,
+      headCount: isEmpty ? '0 LISTENING' : '5 LISTENING',
+      bloomOpacity: isEmpty ? '.45' : '1',
+      homeInk: ink('home'), homePill: pill('home'),
+      exploreInk: ink('explore'), explorePill: pill('explore'),
+      loungesInk: ink('lounges'), loungesPill: pill('lounges'),
+      profileInk: ink('profile'), profilePill: pill('profile'),
+      goHome: () => this.setState({ tab: 'home' }),
+      goExplore: () => this.setState({ tab: 'explore' }),
+      goLounges: () => this.setState({ tab: 'lounges' }),
+      goProfile: () => this.setState({ tab: 'profile' }),
+    };
+  }
+}
+</script>
+</body>
+</html>
