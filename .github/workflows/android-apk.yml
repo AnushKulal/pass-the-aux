@@ -115,6 +115,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # The download filename is the ON-DISK name; gh's `file#label` only
+          # changes the label shown on the page. Copy to a stable name so the
+          # file that lands in Downloads is always aux-latest.apk and simply
+          # overwrites the previous one.
+          cp "${{ steps.rename.outputs.path }}" aux-latest.apk
           gh release delete latest --yes --cleanup-tag 2>/dev/null || true
           gh release create latest             --title "aux — latest build"             --notes "Built from ${GITHUB_SHA::7} on $(date -u '+%Y-%m-%d %H:%M UTC').
 
@@ -122,4 +127,4 @@ jobs:
           is always the newest build.
 
           **Delete any older aux-*.apk from your phone's Downloads first** —
-          Android keeps both and it is easy to install the wrong file."             "${{ steps.rename.outputs.path }}#aux-latest.apk"
+          Android keeps both and it is easy to install the wrong file."             aux-latest.apk
