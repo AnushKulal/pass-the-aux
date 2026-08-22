@@ -1,0 +1,109 @@
+import { memo } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
+
+import { Avatar } from '@/components/ui';
+import type { MemberRole } from '@/lib/database.types';
+import { Colors, Radius, Space, TOUCH_TARGET, Type } from '@/lib/theme';
+
+export type MemberRowProps = {
+  displayName: string;
+  username: string;
+  avatarUrl?: string | null;
+  role: MemberRole;
+  /** Marks the signed-in user's own row. */
+  isYou?: boolean;
+};
+
+const AVATAR_SIZE = 40;
+
+/** Plain members get no chip — a badge on everyone is a badge on no one. */
+const ROLE_LABEL: Record<MemberRole, string | null> = {
+  owner: 'Owner',
+  mod: 'Mod',
+  member: null,
+};
+
+function MemberRowBase({ displayName, username, avatarUrl, role, isYou = false }: MemberRowProps) {
+  const roleLabel = ROLE_LABEL[role];
+  const name = displayName.trim() || username;
+
+  return (
+    <View
+      accessible
+      accessibilityRole="text"
+      accessibilityLabel={[name, `at ${username}`, roleLabel, isYou ? 'You' : null]
+        .filter(Boolean)
+        .join(', ')}
+      style={styles.row}>
+      <Avatar name={name} uri={avatarUrl} size={AVATAR_SIZE} />
+
+      <View style={styles.identity}>
+        <Text numberOfLines={1} style={styles.name}>
+          {name}
+        </Text>
+        <Text numberOfLines={1} style={styles.username}>
+          @{username}
+        </Text>
+      </View>
+
+      {isYou ? (
+        <View style={[styles.chip, styles.chipYou]}>
+          <Text style={styles.chipLabel}>You</Text>
+        </View>
+      ) : null}
+
+      {/*
+        Colors.primary, deliberately. Accent green is reserved for "playing /
+        live / join" — a moderator badge in green would read as "in a Session".
+      */}
+      {roleLabel ? (
+        <View style={[styles.chip, styles.chipRole]}>
+          <Text style={styles.chipLabel}>{roleLabel}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+export const MemberRow = memo(MemberRowBase);
+
+const styles = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.md,
+    // Not tappable, but held at the same rhythm as everything that is.
+    minHeight: TOUCH_TARGET,
+    paddingVertical: Space.sm,
+  },
+  identity: {
+    flex: 1,
+    gap: 1,
+  },
+  name: {
+    ...Type.bodyStrong,
+    color: Colors.text,
+  },
+  username: {
+    ...Type.label,
+    color: Colors.muted,
+  },
+  chip: {
+    paddingHorizontal: Space.md,
+    paddingVertical: Space.xs,
+    borderRadius: Radius.pill,
+  },
+  chipRole: {
+    backgroundColor: Colors.primary,
+  },
+  chipYou: {
+    backgroundColor: Colors.surfaceRaised,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  chipLabel: {
+    ...Type.caption,
+    fontSize: 12,
+    color: Colors.text,
+  },
+});

@@ -1,0 +1,20 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "paths": {
+      "@/*": ["./src/*"],
+      "@/assets/*": ["./assets/*"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    ".expo",
+    // Edge Functions are Deno, not React Native: they use `Deno.*` globals and
+    // jsr:/npm: import specifiers that this tsconfig cannot resolve. They are
+    // typechecked by `deno check` (see supabase/functions/deno.json) instead.
+    "supabase/functions"
+  ]
+}
