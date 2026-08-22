@@ -155,9 +155,13 @@ create policy "users update their own profile"
   using (id = auth.uid()) with check (id = auth.uid());
 
 -- Public lounges are discoverable; private ones only to members.
+-- `owner_id = auth.uid()` is not redundant with membership: the owner's
+-- lounge_members row is added by an AFTER INSERT trigger, which has not fired
+-- when INSERT ... RETURNING evaluates this policy. Without it, creating a
+-- private lounge succeeds but fails to return the row it just created.
 create policy "public lounges or own lounges are readable"
   on public.lounges for select to authenticated
-  using (is_public or public.is_lounge_member(id));
+  using (is_public or owner_id = auth.uid() or public.is_lounge_member(id));
 create policy "authenticated users create lounges they own"
   on public.lounges for insert to authenticated with check (owner_id = auth.uid());
 create policy "owners and mods update their lounge"
