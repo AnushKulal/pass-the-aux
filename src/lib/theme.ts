@@ -1,13 +1,22 @@
 /**
- * Aux design tokens — "Patchbay".
+ * Aux design tokens — "Apex".
  *
- * Flat, gridded, zero corner radius, hard rules, Archivo throughout, near-mono
- * red on near-black. Separation is done with rules and ground steps, never with
- * shadows. Red is reserved: it means live, playing, joinable, in sync, on aux —
- * and nothing else.
+ * Deep near-black ground, generous corner radius, and one signature device: a
+ * heat gradient running black → crimson → amber that sits behind the content
+ * and gives every screen its atmosphere. Depth comes from that light and from
+ * translucent surfaces floating on it, not from hard rules.
  *
- * Two themes. Every value here is exact, from
- * design/handoff/design_handoff_aux_mobile/README.md.
+ * Red is still reserved — live, playing, joinable, in sync, on aux — but it now
+ * has a second register: `ember`, the amber end of the gradient, which carries
+ * heat and energy without claiming "this is live".
+ *
+ * Type is Archivo throughout, leaning hard on 800 for the big readouts: a
+ * number is the loudest thing on a screen, with a small uppercase label above
+ * it. That pairing is the other half of the identity.
+ *
+ * REPLACES "Patchbay" (flat, zero-radius, hard-ruled). Every token NAME from
+ * that system survives, so all 66 consumers pick this up without edits; only
+ * the values changed, plus the gradient and glow tokens added at the end.
  *
  * `Colors` is the DARK palette and is what a module gets by importing directly.
  * Anything that must follow the user's Dark / Light / System choice reads
@@ -18,53 +27,78 @@
 import { Platform } from 'react-native';
 
 export const DarkPalette = {
-  /** App ground. */
-  bg: '#0a0908',
-  /** Recessed — artwork wells, composer fields. */
-  bgRecessed: '#0f0e0d',
-  /** Raised — row hover, docked bar. */
-  surface: '#141312',
-  surface2: '#1c1a19',
+  /** App ground. Near-black with a faint cool cast, so the warm gradient reads
+   *  as heat against it rather than as a brown wash. */
+  bg: '#0a0910',
+  /** Recessed — artwork wells, composer fields. Deeper than the ground. */
+  bgRecessed: '#07060c',
+  /** Raised card. Sits ON the gradient, so it is a lifted neutral, not black. */
+  surface: '#16141e',
+  surface2: '#1f1c2a',
   /** Pressed, inactive toggle track. */
-  surface3: '#211f1e',
+  surface3: '#2a2636',
   /** Avatar fill. */
-  avatar: '#2d2b2b',
+  avatar: '#35303f',
   /** Artwork stand-in glyph. */
-  artwork: '#3a3736',
+  artwork: '#423c4d',
 
   /** Primary text. */
-  ink: '#f3f2f2',
-  /** Secondary text — 6.9:1. */
-  ink2: '#9b9797',
-  /** Tertiary labels — 5.7:1. */
-  ink3: '#8a8686',
+  ink: '#fbfafc',
+  /** Secondary text. */
+  ink2: '#a9a4b4',
+  /** Tertiary labels. */
+  ink3: '#7c7688',
 
-  /** RESERVED. Accent fills. */
+  /** RESERVED. Accent fills. Unchanged from Patchbay — it was already the
+   *  right red, and keeping it means the brand survives the redesign. */
   live: '#ec3013',
   /** RESERVED. Accent text on dark — the fill colour fails as small text. */
-  liveText: '#ff563c',
+  liveText: '#ff6a4a',
   /** Text sitting on an accent fill. */
-  onLive: '#0a0908',
-  danger: '#f2657e',
+  onLive: '#0a0910',
+  danger: '#ff5c7a',
 
-  /** Hairline between list rows. */
-  ruleSoft: 'rgba(243,242,242,.10)',
+  /** Hairline between list rows. Softer than Patchbay: rules are no longer
+   *  doing the separating, so they should whisper. */
+  ruleSoft: 'rgba(251,250,252,.07)',
   /** Standard rule. */
-  rule: 'rgba(243,242,242,.16)',
+  rule: 'rgba(251,250,252,.12)',
   /** Control border. */
-  rule2: 'rgba(243,242,242,.24)',
+  rule2: 'rgba(251,250,252,.20)',
   /** Strong border. */
-  rule3: 'rgba(243,242,242,.30)',
+  rule3: 'rgba(251,250,252,.28)',
   /** Progress track. */
-  track: 'rgba(243,242,242,.12)',
-  /** 25px modular grid overlay. */
-  grid: 'rgba(243,242,242,.045)',
+  track: 'rgba(251,250,252,.10)',
+  /** Faint lattice, where it is still wanted. */
+  grid: 'rgba(251,250,252,.035)',
 
-  liveWash: 'rgba(236,48,19,.14)',
-  liveMid: 'rgba(236,48,19,.28)',
-  dangerBorder: 'rgba(242,101,126,.50)',
-  dangerWash: 'rgba(242,101,126,.12)',
-  scrim: 'rgba(10,9,8,.86)',
+  liveWash: 'rgba(236,48,19,.16)',
+  liveMid: 'rgba(236,48,19,.34)',
+  dangerBorder: 'rgba(255,92,122,.45)',
+  dangerWash: 'rgba(255,92,122,.12)',
+  scrim: 'rgba(7,6,12,.88)',
+
+  /* ------------------------------------------------------ Apex additions */
+
+  /** The amber end of the heat. Energy WITHOUT the "live" claim, so it can be
+   *  spent freely where `live` cannot — chart bars, glow, gradient stops. */
+  ember: '#ff8a3d',
+  /** Ember as small text. */
+  emberText: '#ffa463',
+
+  /** Ambient bloom behind artwork and under the accent. */
+  glow: 'rgba(236,48,19,.32)',
+  glowSoft: 'rgba(236,48,19,.14)',
+
+  /**
+   * The signature gradient, as four stops: ground → deep crimson → accent →
+   * amber. Kept as individual tokens rather than an array because `Palette`
+   * maps every key to `string`; compose them with `gradientStops()` below.
+   */
+  grad0: '#0a0910',
+  grad1: '#3d0a08',
+  grad2: '#b4200e',
+  grad3: '#ff8a3d',
 } as const;
 
 /**
@@ -83,35 +117,57 @@ export type ColorToken = keyof Palette;
  * on small labels; #ae1800 reaches 6.5:1 and reads stronger on a light ground.
  */
 export const LightPalette: Palette = {
-  bg: '#f3f2f2',
-  bgRecessed: '#eae9e9',
-  surface: '#eae7e7',
-  surface2: '#e2dfdf',
-  surface3: '#d7d3d3',
-  avatar: '#d7d3d3',
-  artwork: '#bab6b6',
+  bg: '#faf9fb',
+  bgRecessed: '#f1eff4',
+  /** Cards go pure white and float ON the gradient — the inverse of dark,
+   *  where they are a lifted neutral against black. */
+  surface: '#ffffff',
+  surface2: '#f4f2f7',
+  surface3: '#e9e5ee',
+  avatar: '#ddd8e4',
+  artwork: '#c9c3d1',
 
-  ink: '#201e1d',
-  ink2: '#444141',
-  ink3: '#605d5d',
+  ink: '#14121a',
+  ink2: '#4c4757',
+  ink3: '#6e6879',
 
-  live: '#ae1800',
-  liveText: '#ae1800',
-  onLive: '#f3f2f2',
-  danger: '#a4152c',
+  live: '#cc2510',
+  liveText: '#a81800',
+  onLive: '#fffdfc',
+  danger: '#b01430',
 
-  ruleSoft: 'rgba(32,30,29,.12)',
-  rule: 'rgba(32,30,29,.20)',
-  rule2: 'rgba(32,30,29,.32)',
-  rule3: 'rgba(32,30,29,.42)',
-  track: 'rgba(32,30,29,.14)',
-  grid: 'rgba(32,30,29,.05)',
+  ruleSoft: 'rgba(20,18,26,.06)',
+  rule: 'rgba(20,18,26,.10)',
+  rule2: 'rgba(20,18,26,.16)',
+  rule3: 'rgba(20,18,26,.24)',
+  track: 'rgba(20,18,26,.10)',
+  grid: 'rgba(20,18,26,.04)',
 
   liveWash: 'rgba(236,48,19,.10)',
-  liveMid: 'rgba(236,48,19,.24)',
-  dangerBorder: 'rgba(164,21,44,.45)',
-  dangerWash: 'rgba(164,21,44,.10)',
-  scrim: 'rgba(32,30,29,.55)',
+  liveMid: 'rgba(236,48,19,.22)',
+  dangerBorder: 'rgba(176,20,48,.40)',
+  dangerWash: 'rgba(176,20,48,.09)',
+  scrim: 'rgba(20,18,26,.45)',
+
+  /* ------------------------------------------------------ Apex additions */
+
+  /** Darkened so ember still reads as a colour rather than washing out. */
+  ember: '#e8621a',
+  emberText: '#b8460f',
+
+  glow: 'rgba(236,48,19,.18)',
+  glowSoft: 'rgba(236,48,19,.08)',
+
+  /**
+   * The same heat, running the other way: a light ground warming INTO the
+   * accent, rather than black igniting into amber. This is what "the dark
+   * pixels go light, in the same gradient flow" means in practice — the
+   * gradient is the constant, the ground is what inverts.
+   */
+  grad0: '#faf9fb',
+  grad1: '#ffe0cc',
+  grad2: '#ff8a5c',
+  grad3: '#ec3013',
 };
 
 export const Palettes = { dark: DarkPalette, light: LightPalette } as const;
@@ -194,7 +250,35 @@ export const Space = {
  * Zero everywhere. This is a defining property of the direction, not an
  * oversight — do not soften a corner because it "looks better".
  */
-export const Radius = 0;
+/**
+ * Default corner radius.
+ *
+ * Deliberately still a plain number: roughly twenty call sites write
+ * `borderRadius: Radius`, so changing this single value rounded the entire app
+ * in one edit when Patchbay (radius 0) became Apex. Reach for `Radii` below
+ * when a specific step is wanted.
+ */
+export const Radius = 16;
+
+/**
+ * The radius scale.
+ *
+ * `pill` is a deliberate 999 rather than a computed half-height — it survives
+ * a row growing a second line of text, where a hardcoded half-height would
+ * suddenly look like a rounded rectangle.
+ */
+export const Radii = {
+  /** Chips, small tags, inline badges. */
+  sm: 10,
+  /** The default: cards, inputs, list rows. */
+  md: 16,
+  /** Larger cards, artwork wells. */
+  lg: 22,
+  /** Sheets, hero surfaces, the Session artwork. */
+  xl: 28,
+  /** Buttons, avatars where round is wanted, the live dot. */
+  pill: 999,
+} as const;
 
 /** 1px hairline within a group, 2px between major sections. */
 export const Rule = { hair: 1, major: 2 } as const;
@@ -238,12 +322,72 @@ export const PointerEvents = {
 } as const;
 
 /**
- * Elevation is deliberately absent from this direction — separation comes from
- * rules and ground steps. Kept only so the web build can suppress any default
- * platform shadow.
+ * Suppresses a platform's default shadow.
+ *
+ * Apex has depth, but it comes from the gradient and from `glow` — a coloured
+ * bloom that belongs to the content — never from a generic grey drop shadow
+ * under a card. Use this wherever a platform adds one uninvited.
  */
 export const noShadow = Platform.select({
   web: { boxShadow: 'none' },
   android: { elevation: 0 },
   default: { shadowOpacity: 0 },
 }) as object;
+
+/* ------------------------------------------------------------- the gradient */
+
+/**
+ * The signature heat, ready for `<LinearGradient colors={...} />`.
+ *
+ * Four stops rather than two: a straight black-to-amber ramp goes muddy through
+ * the browns in the middle. The deep crimson at `grad1` holds the shadow end
+ * dark for longer, so the accent arrives late and reads as ignition.
+ *
+ * Pass the palette from `useColors()` so it follows the active theme.
+ */
+export function gradientStops(c: Palette): readonly [string, string, string, string] {
+  return [c.grad0, c.grad1, c.grad2, c.grad3];
+}
+
+/**
+ * Where the heat comes from.
+ *
+ * `corner` is the default and matches the direction's reference: light entering
+ * from one corner and falling away across the screen, like a light source just
+ * off-frame. `vertical` is for wide surfaces where a diagonal would band.
+ */
+export const GradientDirection = {
+  corner: { start: { x: 0.1, y: 0 }, end: { x: 0.9, y: 1 } },
+  vertical: { start: { x: 0.5, y: 0 }, end: { x: 0.5, y: 1 } },
+  horizontal: { start: { x: 0, y: 0.5 }, end: { x: 1, y: 0.5 } },
+} as const;
+
+/**
+ * How far up the screen the gradient is allowed to reach.
+ *
+ * The reference keeps roughly the top third lit and lets the rest fall to
+ * ground, which is what stops the effect becoming a wallpaper. Content sits on
+ * the dark part; the heat is behind the header.
+ */
+export const GradientLocations = [0, 0.28, 0.62, 1] as const;
+
+/**
+ * The ambient bloom under artwork and accent surfaces.
+ *
+ * A COLOURED shadow, not a grey one — it reads as light coming off the thing
+ * rather than the thing casting onto a surface below it. Android only honours
+ * `elevation`, which cannot be tinted, so it gets a slightly stronger elevation
+ * as the nearest equivalent.
+ */
+export function glowShadow(color: string, radius = 24): object {
+  return Platform.select({
+    web: { boxShadow: `0 8px ${radius}px ${color}` },
+    android: { elevation: 8 },
+    default: {
+      shadowColor: color,
+      shadowOpacity: 1,
+      shadowRadius: radius,
+      shadowOffset: { width: 0, height: 8 },
+    },
+  }) as object;
+}

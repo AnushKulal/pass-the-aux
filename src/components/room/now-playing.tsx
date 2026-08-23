@@ -46,8 +46,10 @@ import { BLURHASH_SURFACE } from '@/components/ui';
 import { getClockOffset } from '@/lib/clock';
 import {
   Duration,
+  glowShadow,
   GRID,
   PointerEvents,
+  Radii,
   Rule,
   Space,
   TOUCH_TARGET,
@@ -376,8 +378,15 @@ const ArtworkWell = memo(function ArtworkWell({
   const C = useColors();
 
   return (
-    <View style={[styles.well, { backgroundColor: C.bgRecessed, borderBottomColor: C.rule }]}>
-      <ModularGrid />
+    /*
+      Two views, not one. The bloom has to live on a parent WITHOUT
+      `overflow: hidden`, because that clip is what rounds the artwork's corners
+      and it would crop the shadow away with them. So the outer view carries the
+      glow and the inner one carries the clip.
+    */
+    <View style={[styles.wellGlow, glowShadow(C.glow, 28)]}>
+      <View style={[styles.well, { backgroundColor: C.bgRecessed }]}>
+        <ModularGrid />
 
       {artworkUrl ? (
         <Image
@@ -400,11 +409,12 @@ const ArtworkWell = memo(function ArtworkWell({
       {/* The one accent mark on the well: a rule straight through the middle. */}
       <View style={[styles.wellRule, { backgroundColor: C.liveMid }, PointerEvents.none]} />
 
-      {providerLabel ? (
-        <View style={[styles.wellChip, { backgroundColor: C.live }]}>
-          <Text style={[styles.wellChipLabel, { color: C.onLive }]}>{providerLabel}</Text>
-        </View>
-      ) : null}
+        {providerLabel ? (
+          <View style={[styles.wellChip, { backgroundColor: C.live }]}>
+            <Text style={[styles.wellChipLabel, { color: C.onLive }]}>{providerLabel}</Text>
+          </View>
+        ) : null}
+      </View>
     </View>
   );
 });
@@ -484,10 +494,17 @@ const RungDot = memo(function RungDot({ color, live }: { color: string; live: bo
 
 const styles = StyleSheet.create({
   // ------------------------------------------------------------------ well
+  /*
+    The artwork floats as a rounded card rather than sitting flush to the edges
+    under a hard rule. Inset by the gutter so the heat behind it reads around
+    all four sides — that separation is what makes it look lit rather than
+    pasted on.
+  */
   stage: {
-    width: '100%',
+    width: 'auto',
+    marginHorizontal: GUTTER,
     height: WELL_HEIGHT,
-    borderBottomWidth: Rule.major,
+    borderRadius: Radii.xl,
     overflow: 'hidden',
   },
   /** Mounted and audible, out of the layout, effectively invisible. */
@@ -499,13 +516,18 @@ const styles = StyleSheet.create({
     height: 1,
     opacity: 0,
   },
+  /** Carries the bloom. No clip here, or the shadow is cropped with the corners. */
+  wellGlow: {
+    marginHorizontal: GUTTER,
+    borderRadius: Radii.xl,
+  },
   well: {
     position: 'relative',
     height: WELL_HEIGHT,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
-    borderBottomWidth: Rule.major,
+    borderRadius: Radii.xl,
   },
   wellInitial: {
     ...Type.display(118),
@@ -553,16 +575,21 @@ const styles = StyleSheet.create({
   // ----------------------------------------------------------------- title
   block: {
     paddingHorizontal: GUTTER,
-    paddingTop: Space.lg - 2,
+    paddingTop: Space.lg,
   },
+  /*
+    Larger and tighter than Patchbay's 26. In this direction the track title is
+    the headline of the screen, sitting directly under the artwork with nothing
+    competing — so it can carry the weight that a hard rule used to.
+  */
   title: {
-    ...Type.display(26),
-    lineHeight: 27,
-    letterSpacing: tracking(26, -0.03),
+    ...Type.display(32),
+    lineHeight: 33,
+    letterSpacing: tracking(32, -0.035),
   },
   subtitle: {
     ...Type.body(16),
-    marginTop: 3,
+    marginTop: 5,
   },
 
   // -------------------------------------------------------------- progress

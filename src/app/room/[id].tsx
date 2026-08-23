@@ -59,6 +59,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { AddTrackSheet } from '@/components/room/add-track-sheet';
 import { ModularGrid, NowPlaying } from '@/components/room/now-playing';
+import { HeatBackdrop } from '@/components/shell/heat-backdrop';
 import { ParticipantStrip, SyncOrbit } from '@/components/room/participant-strip';
 import { QueueList } from '@/components/room/queue-list';
 import { TransportControls } from '@/components/room/transport-controls';
@@ -533,12 +534,21 @@ function Layer({ active, children }: { active: boolean; children: ReactNode }) {
 
 // -------------------------------------------------------------------- shell
 
-/** Ground and safe area. Flat: no atmosphere layers in this direction. */
+/**
+ * Ground, atmosphere and safe area.
+ *
+ * The Session is the screen the app exists for, so it gets the heat at full
+ * strength — this is the one place the gradient is allowed to be the loudest
+ * thing before the artwork loads. It sits BEHIND the safe area rather than
+ * inside it, so the colour runs under the status bar instead of stopping at a
+ * hard line below it.
+ */
 function Shell({ children }: { children: ReactNode }) {
   const C = useColors();
 
   return (
     <View style={[styles.root, { backgroundColor: C.bg }]}>
+      <HeatBackdrop extent={0.5} />
       <SafeAreaView edges={['top', 'left', 'right']} style={styles.safe}>
         {/*
           react-native-web has no phone to constrain it, so an unbounded column
