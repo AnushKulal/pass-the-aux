@@ -49,9 +49,10 @@
         "projectId": "3c252219-3619-434b-9ab4-f0931d09722a"
       },
       "releaseNotes": [
-        "Direct messages — inbox, threads and a working composer",
-        "Navigation now fades everywhere instead of sliding",
-        "This prompt tells you what changed"
+        "This sheet is the new update prompt — it rises from the bottom and lists the patch",
+        "Navigation fades everywhere now; only a Session slides up",
+        "Direct messages: inbox, threads and composer",
+        "Follows light and dark with the rest of the app"
       ]
     },
     "owner": "anush_kulal",
