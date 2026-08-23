@@ -1,32 +1,37 @@
 /**
- * The transport row, and who is allowed to touch it.
+ * The transport row and the aux card, and who is allowed to touch them.
  *
- * Three cells: a 52px −15 seek, a flexible accent play/pause that is the widest
- * thing on the screen, and a 52px skip. Underneath, one of two rows:
+ * Built from design/v2/aux-v2.dc.html, screen "Session".
  *
- *   - on aux  → PASS THE AUX, bordered in accent
- *   - passenger → "@mira is on aux. Controls are theirs." + a REQUEST cell
+ * Five cells: shuffle, previous, a 74px `pill` play circle, next, repeat. The
+ * circle is the one filled control on the screen — it is the play state itself,
+ * which is exactly what that colour is reserved for.
  *
  * A passenger still SEES the transport, because hiding it makes the screen look
- * broken rather than borrowed — but the cells are inert and marked disabled to
- * assistive tech, and the sentence directly beneath says whose they are. RLS
- * would reject a passenger's UPDATE on `rooms` anyway; a control that looks
- * live and then errors is worse than one that reads as someone else's.
+ * broken rather than borrowed, but the cells are inert and marked disabled to
+ * assistive tech. RLS would reject a passenger's UPDATE on `rooms` anyway.
  *
- * The play cell is the one accent FILL in this component. It is allowed to be:
- * it is the play state itself, which is exactly what the colour is reserved
- * for.
+ * `AuxCard` is the row underneath: who has the aux, and the one button that
+ * changes that — TAKE THE AUX for a passenger, PASS THE AUX for the host.
  */
 
 import * as Haptics from 'expo-haptics';
-import { ArrowRight, Pause, Play, RotateCcw, SkipForward } from 'lucide-react-native';
+import { Pause, Play, Repeat, Shuffle, SkipBack, SkipForward } from 'lucide-react-native';
 import { memo, type ReactNode } from 'react';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { Fonts, Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
+import { Avatar } from '@/components/ui';
+import {
+  Fonts,
+  Radii,
+  Space,
+  TOUCH_TARGET,
+  Type,
+  glowShadow,
+  raised,
+  tracking,
+} from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
-
-import { TABULAR } from './drift';
 
 export type TransportControlsProps = {
   isHost: boolean;
@@ -37,26 +42,18 @@ export type TransportControlsProps = {
   isBusy: boolean;
   onPlayPause: () => void;
   onSkip: () => void;
-  onRequestAux: () => void;
-  /** Latches after a request so the button cannot be spammed into the chat. */
-  requestSent: boolean;
-  hostName: string | null;
   /**
-   * Optional. There is no "previous track" in the schema — the queue is
-   * forward-only — so this restarts the current one. Used as the fallback for
-   * the −15 cell when no explicit seek-back handler is wired.
+   * There is no "previous track" in the schema — the queue is forward-only —
+   * so this restarts the current one. Used as the fallback for the back cell.
    */
   onRestart?: () => void;
   /** −15 seconds. Falls back to `onRestart` when absent. */
   onSeekBack?: () => void;
-  /**
-   * Hand the aux to someone else. There is no `rooms.host_id` transfer RPC yet,
-   * so the Session screen currently opens the roster instead of mutating.
-   */
-  onPassAux?: () => void;
+  onShuffle?: () => void;
+  onRepeat?: () => void;
 };
 
-const CELL = 52;
+const PLAY = 74;
 const GLYPH_STROKE = 2;
 
 export const TransportControls = memo(function TransportControls({
@@ -67,133 +64,129 @@ export const TransportControls = memo(function TransportControls({
   isBusy,
   onPlayPause,
   onSkip,
-  onRequestAux,
-  requestSent,
-  hostName,
   onRestart,
   onSeekBack,
-  onPassAux,
+  onShuffle,
+  onRepeat,
 }: TransportControlsProps) {
   const C = useColors();
 
   const seekBack = onSeekBack ?? onRestart;
   const Glyph = isPlaying ? Pause : Play;
-  const controlsLive = isHost && !isBusy;
+  const live = isHost && !isBusy;
+  const playBlocked = !live || !canPlay;
 
   return (
-    <View style={styles.root}>
-      <View style={styles.row}>
-        <SideCell
-          label={isPlaying || onSeekBack ? 'Back 15 seconds' : 'Restart this track'}
-          disabled={!controlsLive || !canPlay || !seekBack}
-          onPress={seekBack}>
-          {onSeekBack ? (
-            <Text style={[styles.sideLabel, { color: C.ink2 }]}>−15</Text>
-          ) : (
-            <RotateCcw size={20} strokeWidth={GLYPH_STROKE} color={C.ink2} />
-          )}
-        </SideCell>
+    <View style={styles.row}>
+      <Cell label="Shuffle" disabled={!onShuffle} onPress={onShuffle}>
+        <Shuffle size={19} strokeWidth={GLYPH_STROKE} color={C.ink2} />
+      </Cell>
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={isPlaying ? 'Pause' : 'Play'}
-          accessibilityState={{ disabled: !controlsLive || !canPlay, busy: isBusy }}
-          disabled={!controlsLive || !canPlay}
-          onPress={() => {
-            press('medium');
-            onPlayPause();
-          }}
-          style={({ pressed }) => [
-            styles.play,
-            { backgroundColor: C.live },
-            pressed ? { backgroundColor: C.liveText } : null,
-            !controlsLive || !canPlay ? styles.inert : null,
-          ]}>
-          {isBusy ? (
-            <ActivityIndicator size="small" color={C.onLive} />
-          ) : (
-            <Glyph size={22} strokeWidth={GLYPH_STROKE} color={C.onLive} />
-          )}
-        </Pressable>
+      <Cell
+        label={onSeekBack ? 'Back 15 seconds' : 'Restart this track'}
+        disabled={!live || !canPlay || !seekBack}
+        onPress={seekBack}>
+        <SkipBack size={22} strokeWidth={GLYPH_STROKE} color={C.ink} fill={C.ink} />
+      </Cell>
 
-        <SideCell
-          label="Skip to the next track"
-          disabled={!controlsLive || !canSkip}
-          onPress={onSkip}>
-          <SkipForward size={20} strokeWidth={GLYPH_STROKE} color={C.ink2} />
-        </SideCell>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={isPlaying ? 'Pause' : 'Play'}
+        accessibilityState={{ disabled: playBlocked, busy: isBusy }}
+        disabled={playBlocked}
+        onPress={() => {
+          press('medium');
+          onPlayPause();
+        }}
+        style={({ pressed }) => [
+          styles.play,
+          { backgroundColor: C.pill },
+          glowShadow(C.glow, Math.round(PLAY / 2)),
+          pressed ? styles.held : null,
+          playBlocked ? styles.inert : null,
+        ]}>
+        {isBusy ? (
+          <ActivityIndicator size="small" color={C.pillInk} />
+        ) : (
+          <Glyph size={28} strokeWidth={GLYPH_STROKE} color={C.pillInk} fill={C.pillInk} />
+        )}
+      </Pressable>
+
+      <Cell label="Skip to the next track" disabled={!live || !canSkip} onPress={onSkip}>
+        <SkipForward size={22} strokeWidth={GLYPH_STROKE} color={C.ink} fill={C.ink} />
+      </Cell>
+
+      <Cell label="Repeat" disabled={!onRepeat} onPress={onRepeat}>
+        <Repeat size={19} strokeWidth={GLYPH_STROKE} color={C.ink2} />
+      </Cell>
+    </View>
+  );
+});
+
+// ---------------------------------------------------------------- aux card
+
+export type AuxCardProps = {
+  /** Whoever holds the aux right now. */
+  name: string | null;
+  avatarUrl?: string | null;
+  isHost: boolean;
+  /** Latches after a request so the button cannot be spammed into the chat. */
+  requestSent: boolean;
+  onRequestAux: () => void;
+  /**
+   * Hand the aux to someone else. There is no `rooms.host_id` transfer RPC yet,
+   * so the Session leaves this out and the cell reads as unavailable.
+   */
+  onPassAux?: () => void;
+};
+
+export const AuxCard = memo(function AuxCard({
+  name,
+  avatarUrl,
+  isHost,
+  requestSent,
+  onRequestAux,
+  onPassAux,
+}: AuxCardProps) {
+  const C = useColors();
+
+  const who = isHost ? 'You' : (name ?? 'Nobody');
+  const action = isHost ? 'Pass the aux' : requestSent ? 'Requested' : 'Take the aux';
+  const blocked = isHost ? !onPassAux : requestSent;
+
+  return (
+    <View style={[styles.aux, { backgroundColor: C.surface }, raised(C)]}>
+      <Avatar name={who} uri={avatarUrl} size={38} live />
+
+      <View style={styles.auxMeta}>
+        <Text style={[styles.auxKicker, { color: C.ink3 }]}>On aux</Text>
+        <Text numberOfLines={1} style={[styles.auxName, { color: C.ink }]}>
+          {who}
+        </Text>
       </View>
 
-      {isHost ? (
-        <>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Pass the aux to someone else"
-            accessibilityState={{ disabled: !onPassAux }}
-            disabled={!onPassAux}
-            onPress={() => {
-              press('light');
-              onPassAux?.();
-            }}
-            style={({ pressed }) => [
-              styles.pass,
-              { borderColor: C.live },
-              pressed ? { backgroundColor: C.liveWash } : null,
-              !onPassAux ? styles.inert : null,
-            ]}>
-            <Text style={[styles.passLabel, { color: C.liveText }]}>Pass the aux</Text>
-            <ArrowRight size={15} strokeWidth={GLYPH_STROKE} color={C.liveText} />
-          </Pressable>
-
-          {onPassAux ? null : (
-            /*
-              Say what the product cannot do and move on, per the copy guidance.
-              `rooms` RLS pins `host_id` to `auth.uid()` on both the USING and
-              the WITH CHECK clause, so handing the aux over needs an RPC that
-              is not in `supabase/migrations/` yet.
-            */
-            <Text style={[styles.passNote, { color: C.ink3 }]}>
-              Handing the aux over is not wired up yet — you keep the controls for now.
-            </Text>
-          )}
-        </>
-      ) : (
-        <View style={[styles.passenger, { borderColor: C.rule2 }]}>
-          <Text style={[styles.passengerLine, { color: C.ink2 }]}>
-            <Text style={[styles.passengerName, { color: C.ink }]}>
-              {hostName ? `@${hostName}` : 'Someone else'}
-            </Text>
-            {' is on aux. Controls are theirs.'}
-          </Text>
-
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={requestSent ? 'Aux requested' : 'Request the aux'}
-            accessibilityHint={
-              requestSent
-                ? undefined
-                : hostName
-                  ? `Asks ${hostName} in the Session chat`
-                  : 'Asks in the Session chat'
-            }
-            accessibilityState={{ disabled: requestSent }}
-            disabled={requestSent}
-            onPress={() => {
-              press('light');
-              onRequestAux();
-            }}
-            style={({ pressed }) => [
-              styles.request,
-              { borderColor: C.live },
-              pressed ? { backgroundColor: C.liveWash } : null,
-              requestSent ? styles.inert : null,
-            ]}>
-            <Text style={[styles.requestLabel, { color: C.liveText }]}>
-              {requestSent ? 'Requested' : 'Request'}
-            </Text>
-          </Pressable>
-        </View>
-      )}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={isHost ? 'Pass the aux to someone else' : action}
+        accessibilityHint={
+          isHost || requestSent ? undefined : 'Asks for the aux in the Session chat'
+        }
+        accessibilityState={{ disabled: blocked }}
+        disabled={blocked}
+        hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
+        onPress={() => {
+          press('light');
+          if (isHost) onPassAux?.();
+          else onRequestAux();
+        }}
+        style={({ pressed }) => [
+          styles.auxAction,
+          { backgroundColor: C.pill },
+          pressed ? styles.held : null,
+          blocked ? styles.inert : null,
+        ]}>
+        <Text style={[styles.auxActionLabel, { color: C.pillInk }]}>{action}</Text>
+      </Pressable>
     </View>
   );
 });
@@ -207,17 +200,15 @@ function press(weight: 'light' | 'medium') {
   );
 }
 
-type SideCellProps = {
+type CellProps = {
   label: string;
   disabled: boolean;
   onPress?: () => void;
   children: ReactNode;
 };
 
-/** A bordered square. No fill, no radius — the direction's non-accent control. */
-function SideCell({ label, disabled, onPress, children }: SideCellProps) {
-  const C = useColors();
-
+/** A bare 44px target. No fill and no border — the artboard's outer glyphs. */
+function Cell({ label, disabled, onPress, children }: CellProps) {
   return (
     <Pressable
       accessibilityRole="button"
@@ -229,9 +220,8 @@ function SideCell({ label, disabled, onPress, children }: SideCellProps) {
         onPress?.();
       }}
       style={({ pressed }) => [
-        styles.side,
-        { borderColor: C.rule2 },
-        pressed ? { borderColor: C.ink } : null,
+        styles.cell,
+        pressed ? styles.held : null,
         disabled ? styles.inert : null,
       ]}>
       {children}
@@ -240,95 +230,66 @@ function SideCell({ label, disabled, onPress, children }: SideCellProps) {
 }
 
 const styles = StyleSheet.create({
-  root: {
-    paddingHorizontal: Space.md,
-    paddingTop: Space.lg - 2,
-  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    // The 8px floor between adjacent targets, exactly.
-    gap: Space.sm,
+    justifyContent: 'space-between',
+    paddingTop: Space.xxl,
+    paddingHorizontal: Space.xl,
   },
-  side: {
-    width: CELL,
-    height: CELL,
-    flexGrow: 0,
-    flexShrink: 0,
+  cell: {
+    width: TOUCH_TARGET,
+    height: TOUCH_TARGET,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: Rule.hair,
-  },
-  sideLabel: {
-    ...Type.heading(11),
-    ...TABULAR,
   },
   play: {
-    flex: 1,
-    height: CELL,
-    flexDirection: 'row',
+    width: PLAY,
+    height: PLAY,
+    borderRadius: Radii.pill,
     alignItems: 'center',
-    // Left-aligned, as the artboard: the glyph sits on the gutter line rather
-    // than floating in the middle of a very wide cell.
-    justifyContent: 'flex-start',
-    paddingHorizontal: Space.lg,
+    justifyContent: 'center',
+  },
+  held: {
+    opacity: 0.82,
   },
   inert: {
     opacity: 0.4,
   },
 
-  // ------------------------------------------------------------- on aux
-  pass: {
-    marginTop: Space.sm,
-    minHeight: 46,
+  // ------------------------------------------------------------- aux card
+  aux: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Space.sm,
-    paddingHorizontal: Space.lg - 2,
-    borderWidth: Rule.hair,
+    gap: Space.md + 1,
+    padding: Space.md + 1,
+    paddingRight: Space.md + 3,
+    borderRadius: Radii.lg,
   },
-  passLabel: {
-    ...Type.heading(11),
-    letterSpacing: tracking(11, 0.1),
-    textTransform: 'uppercase',
-  },
-  passNote: {
-    ...Type.body(16),
-    marginTop: Space.sm,
-  },
-
-  // ----------------------------------------------------------- passenger
-  passenger: {
-    marginTop: Space.sm,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space.sm + 1,
-    paddingLeft: 11,
-    paddingRight: Space.sm,
-    paddingVertical: Space.sm,
-    borderWidth: Rule.hair,
-  },
-  passengerLine: {
-    ...Type.body(16),
+  auxMeta: {
     flex: 1,
     minWidth: 0,
   },
-  passengerName: {
-    fontFamily: Fonts.semibold,
+  auxKicker: {
+    ...Type.label(10),
+    letterSpacing: tracking(10, 0.14),
   },
-  request: {
+  auxName: {
+    fontFamily: Fonts.extrabold,
+    fontSize: 14.5,
+    letterSpacing: tracking(14.5, -0.01),
+    marginTop: 2,
+  },
+  auxAction: {
     flexGrow: 0,
     flexShrink: 0,
-    minHeight: TOUCH_TARGET,
-    minWidth: TOUCH_TARGET,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: Space.md,
-    borderWidth: Rule.hair,
+    paddingHorizontal: 15,
+    paddingVertical: 11,
+    borderRadius: Radii.sm,
   },
-  requestLabel: {
-    ...Type.heading(10),
-    letterSpacing: tracking(10, 0.09),
-    textTransform: 'uppercase',
+  auxActionLabel: {
+    fontFamily: Fonts.semibold,
+    fontSize: 12,
+    letterSpacing: tracking(12, 0.02),
   },
 });

@@ -1,11 +1,10 @@
 /**
- * A direct-message thread. README §13, the "Thread" paragraph.
+ * A direct-message thread. Design canvas: `data-screen-label="Thread"`.
  *
- * Header: avatar, presence and status (tap → profile), then
- * search-this-conversation, call and video. The log below it is an `inverted`
- * FlatList of memoised bubbles with day separators and 5-minute run grouping —
- * the same machinery the lounge chat uses, because a DM is a chat log with two
- * people in it and a private bucket behind it, not a different idea.
+ * Header: back tile, avatar, name, and a live dot with the status under it.
+ * The log below is an `inverted` FlatList of memoised bubbles with day
+ * separators and 5-minute run grouping — the same machinery the lounge chat
+ * uses, because a DM is a chat log with two people in it.
  *
  * Three things worth knowing before changing this:
  *
@@ -19,12 +18,14 @@
  *     alone never catches.
  *
  *  3. **Search is local to what is loaded.** It filters the pages already in
- *     the cache rather than querying, and says so when it finds nothing, so it
- *     never claims a thread does not contain a word that is simply further up.
+ *     the cache rather than querying.
+ *
+ * The bubbles and the composer are `@/components/dm` components and are styled
+ * there, not here.
  */
 
 import { router, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft, MessageCircle, Phone, Search, Video, X } from 'lucide-react-native';
+import { ChevronLeft, Search, X } from 'lucide-react-native';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -52,7 +53,7 @@ import { DmComposer } from '@/components/dm/composer';
 import { MessageBubble } from '@/components/dm/message-bubble';
 import { type MentionCandidate } from '@/components/dm/mention-picker';
 import { DmRecordSheet, type VoiceNoteDraft } from '@/components/dm/record-sheet';
-import { Avatar, AuxButton, EmptyState, Skeleton, useToast } from '@/components/ui';
+import { Avatar, Skeleton, useToast } from '@/components/ui';
 import {
   useDmSubscription,
   useInbox,
@@ -65,11 +66,14 @@ import {
 } from '@/features/dm';
 import {
   Duration,
-  Radius,
+  Fonts,
+  Radii,
   Rule,
   Space,
   TOUCH_TARGET,
   Type,
+  pressed as pressedWell,
+  raised,
   tracking,
 } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
@@ -85,8 +89,9 @@ const IDLE_MS = 15 * 60_000;
 /** Inverted: offset 0 is the newest message. This much slack still counts. */
 const AT_BOTTOM_PX = 24;
 
-const HEADER_AVATAR = 30;
-const PRESENCE_DOT = 9;
+const HEADER_AVATAR = 40;
+const TILE = 38;
+const TILE_SLOP = { top: 3, bottom: 3, left: 6, right: 6 };
 
 /** `Type.readout` hands back a readonly fontVariant tuple; TextStyle wants a mutable one. */
 const readout = (size: number): TextStyle => ({
@@ -171,10 +176,10 @@ type Presence = {
 /**
  * Presence from `last_seen_at`, and only when the person allows it.
  *
- * There is no presence table (README, Schema gaps) and no room join on this
- * screen, so this deliberately never claims LISTENING — the prototype's fourth
- * state is not something this screen can know. `show_activity` off means the
- * user asked not to be reported on, and the answer is silence, not OFFLINE.
+ * There is no presence table and no room join on this screen, so this
+ * deliberately never claims LISTENING — the artboard's state is not something
+ * this screen can know. `show_activity` off means the user asked not to be
+ * reported on, and the answer is silence, not "Offline".
  */
 function presenceOf(author: DmAuthor | null): Presence {
   if (!author || !author.show_activity) return { label: null, live: false };
@@ -183,9 +188,9 @@ function presenceOf(author: DmAuthor | null): Presence {
   if (Number.isNaN(seen)) return { label: null, live: false };
 
   const age = Date.now() - seen;
-  if (age <= ONLINE_MS) return { label: 'ONLINE', live: true };
-  if (age <= IDLE_MS) return { label: 'IDLE', live: false };
-  return { label: 'OFFLINE', live: false };
+  if (age <= ONLINE_MS) return { label: 'Online', live: true };
+  if (age <= IDLE_MS) return { label: 'Idle', live: false };
+  return { label: 'Offline', live: false };
 }
 
 /** Everything in a message a conversation search should look at. */
@@ -286,23 +291,9 @@ export default function DmThreadScreen() {
       router.push('/profile');
       return;
     }
-    // TODO(profiles): route to /profile/[id] once README §15 is built.
-    toast.show('That profile screen is not built yet.', 'info');
+    // TODO(profiles): route to /profile/[id] once that screen is built.
+    toast.show('No profile page yet.', 'info');
   }, [other, toast, viewerId]);
-
-  /*
-    §14 has no backend. The controls still render, because a header missing two
-    of its four cells reads as a broken build rather than as an unfinished
-    feature — and a tap that explains itself is better than a tap that does
-    nothing at all.
-  */
-  const onCall = useCallback(() => {
-    toast.show('Voice calls are not built yet.', 'info');
-  }, [toast]);
-
-  const onVideo = useCallback(() => {
-    toast.show('Video calls are not built yet.', 'info');
-  }, [toast]);
 
   // ---------------------------------------------------------------- composing
 
@@ -331,8 +322,8 @@ export default function DmThreadScreen() {
 
   const onAttachSelect = useCallback((option: AttachOption) => {
     setAttachOpen(false);
-    // Only `voice` can reach here — the other three are disabled below, with
-    // their reasons, rather than being offered and then failing.
+    // Only `voice` can reach here — the others are disabled below rather than
+    // being offered and then failing.
     if (option === 'voice') setRecordOpen(true);
   }, []);
 
@@ -350,10 +341,8 @@ export default function DmThreadScreen() {
   );
 
   /**
-   * §13's picker is scoped to a lounge or a Session. A thread has neither — it
-   * has exactly two people in it — so the scope is the conversation, and the
-   * pool is the person you are talking to. Never pre-filtered: the picker's
-   * count depends on getting the whole set.
+   * The mention pool is the person you are talking to. Never pre-filtered: the
+   * picker's count depends on getting the whole set.
    */
   const mentionPeople = useMemo<MentionCandidate[]>(() => {
     if (!other?.username) return [];
@@ -392,30 +381,19 @@ export default function DmThreadScreen() {
 
   const enter = useSharedValue(0);
   useEffect(() => {
-    if (reduced) {
-      enter.value = 1;
-      return;
-    }
-    enter.value = withTiming(1, { duration: Duration.enter });
-  }, [enter, reduced]);
-
-  const enterStyle = useAnimatedStyle(() => ({
-    opacity: enter.value,
-    transform: [{ translateY: (1 - enter.value) * 8 }],
-  }));
+    enter.value = reduced ? 1 : withTiming(1, { duration: Duration.enter });
+  }, [reduced, enter]);
+  const enterStyle = useAnimatedStyle(() => ({ opacity: enter.value }));
 
   // ---------------------------------------------------------------- render
 
   if (!conversationId) {
     return (
-      <SafeAreaView edges={['top', 'left', 'right']} style={[styles.root, { backgroundColor: C.bg }]}>
-        <View style={styles.emptyDock}>
-          <EmptyState
-            icon={MessageCircle}
-            title="No conversation"
-            description="That thread could not be opened."
-            action={<AuxButton label="Go back" onPress={router.back} variant="ghost" size="sm" />}
-          />
+      <SafeAreaView
+        edges={['top', 'left', 'right']}
+        style={[styles.root, { backgroundColor: C.bg }]}>
+        <View style={styles.noticeDock}>
+          <Notice label="No conversation." action={{ label: 'Go back', onPress: router.back }} />
         </View>
       </SafeAreaView>
     );
@@ -428,46 +406,39 @@ export default function DmThreadScreen() {
           <View style={[styles.header, { borderBottomColor: C.rule }]}>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Go back"
+              accessibilityLabel="Back to messages"
+              hitSlop={TILE_SLOP}
               onPress={router.back}
               style={({ pressed }) => [
-                styles.headerCell,
-                { borderRightWidth: Rule.hair, borderRightColor: C.rule },
-                pressed && styles.dim,
+                styles.tile,
+                { backgroundColor: pressed ? C.surface2 : C.surface },
+                raised(C),
               ]}>
-              <ArrowLeft size={20} strokeWidth={2} color={C.ink2} />
+              <ChevronLeft size={20} strokeWidth={2.4} color={C.ink} />
             </Pressable>
 
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`${name}${presence.label ? `, ${presence.label}` : ''}. Open profile`}
               onPress={openProfile}
-              style={({ pressed }) => [
-                styles.identity,
-                pressed ? { backgroundColor: C.surface } : null,
-              ]}>
-              <View style={styles.avatarWell}>
-                <Avatar uri={other?.avatar_url} name={name} size={HEADER_AVATAR} />
-                {presence.live ? (
-                  /* Square, like everything else. The 2px ring in the ground
-                     colour separates the dot from the avatar without a shadow. */
-                  <View style={[styles.dot, { backgroundColor: C.live, borderColor: C.bg }]} />
-                ) : null}
-              </View>
+              style={({ pressed }) => [styles.identity, pressed && styles.dim]}>
+              <Avatar uri={other?.avatar_url} name={name} size={HEADER_AVATAR} />
 
               <View style={styles.identityText}>
                 <Text numberOfLines={1} style={[styles.name, { color: C.ink }]}>
                   {name}
                 </Text>
                 {presence.label ? (
-                  <Text
-                    numberOfLines={1}
-                    style={[
-                      styles.status,
-                      { color: presence.live ? C.liveText : C.ink3 },
-                    ]}>
-                    {presence.label}
-                  </Text>
+                  <View style={styles.statusLine}>
+                    {presence.live ? (
+                      <View style={[styles.statusDot, { backgroundColor: C.live }]} />
+                    ) : null}
+                    <Text
+                      numberOfLines={1}
+                      style={[styles.status, { color: presence.live ? C.liveText : C.ink3 }]}>
+                      {presence.label}
+                    </Text>
+                  </View>
                 ) : handle ? (
                   <Text numberOfLines={1} style={[styles.status, { color: C.ink3 }]}>
                     {handle}
@@ -480,66 +451,53 @@ export default function DmThreadScreen() {
               accessibilityRole="button"
               accessibilityLabel="Search this conversation"
               accessibilityState={{ expanded: searchOpen }}
+              hitSlop={TILE_SLOP}
               onPress={toggleSearch}
-              style={({ pressed }) => [styles.headerCell, pressed && styles.dim]}>
-              <Search size={18} strokeWidth={2} color={searchOpen ? C.ink : C.ink2} />
-            </Pressable>
-
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`Call ${name}`}
-              accessibilityHint="Not built yet"
-              onPress={onCall}
-              style={({ pressed }) => [styles.headerCell, pressed && styles.dim]}>
-              <Phone size={18} strokeWidth={2} color={C.ink2} />
-            </Pressable>
-
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`Video call ${name}`}
-              accessibilityHint="Not built yet"
-              onPress={onVideo}
               style={({ pressed }) => [
-                styles.headerCell,
-                { borderLeftWidth: Rule.hair, borderLeftColor: C.rule },
-                pressed && styles.dim,
+                styles.tile,
+                { backgroundColor: pressed || searchOpen ? C.surface2 : C.surface },
+                raised(C),
               ]}>
-              <Video size={19} strokeWidth={2} color={C.ink2} />
+              <Search size={18} strokeWidth={2.2} color={searchOpen ? C.ink : C.ink2} />
             </Pressable>
           </View>
 
           {searchOpen ? (
-            <View
-              style={[
-                styles.searchBar,
-                { backgroundColor: C.bgRecessed, borderBottomColor: C.rule },
-              ]}>
-              <TextInput
-                autoFocus
-                value={query}
-                onChangeText={setQuery}
-                placeholder="Search this conversation"
-                placeholderTextColor={C.ink3}
-                selectionColor={C.live}
-                accessibilityLabel="Search this conversation"
-                returnKeyType="search"
-                style={[styles.searchInput, { color: C.ink }]}
-              />
+            <View style={styles.searchBar}>
+              <View
+                style={[styles.searchWell, { backgroundColor: C.bgRecessed }, pressedWell(C)]}>
+                <TextInput
+                  autoFocus
+                  value={query}
+                  onChangeText={setQuery}
+                  placeholder="Search"
+                  placeholderTextColor={C.ink3}
+                  selectionColor={C.live}
+                  accessibilityLabel="Search this conversation"
+                  returnKeyType="search"
+                  style={[styles.searchInput, { color: C.ink }]}
+                />
 
-              {trimmedQuery ? (
-                <Text
-                  accessibilityLiveRegion="polite"
-                  style={[styles.matchCount, { color: C.ink3 }]}>
-                  {visible.length}
-                </Text>
-              ) : null}
+                {trimmedQuery ? (
+                  <Text
+                    accessibilityLiveRegion="polite"
+                    style={[styles.matchCount, { color: C.ink3 }]}>
+                    {visible.length}
+                  </Text>
+                ) : null}
+              </View>
 
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Close search"
+                hitSlop={TILE_SLOP}
                 onPress={toggleSearch}
-                style={({ pressed }) => [styles.searchClose, pressed && styles.dim]}>
-                <X size={17} strokeWidth={2} color={C.ink2} />
+                style={({ pressed }) => [
+                  styles.tile,
+                  { backgroundColor: pressed ? C.surface2 : C.surface },
+                  raised(C),
+                ]}>
+                <X size={17} strokeWidth={2.2} color={C.ink2} />
               </Pressable>
             </View>
           ) : null}
@@ -548,25 +506,12 @@ export default function DmThreadScreen() {
         {isPending ? (
           <ThreadSkeleton />
         ) : isError && messages.length === 0 ? (
-          <View style={styles.emptyDock}>
-            <EmptyState
-              icon={MessageCircle}
-              title="This thread didn't load"
-              description="Check your connection and try again."
-              action={<AuxButton label="Retry" onPress={refetch} variant="ghost" size="sm" />}
-            />
+          <View style={styles.noticeDock}>
+            <Notice label="This thread didn't load." action={{ label: 'Retry', onPress: refetch }} />
           </View>
         ) : visible.length === 0 ? (
-          <View style={styles.emptyDock}>
-            <EmptyState
-              icon={MessageCircle}
-              title={trimmedQuery ? 'Nothing found' : 'Say something'}
-              description={
-                trimmedQuery
-                  ? 'No loaded message matches that. Scroll further back and search again.'
-                  : `This is the beginning of your conversation with ${name}.`
-              }
-            />
+          <View style={styles.noticeDock}>
+            <Notice label={trimmedQuery ? 'Nothing found.' : 'Say something.'} />
           </View>
         ) : (
           <FlatList
@@ -589,11 +534,10 @@ export default function DmThreadScreen() {
                   figure the day separators use, so "the log ends here" and "a
                   new day starts here" read as one system rather than two.
                 */
-                <View style={styles.logStartBlock}>
+                <View style={styles.logStart}>
                   <View style={[styles.logStartRule, { backgroundColor: C.rule }]} />
-                  <Text style={[styles.logStart, { color: C.ink3 }]}>
-                    This is the beginning of your conversation with {name}.
-                  </Text>
+                  <Text style={[styles.logStartLabel, { color: C.ink3 }]}>Start</Text>
+                  <View style={[styles.logStartRule, { backgroundColor: C.rule }]} />
                 </View>
               ) : null
             }
@@ -621,7 +565,7 @@ export default function DmThreadScreen() {
             onSend={onSend}
             onAttach={openAttach}
             onRecord={openRecord}
-            placeholder={handle ? `Message ${handle}` : 'Message'}
+            placeholder="Message"
             sending={send.isPending}
             mentionPeople={mentionPeople}
             mentionScopeLabel="IN THIS CONVERSATION"
@@ -632,15 +576,14 @@ export default function DmThreadScreen() {
       {/*
         Photo, file and track are switched off here rather than in the sheet:
         the sheet only knows which *packages* this build has, and this screen is
-        what would have to service the pick. Offering a row that dead-ends on
-        tap is worse than a row that says why it is off.
+        what would have to service the pick.
       */}
       <DmAttachSheet
         visible={attachOpen}
         onClose={closeAttach}
         onSelect={onAttachSelect}
         available={{ track: false }}
-        unavailableReason={{ track: 'Sharing a track from a thread is not built yet' }}
+        unavailableReason={{ track: 'Not built yet' }}
       />
 
       <DmRecordSheet visible={recordOpen} onCancel={closeRecord} onSend={onVoiceNote} />
@@ -648,9 +591,47 @@ export default function DmThreadScreen() {
   );
 }
 
+/* ------------------------------------------------------------------- parts */
+
+/** Carries the 38px action pill to the 44px floor. */
+const NOTICE_SLOP = { top: 3, bottom: 3, left: 0, right: 0 } as const;
+
+/** One line where a log would be. Never a paragraph. */
+function Notice({
+  label,
+  action,
+}: {
+  label: string;
+  action?: { label: string; onPress: () => void };
+}) {
+  const C = useColors();
+
+  return (
+    <View style={[styles.notice, { backgroundColor: C.surface }, raised(C)]}>
+      <Text numberOfLines={2} style={[styles.noticeLabel, { color: C.ink2 }]}>
+        {label}
+      </Text>
+      {action ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={action.label}
+          onPress={action.onPress}
+          // The pill is 38 tall by design; the slop carries it to the 44 floor.
+          hitSlop={NOTICE_SLOP}
+          style={({ pressed }) => [
+            styles.noticeAction,
+            { backgroundColor: pressed ? C.cream : C.pill },
+          ]}>
+          <Text style={[styles.noticeActionLabel, { color: C.pillInk }]}>{action.label}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
 /**
  * First-load placeholder. Alternating widths and sides read as "messages are
- * coming" rather than as a broken layout. Square, like every other block here.
+ * coming" rather than as a broken layout.
  */
 function ThreadSkeleton() {
   return (
@@ -659,7 +640,7 @@ function ThreadSkeleton() {
         <View
           key={width}
           style={[styles.skeletonRow, index % 2 === 0 ? styles.alignStart : styles.alignEnd]}>
-          <Skeleton width={`${width}%`} height={38} radius={Radius} />
+          <Skeleton width={`${width}%`} height={44} radius={Radii.lg} />
         </View>
       ))}
     </View>
@@ -682,18 +663,23 @@ const styles = StyleSheet.create({
     maxWidth: 720,
     alignSelf: 'center',
   },
+
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    // 2px, because this is a boundary between two major regions of the screen.
-    borderBottomWidth: Rule.major,
+    gap: 13,
+    paddingHorizontal: Space.xl,
+    paddingTop: Space.sm,
+    paddingBottom: 14,
+    borderBottomWidth: Rule.hair,
   },
-  headerCell: {
-    width: TOUCH_TARGET,
-    height: TOUCH_TARGET,
+  tile: {
+    width: TILE,
+    height: TILE,
     flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: Radii.sm,
   },
   dim: {
     opacity: 0.6,
@@ -704,83 +690,121 @@ const styles = StyleSheet.create({
     minHeight: TOUCH_TARGET,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 9,
-    paddingHorizontal: 10,
-  },
-  avatarWell: {
-    flexShrink: 0,
-  },
-  dot: {
-    position: 'absolute',
-    right: -2,
-    bottom: -2,
-    width: PRESENCE_DOT,
-    height: PRESENCE_DOT,
-    borderWidth: Rule.major,
+    gap: 13,
   },
   identityText: {
     flex: 1,
     minWidth: 0,
   },
   name: {
-    ...Type.heading(13),
-    letterSpacing: tracking(13, 0.01),
+    fontFamily: Fonts.semibold,
+    fontSize: 15.5,
+    lineHeight: 20,
+    letterSpacing: tracking(15.5, -0.01),
+  },
+  statusLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    marginTop: 2,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: Radii.pill,
   },
   status: {
-    ...Type.label(10),
-    letterSpacing: tracking(10, 0.08),
+    fontFamily: Fonts.semibold,
+    fontSize: 11.5,
+    lineHeight: 15,
   },
+
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderBottomWidth: Rule.hair,
+    gap: 11,
+    paddingHorizontal: Space.lg,
+    paddingVertical: Space.md,
+  },
+  searchWell: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: TOUCH_TARGET,
+    borderRadius: Radii.md,
   },
   searchInput: {
     flex: 1,
     minWidth: 0,
-    height: 46,
-    paddingHorizontal: Space.md,
-    ...Type.body(16),
+    height: TOUCH_TARGET,
+    paddingHorizontal: 15,
+    fontFamily: Fonts.regular,
+    fontSize: 14.5,
   },
   matchCount: {
     // A match count measures. Tabular figures.
     ...readout(12),
-    paddingHorizontal: Space.sm,
+    paddingRight: Space.md,
   },
-  searchClose: {
-    width: TOUCH_TARGET,
-    height: TOUCH_TARGET,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+
   listContent: {
-    paddingVertical: Space.md,
-  },
-  emptyDock: {
-    flex: 1,
-    justifyContent: 'center',
+    paddingHorizontal: Space.lg,
+    paddingVertical: Space.lg,
   },
   olderLoader: {
     paddingVertical: Space.lg,
     alignItems: 'center',
   },
-  logStartBlock: {
-    paddingVertical: Space.lg,
+  logStart: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: Space.md,
+    paddingVertical: Space.lg,
   },
   logStartRule: {
+    flex: 1,
     height: Rule.hair,
-    marginHorizontal: Space.md,
   },
-  logStart: {
-    ...Type.body(12),
-    textAlign: 'center',
+  logStartLabel: {
+    ...Type.label(10.5),
+    letterSpacing: tracking(10.5, 0.12),
+  },
+
+  noticeDock: {
+    flex: 1,
+    justifyContent: 'center',
     paddingHorizontal: Space.xl,
   },
+  notice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.md,
+    minHeight: TOUCH_TARGET + Space.xs,
+    padding: 15,
+    borderRadius: Radii.lg,
+  },
+  noticeLabel: {
+    flex: 1,
+    minWidth: 0,
+    ...Type.body(13.5),
+  },
+  noticeAction: {
+    minHeight: 38,
+    justifyContent: 'center',
+    paddingHorizontal: Space.lg,
+    borderRadius: Radii.sm - 1,
+  },
+  noticeActionLabel: {
+    fontFamily: Fonts.semibold,
+    fontSize: 12.5,
+    lineHeight: 16,
+  },
+
   skeleton: {
     flex: 1,
     justifyContent: 'flex-end',
-    paddingHorizontal: Space.md,
+    paddingHorizontal: Space.lg,
     paddingBottom: Space.lg,
     gap: Space.md,
   },

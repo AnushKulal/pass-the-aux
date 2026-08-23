@@ -10,7 +10,12 @@ import {
   type ReactNode,
 } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeInUp, FadeOutUp, useReducedMotion } from 'react-native-reanimated';
+import Animated, {
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useColors } from '@/lib/theme-context';
@@ -144,11 +149,29 @@ function ToastRow({
   const Icon = ICONS[item.variant];
   const tint = tintFor(item.variant, C);
 
+  /*
+    Driven by a shared value from an effect, NOT `entering={FadeInUp…}`.
+    Reanimated marks an entering view `visibility: hidden` until its animation
+    runs, and on react-native-web that animation never fires — which would make
+    EVERY toast in the app invisible on web while reporting correct layout.
+
+    `exiting` went with it: a removal the layout system never animates can hold
+    the node in the tree forever. The row is filtered out of provider state on
+    dismiss, so React unmounts it either way.
+  */
+  const enter = useSharedValue(0);
+
+  useEffect(() => {
+    enter.value = reduced ? 1 : withTiming(1, { duration: Duration.enter });
+  }, [reduced, enter]);
+
+  const enterStyle = useAnimatedStyle(() => ({
+    opacity: enter.value,
+    transform: [{ translateY: (1 - enter.value) * -8 }],
+  }));
+
   return (
-    <Animated.View
-      entering={reduced ? undefined : FadeInUp.duration(Duration.enter)}
-      exiting={reduced ? undefined : FadeOutUp.duration(Duration.press)}
-      style={styles.rowWrap}>
+    <Animated.View style={[styles.rowWrap, enterStyle]}>
       <Pressable
         accessibilityRole="alert"
         accessibilityLabel={`${ROLES[item.variant]}. ${item.message}`}

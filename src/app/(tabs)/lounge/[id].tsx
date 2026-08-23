@@ -1,34 +1,36 @@
 /**
- * A lounge: three views of one community.
+ * A lounge. Built from design/v2/aux-v2.dc.html, screen "Lounge detail".
  *
- * README §8. The header names it, counts it, and hands out the way in; the tabs
- * split it into SESSIONS (what is playing), CHAT (what everyone is saying) and
- * MEMBERS (who is here). A non-member gets "Join to see inside" rather than an
- * error — RLS hiding the roster is not a failure, it is the door being shut.
+ * One scroller, not three tabs: the tile and the name, the way in, whatever is
+ * live right now, then the members. Chat is a sheet off the same screen so the
+ * roster stays the thing you land on.
+ *
+ * A non-member gets "Join to see inside" rather than an error — RLS hiding the
+ * roster is not a failure, it is the door being shut.
  */
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
-import { ArrowLeft, MoreVertical } from 'lucide-react-native';
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  ArrowLeft,
+  ChevronRight,
+  Copy,
+  MessageCircle,
+  MoreHorizontal,
+  Play,
+  X,
+} from 'lucide-react-native';
+import { memo, useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
   Modal,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
   View,
   type ListRenderItem,
-  type TextStyle,
 } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ChatComposer } from '@/components/chat/chat-composer';
@@ -36,7 +38,7 @@ import { ChatList } from '@/components/chat/chat-list';
 import { LoungeMenuModal } from '@/components/lounge/lounge-menu-modal';
 import { MemberRow } from '@/components/lounge/member-row';
 import { SessionCard } from '@/components/lounge/session-card';
-import { Screen, Skeleton, useToast } from '@/components/ui';
+import { LivePulse, Screen, Skeleton, useToast } from '@/components/ui';
 import { shareInviteCode } from '@/features/lounges/invite';
 import {
   loungeErrorMessage,
@@ -49,38 +51,26 @@ import {
   useLoungeSessions,
   useStartSession,
   type LoungeMemberEntry,
-  type LoungeSessionSummary,
 } from '@/features/lounges/queries';
 import { supabase } from '@/lib/supabase';
 import {
-  Duration,
-  PointerEvents,
-  Radius,
-  Rule,
+  Fonts,
+  Radii,
+  Sheet as SheetMetrics,
   Space,
   TOUCH_TARGET,
   Type,
-  ZIndex,
+  dropped,
+  pressedSoft,
+  raised,
   tracking,
 } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
-type LoungeTab = 'sessions' | 'chat' | 'members';
-
-const TABS: { key: LoungeTab; label: string }[] = [
-  { key: 'sessions', label: 'SESSIONS' },
-  { key: 'chat', label: 'CHAT' },
-  { key: 'members', label: 'MEMBERS' },
-];
-
-const CODE_SIZE = 32;
-const CODE_TRACKING = tracking(CODE_SIZE, 0.14);
-
-/** `Type.readout` hands back a readonly fontVariant tuple; TextStyle wants a mutable one. */
-const readout = (size: number): TextStyle => ({
-  ...Type.readout(size),
-  fontVariant: ['tabular-nums'],
-});
+/** The artboard's hero tile. */
+const ART = 96;
+/** The chrome squares in the header row. */
+const TILE = 38;
 
 /**
  * Deleting a lounge lives here rather than in `@/features/lounges/queries`
@@ -119,8 +109,7 @@ export default function LoungeDetailScreen() {
   const toast = useToast();
   const userId = useCurrentUserId();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [inviteOpen, setInviteOpen] = useState(false);
-  const [tab, setTab] = useState<LoungeTab>('sessions');
+  const [chatOpen, setChatOpen] = useState(false);
 
   const detail = useLounge(loungeId);
   const lounge = detail.data?.lounge ?? null;
@@ -154,6 +143,8 @@ export default function LoungeDetailScreen() {
       toast.show(loungeErrorMessage(error, 'Could not share the invite.'), 'error');
     }
   }, [lounge, toast]);
+
+  const shareInvite = useCallback(() => void handleShare(), [handleShare]);
 
   const handleJoin = useCallback(() => {
     join.mutate(loungeId, {
@@ -210,8 +201,13 @@ export default function LoungeDetailScreen() {
 
   const openInvite = useCallback(() => {
     setMenuOpen(false);
-    setInviteOpen(true);
-  }, []);
+    void handleShare();
+  }, [handleShare]);
+
+  const openMenu = useCallback(() => setMenuOpen(true), []);
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
+  const openChat = useCallback(() => setChatOpen(true), []);
+  const closeChat = useCallback(() => setChatOpen(false), []);
 
   const renderMember = useCallback<ListRenderItem<LoungeMemberEntry>>(
     ({ item }) => (
@@ -232,35 +228,135 @@ export default function LoungeDetailScreen() {
     [openProfile, userId],
   );
 
-  const renderSession = useCallback<ListRenderItem<LoungeSessionSummary>>(
-    ({ item }) => (
-      <SessionCard
-        name={item.room.name}
-        hostName={item.hostName}
-        listeners={item.listeners}
-        isPlaying={item.room.is_playing}
-        nowPlaying={item.nowPlaying}
-        onPress={() => router.push(`/room/${item.room.id}`)}
-      />
-    ),
-    [],
-  );
-
   const memberCount = members.data?.length ?? null;
-  const liveCount = sessions.data?.length ?? 0;
+  const liveSessions = useMemo(() => sessions.data ?? [], [sessions.data]);
 
-  const chips = useMemo(
-    () => [
-      {
-        key: 'members',
-        text: memberCount === null ? 'MEMBERS' : `${memberCount} MEMBERS`,
-        live: false,
-      },
-      { key: 'privacy', text: lounge?.is_public ? 'PUBLIC' : 'PRIVATE', live: false },
-      { key: 'live', text: liveCount > 0 ? `${liveCount} LIVE` : 'NO SESSIONS', live: liveCount > 0 },
-    ],
-    [lounge?.is_public, liveCount, memberCount],
-  );
+  const header = useMemo(() => {
+    if (!lounge) return null;
+
+    return (
+      <View>
+        <View style={styles.headerRow}>
+          <Tile icon={ArrowLeft} label="Go back" onPress={handleBack} />
+          <View style={styles.headerGap} />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Invite code ${lounge.invite_code}. Share it.`}
+            onPress={shareInvite}
+            hitSlop={4}
+            style={({ pressed }) => [
+              styles.code,
+              { backgroundColor: C.surface },
+              raised(C),
+              pressed ? styles.dim : null,
+            ]}>
+            <Text style={[styles.codeText, { color: C.ink2 }]}>{lounge.invite_code}</Text>
+            <Copy size={13} strokeWidth={2} color={C.ink2} />
+          </Pressable>
+          <Tile icon={MoreHorizontal} label="More options" onPress={openMenu} />
+        </View>
+
+        <View style={styles.hero}>
+          <View
+            style={[
+              styles.art,
+              { backgroundColor: C.artwork },
+              { boxShadow: [{ offsetX: 0, offsetY: 16, blurRadius: 40, color: C.glow }] },
+            ]}>
+            <Text style={[styles.artTag, { color: C.artInk }]}>{tagFor(lounge.name)}</Text>
+          </View>
+
+          <View style={styles.heroMeta}>
+            <Text style={[styles.role, { color: C.ink3 }]}>{role ?? 'Member'}</Text>
+            <Text numberOfLines={2} style={[styles.name, { color: C.ink }]}>
+              {lounge.name}
+            </Text>
+            {lounge.description ? (
+              <Text numberOfLines={3} style={[styles.description, { color: C.ink2 }]}>
+                {lounge.description}
+              </Text>
+            ) : null}
+          </View>
+        </View>
+
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Start a session"
+          accessibilityState={{ disabled: startSession.isPending, busy: startSession.isPending }}
+          disabled={startSession.isPending}
+          onPress={handleStartSession}
+          style={({ pressed }) => [
+            styles.start,
+            { backgroundColor: C.pill },
+            dropped(C, 'lg'),
+            pressed ? styles.held : null,
+            startSession.isPending ? styles.dim : null,
+          ]}>
+          {startSession.isPending ? (
+            <ActivityIndicator size="small" color={C.pillInk} />
+          ) : (
+            <Play size={17} strokeWidth={2} color={C.pillInk} fill={C.pillInk} />
+          )}
+          <Text style={[styles.startLabel, { color: C.pillInk }]}>Start a session</Text>
+        </Pressable>
+
+        <Row icon={MessageCircle} label="Chat" onPress={openChat} />
+
+        <View style={styles.sectionHead}>
+          {liveSessions.length > 0 ? <LivePulse size={6} /> : null}
+          <Text
+            style={[
+              styles.sectionKicker,
+              { color: liveSessions.length > 0 ? C.liveText : C.ink3 },
+            ]}>
+            {liveSessions.length > 0 ? 'Live sessions' : 'Sessions'}
+          </Text>
+        </View>
+
+        {sessions.isPending ? (
+          <View style={styles.sessionSkeletons}>
+            <Skeleton width="100%" height={86} radius={Radii.xl} />
+            <Skeleton width="100%" height={86} radius={Radii.xl} />
+          </View>
+        ) : liveSessions.length === 0 ? (
+          <Text style={[styles.quiet, { color: C.ink2 }]}>Nobody is on aux right now.</Text>
+        ) : (
+          <View style={styles.sessions}>
+            {liveSessions.map((entry) => (
+              <SessionCard
+                key={entry.room.id}
+                name={entry.room.name}
+                hostName={entry.hostName}
+                listeners={entry.listeners}
+                isPlaying={entry.room.is_playing}
+                nowPlaying={entry.nowPlaying}
+                onPress={() => router.push(`/room/${entry.room.id}`)}
+              />
+            ))}
+          </View>
+        )}
+
+        <View style={styles.sectionHead}>
+          <Text style={[styles.sectionKicker, { color: C.ink3 }]}>
+            {memberCount === null ? 'Members' : `Members · ${memberCount}`}
+          </Text>
+        </View>
+      </View>
+    );
+  }, [
+    C,
+    handleBack,
+    handleStartSession,
+    liveSessions,
+    lounge,
+    memberCount,
+    openChat,
+    openMenu,
+    role,
+    sessions.isPending,
+    shareInvite,
+    startSession.isPending,
+  ]);
 
   return (
     <Screen padded={false}>
@@ -268,245 +364,59 @@ export default function LoungeDetailScreen() {
         <DetailSkeleton onBack={handleBack} />
       ) : detail.isError ? (
         <Marker
-          kicker="NO ANSWER"
           title="Could not load this lounge"
           body={loungeErrorMessage(detail.error, 'Check your connection and try again.')}
           onBack={handleBack}
-          actions={
-            <ActionCell label="TRY AGAIN" tone="accentOutline" onPress={() => void detail.refetch()} />
-          }
+          actionLabel="Try again"
+          onAction={() => void detail.refetch()}
         />
       ) : !lounge ? (
         /*
           RLS hid the row. Either the lounge is private and we are not a member,
-          or it no longer exists — indistinguishable from here, so the copy
-          covers both without accusing the user of a bad link.
+          or it no longer exists — indistinguishable from here.
         */
         <Marker
-          kicker="NOT A MEMBER"
           title="Join to see inside"
-          body="This lounge is private, or it no longer exists. Redeem its invite code to get in."
+          body="This lounge is private, or it no longer exists."
           onBack={handleBack}
-          actions={
-            <ActionCell
-              label="ENTER AN INVITE CODE"
-              tone="accentOutline"
-              onPress={() => router.replace('/explore')}
-            />
-          }
+          actionLabel="Enter an invite code"
+          onAction={() => router.replace('/explore')}
         />
       ) : !isMember ? (
         <Marker
-          kicker="NOT A MEMBER"
           title="Join to see inside"
-          body={
-            lounge.description ||
-            'Sessions, chat and the member list are only visible to members. Find it in Explore, or enter its 8-character invite code.'
-          }
+          body={lounge.description || 'Sessions, chat and members are for members only.'}
           onBack={handleBack}
-          actions={
-            <>
-              <ActionCell
-                label={`JOIN ${lounge.name.toUpperCase()}`}
-                tone="accent"
-                busy={join.isPending}
-                onPress={handleJoin}
-              />
-              <ActionCell
-                label="FIND A LOUNGE"
-                tone="accentOutline"
-                onPress={() => router.replace('/explore')}
-              />
-            </>
-          }
+          actionLabel={`Join ${lounge.name}`}
+          busy={join.isPending}
+          onAction={handleJoin}
         />
       ) : (
-        <View style={styles.fill}>
-          {/* ---------------------------------------------------- header */}
-          <View style={styles.header}>
-            <View style={styles.headerRow}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Go back"
-                onPress={handleBack}
-                style={({ pressed }) => [styles.iconTarget, styles.backTarget, pressed && styles.dim]}>
-                <ArrowLeft size={20} color={C.ink} strokeWidth={2} />
-              </Pressable>
-
-              <View style={styles.headerText}>
-                <Text numberOfLines={1} style={[styles.loungeName, { color: C.ink }]}>
-                  {lounge.name}
-                </Text>
-
-                <View style={styles.chips}>
-                  {chips.map((chip) => (
-                    <Text
-                      key={chip.key}
-                      style={[
-                        chip.live ? styles.chipLive : styles.chip,
-                        { color: chip.live ? C.liveText : C.ink3 },
-                      ]}>
-                      {chip.text}
-                    </Text>
-                  ))}
-                </View>
-              </View>
-
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Invite people"
-                onPress={openInvite}
-                style={({ pressed }) => [
-                  styles.invite,
-                  { borderColor: pressed ? C.live : C.rule3 },
-                ]}>
-                <Text style={[styles.inviteLabel, { color: C.ink }]}>INVITE</Text>
-              </Pressable>
-
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="More options"
-                onPress={() => setMenuOpen(true)}
-                style={({ pressed }) => [styles.iconTarget, pressed && styles.dim]}>
-                <MoreVertical size={19} color={C.ink2} strokeWidth={2} />
-              </Pressable>
-            </View>
-
-            {/*
-              The tabs' own bottom borders ARE the header's 2px section rule —
-              the active cell simply paints its segment accent. Nothing is
-              absolutely positioned, so nothing can be clipped on Android.
-            */}
-            <View accessibilityRole="tablist" style={styles.tabsRow}>
-              <View style={[styles.tabEdge, { borderBottomColor: C.rule }]} />
-              {TABS.map((entry, index) => {
-                const active = tab === entry.key;
-                return (
-                  <View key={entry.key} style={styles.tabWrap}>
-                    {/* 8px of dead rule between adjacent 44px targets, per the
-                        touch-target floor — the rule itself never breaks. */}
-                    {index > 0 ? (
-                      <View style={[styles.tabGap, { borderBottomColor: C.rule }]} />
-                    ) : null}
-                    <Pressable
-                      accessibilityRole="tab"
-                      accessibilityState={{ selected: active }}
-                      accessibilityLabel={entry.label}
-                      onPress={() => setTab(entry.key)}
-                      style={[styles.tab, { borderBottomColor: active ? C.live : C.rule }]}>
-                      <Text style={[styles.tabLabel, { color: active ? C.ink : C.ink2 }]}>
-                        {entry.label}
-                      </Text>
-                    </Pressable>
-                  </View>
-                );
-              })}
-              <View style={[styles.tabFill, { borderBottomColor: C.rule }]} />
-            </View>
-          </View>
-
-          {/* ---------------------------------------------------- panels */}
-          <Panel key={tab}>
-            {tab === 'sessions' ? (
-              <FlatList
-                data={sessions.data ?? []}
-                keyExtractor={sessionKey}
-                renderItem={renderSession}
-                style={styles.fill}
-                contentContainerStyle={styles.listContent}
-                showsVerticalScrollIndicator={false}
-                ListEmptyComponent={
-                  sessions.isPending ? (
-                    <View style={styles.blockSkeletons}>
-                      <Skeleton width="100%" height={88} radius={Radius} />
-                      <Skeleton width="100%" height={88} radius={Radius} />
-                    </View>
-                  ) : (
-                    <View style={styles.emptyBlock}>
-                      <Text style={[styles.emptyKicker, { color: C.ink3 }]}>NO SESSIONS</Text>
-                      <Text style={[styles.emptyTitle, { color: C.ink }]}>
-                        Nobody is on aux right now
-                      </Text>
-                      <Text style={[styles.note, { color: C.ink2 }]}>
-                        Start a Session and pick the first track.
-                      </Text>
-                    </View>
-                  )
-                }
-                ListFooterComponent={
-                  <View style={styles.footerBlock}>
-                    <ActionCell
-                      label="START A SESSION"
-                      tone="accentOutline"
-                      busy={startSession.isPending}
-                      onPress={handleStartSession}
-                    />
-                    <Text style={[styles.note, { color: C.ink3 }]}>
-                      Anyone in this lounge can start one. You&apos;ll be on aux.
-                    </Text>
-                  </View>
-                }
-              />
-            ) : tab === 'chat' ? (
-              /*
-                ChatList and ChatComposer are mounted directly rather than
-                through `LoungeChat` so the log can hand every avatar and name
-                a profile target — the wrapper has no prop for it. Mounted only
-                while selected: the subscription's SUBSCRIBED handler replays
-                whatever landed while it was torn down.
-              */
-              <View style={styles.fill}>
-                <ChatList
-                  loungeId={loungeId}
-                  roomId={null}
-                  emptyTitle="No messages yet"
-                  emptyDescription="This is the lounge — say hello, or drop a track everyone should hear."
-                  onOpenProfile={openProfile}
-                />
-                <ChatComposer
-                  loungeId={loungeId}
-                  roomId={null}
-                  placeholder={`Message ${lounge.name}`}
-                />
+        <FlatList
+          data={members.data ?? []}
+          keyExtractor={memberKey}
+          renderItem={renderMember}
+          style={styles.fill}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          ListHeaderComponent={header}
+          ListEmptyComponent={
+            members.isPending ? (
+              <View style={styles.memberSkeletons}>
+                <Skeleton width="100%" height={54} radius={Radii.md} />
+                <Skeleton width="100%" height={54} radius={Radii.md} />
+                <Skeleton width="100%" height={54} radius={Radii.md} />
               </View>
             ) : (
-              <FlatList
-                data={members.data ?? []}
-                keyExtractor={memberKey}
-                renderItem={renderMember}
-                style={styles.fill}
-                contentContainerStyle={styles.listContent}
-                showsVerticalScrollIndicator={false}
-                ListEmptyComponent={
-                  members.isPending ? (
-                    <View style={styles.blockSkeletons}>
-                      <Skeleton width="100%" height={56} radius={Radius} />
-                      <Skeleton width="100%" height={56} radius={Radius} />
-                      <Skeleton width="100%" height={56} radius={Radius} />
-                    </View>
-                  ) : (
-                    <View style={styles.emptyBlock}>
-                      <Text style={[styles.emptyKicker, { color: C.ink3 }]}>EMPTY</Text>
-                      <Text style={[styles.emptyTitle, { color: C.ink }]}>No members listed</Text>
-                    </View>
-                  )
-                }
-                ListFooterComponent={
-                  <View style={styles.footerBlock}>
-                    <Text style={[styles.note, { color: C.ink3 }]}>
-                      Roles are enforced in the database, not the app.
-                    </Text>
-                  </View>
-                }
-              />
-            )}
-          </Panel>
-        </View>
+              <Text style={[styles.quiet, { color: C.ink2 }]}>No members listed.</Text>
+            )
+          }
+        />
       )}
 
       <LoungeMenuModal
         visible={menuOpen}
-        onClose={() => setMenuOpen(false)}
+        onClose={closeMenu}
         isOwner={isOwner}
         isLeaving={leave.isPending}
         onLeave={handleLeave}
@@ -518,12 +428,12 @@ export default function LoungeDetailScreen() {
         isDeleting={remove.isPending}
       />
 
-      <InviteSheet
-        visible={inviteOpen && lounge !== null}
+      <ChatSheet
+        visible={chatOpen && lounge !== null}
+        loungeId={loungeId}
         loungeName={lounge?.name ?? ''}
-        code={lounge?.invite_code ?? ''}
-        onClose={() => setInviteOpen(false)}
-        onShare={() => void handleShare()}
+        onClose={closeChat}
+        onOpenProfile={openProfile}
       />
     </Screen>
   );
@@ -533,256 +443,222 @@ function memberKey(item: LoungeMemberEntry): string {
   return item.userId;
 }
 
-function sessionKey(item: LoungeSessionSummary): string {
-  return item.room.id;
+/** The artboard's three-letter mark: BMT, 3AM, VNL. */
+function tagFor(name: string): string {
+  const letters = name.replace(/[^a-z0-9]/gi, '');
+  return (letters.slice(0, 3) || '?').toUpperCase();
 }
 
 /* ------------------------------------------------------------------ parts */
 
-/**
- * Every screen, tab and mode enters with translateY(8px) → 0 plus a fade over
- * 280ms, and collapses to nothing under reduced motion. Re-keying this on the
- * active tab is what replays it per panel.
- */
-function Panel({ children }: { children: ReactNode }) {
-  const reduced = useReducedMotion();
-  const t = useSharedValue(reduced ? 1 : 0);
-
-  useEffect(() => {
-    if (reduced) {
-      t.value = 1;
-      return;
-    }
-    t.value = withTiming(1, { duration: Duration.enter });
-  }, [reduced, t]);
-
-  const style = useAnimatedStyle(() => ({
-    opacity: t.value,
-    transform: [{ translateY: (1 - t.value) * 8 }],
-  }));
-
-  return <Animated.View style={[styles.fill, style]}>{children}</Animated.View>;
-}
-
-type Tone = 'accent' | 'accentOutline' | 'outline';
-
-/**
- * A flat action cell: no radius, no shadow, 48px tall, label in the heading
- * weight. `accent` fills, `accentOutline` borders — the artboard reserves the
- * fill for the single most consequential action on any given screen.
- */
-function ActionCell({
+/** The raised card square the artboard puts every piece of chrome in. */
+const Tile = memo(function Tile({
+  icon: Icon,
   label,
-  tone,
   onPress,
-  busy = false,
-  disabled = false,
 }: {
+  icon: typeof ArrowLeft;
   label: string;
-  tone: Tone;
   onPress: () => void;
-  busy?: boolean;
-  disabled?: boolean;
 }) {
   const C = useColors();
-  const blocked = busy || disabled;
-
-  const fill = tone === 'accent';
-  const border = tone === 'accent' ? 'transparent' : tone === 'accentOutline' ? C.live : C.rule2;
-  const ink = fill ? C.onLive : tone === 'accentOutline' ? C.liveText : C.ink;
 
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityState={{ disabled: blocked, busy }}
-      disabled={blocked}
       onPress={onPress}
+      hitSlop={(TOUCH_TARGET - TILE) / 2}
       style={({ pressed }) => [
-        styles.actionCell,
-        {
-          borderColor: border,
-          backgroundColor: fill
-            ? pressed
-              ? C.liveText
-              : C.live
-            : pressed
-              ? C.liveWash
-              : 'transparent',
-        },
-        blocked && styles.dim,
+        styles.tile,
+        { backgroundColor: C.surface },
+        raised(C),
+        pressed ? styles.dim : null,
       ]}>
-      {busy ? <ActivityIndicator size="small" color={ink} /> : null}
-      <Text numberOfLines={1} style={[styles.actionLabel, { color: ink }]}>
-        {label}
-      </Text>
+      <Icon size={18} strokeWidth={2.2} color={C.ink} />
     </Pressable>
   );
-}
+});
 
-/**
- * The full-screen states: a kicker, a display line, a paragraph and whatever
- * you can do about it. Left-aligned rather than centred — this direction has no
- * centred illustrations, and a left column keeps the same measure as the rest
- * of the app.
- */
-function Marker({
-  kicker,
-  title,
-  body,
-  actions,
-  onBack,
+/** A raised row: recessed icon well, label, chevron. */
+const Row = memo(function Row({
+  icon: Icon,
+  label,
+  onPress,
 }: {
-  kicker: string;
-  title: string;
-  body: string;
-  actions?: ReactNode;
-  onBack: () => void;
+  icon: typeof MessageCircle;
+  label: string;
+  onPress: () => void;
 }) {
   const C = useColors();
 
   return (
-    <View style={styles.fill}>
-      <View style={styles.markerBar}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-          onPress={onBack}
-          style={({ pressed }) => [styles.iconTarget, styles.backTarget, pressed && styles.dim]}>
-          <ArrowLeft size={20} color={C.ink} strokeWidth={2} />
-        </Pressable>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.row,
+        { backgroundColor: C.surface },
+        raised(C),
+        pressed ? styles.dim : null,
+      ]}>
+      <View style={[styles.rowWell, { backgroundColor: C.bgRecessed }, pressedSoft(C)]}>
+        <Icon size={17} strokeWidth={2} color={C.ink2} />
       </View>
-
-      <View style={styles.markerBody}>
-        <Text style={[styles.emptyKicker, { color: C.ink3 }]}>{kicker}</Text>
-        <Text style={[styles.markerTitle, { color: C.ink }]}>{title}</Text>
-        <Text style={[styles.markerText, { color: C.ink2 }]}>{body}</Text>
-        {actions ? <View style={styles.markerActions}>{actions}</View> : null}
-      </View>
-    </View>
+      <Text style={[styles.rowLabel, { color: C.ink }]}>{label}</Text>
+      <ChevronRight size={17} strokeWidth={2} color={C.ink3} />
+    </Pressable>
   );
-}
+});
 
 /**
- * The invite code, on its own, in a 2px accent frame.
+ * The lounge log, as a sheet.
  *
- * This is the clearest readout moment in the app: a community starts as eight
- * characters somebody reads out over a room, so they get the extrabold face at
- * 32px, tabular figures and .14em of tracking. Accent is exactly right here —
- * a code is *joinable*.
+ * `ChatList` and `ChatComposer` are mounted directly rather than through
+ * `LoungeChat` so the log can hand every avatar and name a profile target —
+ * the wrapper has no prop for it. Mounted only while open: the subscription's
+ * SUBSCRIBED handler replays whatever landed while it was torn down.
  */
-function InviteSheet({
+function ChatSheet({
   visible,
+  loungeId,
   loungeName,
-  code,
   onClose,
-  onShare,
+  onOpenProfile,
 }: {
   visible: boolean;
+  loungeId: string;
   loungeName: string;
-  code: string;
   onClose: () => void;
-  onShare: () => void;
+  onOpenProfile: (userId: string) => void;
 }) {
   const C = useColors();
   const insets = useSafeAreaInsets();
 
-  const reduced = useReducedMotion();
-  const rise = useSharedValue(0);
-
-  useEffect(() => {
-    if (reduced) {
-      rise.value = visible ? 1 : 0;
-      return;
-    }
-    rise.value = withTiming(visible ? 1 : 0, {
-      duration: visible ? Duration.sheet : Duration.scrim,
-    });
-  }, [visible, reduced, rise]);
-
-  const sheetStyle = useAnimatedStyle(() => ({
-    opacity: rise.value,
-    transform: [{ translateY: (1 - rise.value) * 16 }],
-  }));
-
   return (
     <Modal
       visible={visible}
+      animationType="slide"
       transparent
-      animationType="fade"
-      onRequestClose={onClose}
-      statusBarTranslucent>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Dismiss"
-        onPress={onClose}
-        style={[styles.scrim, { backgroundColor: C.scrim }]}
-      />
+      statusBarTranslucent
+      onRequestClose={onClose}>
+      <View style={[styles.scrim, { backgroundColor: C.scrim }]}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Close"
+          onPress={onClose}
+          style={styles.scrimTap}
+        />
 
-      <View style={[styles.sheetDock, PointerEvents.boxNone]}>
-        <Animated.View
+        <View
           style={[
             styles.sheet,
-            { backgroundColor: C.bg, borderTopColor: C.live, paddingBottom: insets.bottom },
-            sheetStyle,
+            { backgroundColor: C.bg, paddingBottom: insets.bottom },
+            dropped(C, 'lg'),
           ]}>
-          <View style={[styles.sheetHead, { borderBottomColor: C.rule }]}>
-            <Text style={[styles.sheetTitle, { color: C.ink }]}>INVITE CODE</Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Close"
-              onPress={onClose}
-              style={({ pressed }) => [styles.sheetClose, pressed && styles.dim]}>
-              <Text style={[styles.sheetCloseLabel, { color: C.ink2 }]}>CLOSE</Text>
-            </Pressable>
+          <View style={styles.grabberSlot}>
+            <View style={[styles.grabber, { backgroundColor: C.ink3 }]} />
           </View>
 
-          <View style={styles.sheetBody}>
-            <Text style={[styles.markerText, { color: C.ink2 }]}>
-              Eight characters. Anyone with it can join {loungeName} — public or not.
+          <View style={styles.sheetHead}>
+            <Text numberOfLines={1} style={[styles.sheetTitle, { color: C.ink }]}>
+              {loungeName}
             </Text>
-
-            <View style={[styles.codeFrame, { borderColor: C.live }]}>
-              <Text selectable style={[styles.code, { color: C.liveText }]}>
-                {code}
-              </Text>
-            </View>
-
-            <ActionCell label="SHARE INVITE CODE" tone="accent" onPress={onShare} />
-            <Text style={[styles.note, { color: C.ink3 }]}>
-              {Platform.OS === 'web'
-                ? 'Copies the code to your clipboard.'
-                : 'Opens your share sheet with the code in the message.'}
-            </Text>
+            <Tile icon={X} label="Close" onPress={onClose} />
           </View>
-        </Animated.View>
+
+          <View style={styles.fill}>
+            <ChatList
+              loungeId={loungeId}
+              roomId={null}
+              emptyTitle="No messages yet"
+              emptyDescription="Say hello, or drop a track everyone should hear."
+              onOpenProfile={onOpenProfile}
+            />
+            <ChatComposer
+              loungeId={loungeId}
+              roomId={null}
+              placeholder={`Message ${loungeName}`}
+              bottomInset={0}
+            />
+          </View>
+        </View>
       </View>
     </Modal>
   );
 }
 
-/** Carries its own back target: a lounge that never answers must still be exitable. */
-function DetailSkeleton({ onBack }: { onBack: () => void }) {
+/** The full-screen states: a title, one line, and whatever you can do about it. */
+function Marker({
+  title,
+  body,
+  onBack,
+  actionLabel,
+  onAction,
+  busy = false,
+}: {
+  title: string;
+  body: string;
+  onBack: () => void;
+  actionLabel: string;
+  onAction: () => void;
+  busy?: boolean;
+}) {
   const C = useColors();
 
   return (
     <View style={styles.fill}>
       <View style={styles.markerBar}>
+        <Tile icon={ArrowLeft} label="Go back" onPress={onBack} />
+      </View>
+
+      <View style={styles.markerBody}>
+        <Text style={[styles.markerTitle, { color: C.ink }]}>{title}</Text>
+        <Text style={[styles.description, { color: C.ink2 }]}>{body}</Text>
+
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Go back"
-          onPress={onBack}
-          style={({ pressed }) => [styles.iconTarget, styles.backTarget, pressed && styles.dim]}>
-          <ArrowLeft size={20} color={C.ink} strokeWidth={2} />
+          accessibilityLabel={actionLabel}
+          accessibilityState={{ disabled: busy, busy }}
+          disabled={busy}
+          onPress={onAction}
+          style={({ pressed }) => [
+            styles.start,
+            styles.markerAction,
+            { backgroundColor: C.pill },
+            dropped(C, 'lg'),
+            pressed ? styles.held : null,
+            busy ? styles.dim : null,
+          ]}>
+          {busy ? <ActivityIndicator size="small" color={C.pillInk} /> : null}
+          <Text numberOfLines={1} style={[styles.startLabel, { color: C.pillInk }]}>
+            {actionLabel}
+          </Text>
         </Pressable>
+      </View>
+    </View>
+  );
+}
+
+/** Carries its own back target: a lounge that never answers must still be exitable. */
+function DetailSkeleton({ onBack }: { onBack: () => void }) {
+  return (
+    <View style={styles.fill}>
+      <View style={styles.markerBar}>
+        <Tile icon={ArrowLeft} label="Go back" onPress={onBack} />
       </View>
 
       <View accessibilityLabel="Loading this lounge" style={styles.detailSkeleton}>
-        <Skeleton width="60%" height={26} radius={Radius} />
-        <Skeleton width="40%" height={12} radius={Radius} />
-        <Skeleton width="100%" height={Rule.major} radius={Radius} />
-        <Skeleton width="100%" height={88} radius={Radius} />
-        <Skeleton width="100%" height={88} radius={Radius} />
+        <View style={styles.skeletonHero}>
+          <Skeleton width={ART} height={ART} radius={Radii.xl} />
+          <View style={styles.skeletonMeta}>
+            <Skeleton width="70%" height={24} radius={Radii.sm} />
+            <Skeleton width="50%" height={13} radius={Radii.sm} />
+          </View>
+        </View>
+        <Skeleton width="100%" height={56} radius={Radii.button} />
+        <Skeleton width="100%" height={86} radius={Radii.xl} />
       </View>
     </View>
   );
@@ -795,226 +671,242 @@ const styles = StyleSheet.create({
   dim: {
     opacity: 0.6,
   },
+  held: {
+    opacity: 0.9,
+  },
 
   /* header */
-  header: {
-    paddingTop: 13,
-  },
   headerRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: Space.sm,
-    paddingHorizontal: Space.md,
+    alignItems: 'center',
+    gap: Space.sm + 1,
+    paddingHorizontal: Space.xxl,
+    paddingTop: Space.md,
   },
-  headerText: {
+  headerGap: {
     flex: 1,
-    minWidth: 0,
-    // Optically drops the name onto the same line as the 44px back target.
-    paddingTop: Space.sm,
   },
-  loungeName: {
-    ...Type.display(20),
-    letterSpacing: tracking(20, -0.015),
-  },
-  chips: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 7,
-    marginTop: Space.xs,
-  },
-  chip: {
-    ...Type.label(10),
-  },
-  chipLive: {
-    // The only accent in the header, and only when something is actually live.
-    ...Type.heading(10),
-    letterSpacing: tracking(10, 0.09),
-  },
-  iconTarget: {
-    width: TOUCH_TARGET,
-    height: TOUCH_TARGET,
+  tile: {
+    width: TILE,
+    height: TILE,
+    borderRadius: Radii.sm,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  backTarget: {
-    // Pulls the arrow's optical centre back onto the 12px gutter line.
-    marginLeft: -Space.md,
+  code: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.sm + 1,
+    paddingHorizontal: Space.md + 2,
+    paddingVertical: 10,
+    borderRadius: Radii.sm,
   },
-  invite: {
-    minHeight: TOUCH_TARGET,
-    justifyContent: 'center',
-    paddingHorizontal: Space.md,
-    borderWidth: Rule.hair,
-  },
-  inviteLabel: {
-    ...Type.heading(10),
-    letterSpacing: tracking(10, 0.09),
+  codeText: {
+    fontFamily: Fonts.semibold,
+    fontSize: 11.5,
+    letterSpacing: tracking(11.5, 0.06),
+    fontVariant: ['tabular-nums'],
   },
 
-  /* tabs */
-  tabsRow: {
+  /* hero */
+  hero: {
     flexDirection: 'row',
-    marginTop: Space.md,
+    alignItems: 'flex-start',
+    gap: 17,
+    paddingHorizontal: Space.xxl,
+    paddingTop: Space.xxl,
   },
-  tabWrap: {
-    flexDirection: 'row',
-  },
-  tabGap: {
-    width: Space.sm,
-    borderBottomWidth: Rule.major,
-  },
-  tab: {
-    minHeight: TOUCH_TARGET,
+  art: {
+    width: ART,
+    height: ART,
+    flexGrow: 0,
+    flexShrink: 0,
+    borderRadius: Radii.xl,
+    alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: Space.md,
-    borderBottomWidth: Rule.major,
   },
-  tabLabel: {
-    ...Type.heading(11),
-    letterSpacing: tracking(11, 0.1),
+  artTag: {
+    fontFamily: Fonts.extrabold,
+    fontSize: 22,
+    letterSpacing: tracking(22, -0.03),
   },
-  tabEdge: {
-    width: Space.md,
-    borderBottomWidth: Rule.major,
-  },
-  tabFill: {
+  heroMeta: {
     flex: 1,
-    borderBottomWidth: Rule.major,
+    minWidth: 0,
+    paddingTop: Space.xs,
+  },
+  role: {
+    ...Type.label(11),
+    letterSpacing: tracking(11, 0.14),
+  },
+  name: {
+    ...Type.display(25),
+    lineHeight: 27,
+    letterSpacing: tracking(25, -0.03),
+    marginTop: 5,
+  },
+  description: {
+    ...Type.body(13),
+    lineHeight: 18,
+    marginTop: 5,
+  },
+
+  /* the way in */
+  start: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Space.sm + 2,
+    minHeight: 56,
+    marginHorizontal: Space.xl,
+    marginTop: Space.xl + 2,
+    borderRadius: Radii.button,
+  },
+  startLabel: {
+    fontFamily: Fonts.semibold,
+    fontSize: 15,
+    letterSpacing: tracking(15, -0.005),
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.md + 2,
+    minHeight: TOUCH_TARGET + 20,
+    marginHorizontal: Space.xl,
+    marginTop: Space.md,
+    paddingHorizontal: Space.md + 3,
+    borderRadius: Radii.lg,
+  },
+  rowWell: {
+    width: 38,
+    height: 38,
+    borderRadius: Radii.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rowLabel: {
+    flex: 1,
+    minWidth: 0,
+    fontFamily: Fonts.extrabold,
+    fontSize: 14.5,
+    letterSpacing: tracking(14.5, -0.005),
+  },
+
+  /* sections */
+  sectionHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.xs,
+    paddingHorizontal: Space.xxl,
+    paddingTop: Space.xxl + 4,
+    paddingBottom: Space.md,
+  },
+  sectionKicker: {
+    ...Type.label(10.5),
+    letterSpacing: tracking(10.5, 0.15),
+  },
+  sessions: {
+    gap: Space.sm + 1,
+  },
+  sessionSkeletons: {
+    paddingHorizontal: Space.md + 2,
+    gap: Space.sm + 1,
+  },
+  memberSkeletons: {
+    paddingHorizontal: Space.xxl,
+    gap: Space.sm,
+  },
+  quiet: {
+    ...Type.body(13.5),
+    paddingHorizontal: Space.xxl,
   },
 
   /* lists */
   listContent: {
     flexGrow: 1,
-    paddingBottom: Space.xxl,
-  },
-  blockSkeletons: {
-    gap: Rule.hair,
-  },
-  emptyBlock: {
-    paddingHorizontal: Space.md,
-    paddingTop: Space.xxl,
-    gap: Space.sm,
-  },
-  emptyKicker: {
-    ...Type.label(10),
-  },
-  emptyTitle: {
-    ...Type.display(22),
-  },
-  footerBlock: {
-    paddingHorizontal: Space.md,
-    paddingTop: Space.xl,
-    gap: Space.md,
-  },
-  note: {
-    ...Type.body(12),
-  },
-
-  /* actions */
-  actionCell: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space.sm,
-    minHeight: 48,
-    paddingHorizontal: Space.lg,
-    borderWidth: Rule.hair,
-  },
-  actionLabel: {
-    ...Type.heading(11),
-    letterSpacing: tracking(11, 0.1),
+    paddingBottom: Space.huge * 2,
   },
 
   /* markers */
   markerBar: {
-    paddingTop: 13,
-    paddingHorizontal: Space.md,
     flexDirection: 'row',
+    paddingHorizontal: Space.xxl,
+    paddingTop: Space.md,
   },
   markerBody: {
     flex: 1,
     justifyContent: 'center',
-    paddingHorizontal: Space.md,
+    paddingHorizontal: Space.xxl,
     paddingBottom: Space.huge,
     gap: Space.sm,
   },
   markerTitle: {
-    ...Type.display(24),
+    ...Type.display(28),
+    letterSpacing: tracking(28, -0.03),
   },
-  markerText: {
-    ...Type.body(14),
-  },
-  markerActions: {
-    marginTop: Space.md,
-    gap: Space.sm,
+  markerAction: {
+    marginHorizontal: 0,
     alignSelf: 'stretch',
   },
 
-  /* invite sheet */
+  /* chat sheet */
   scrim: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  scrimTap: {
     position: 'absolute',
     top: 0,
     right: 0,
     bottom: 0,
     left: 0,
   },
-  sheetDock: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    zIndex: ZIndex.sheet,
-  },
   sheet: {
+    height: '88%',
     width: '100%',
-    maxWidth: 720,
+    maxWidth: 480,
     alignSelf: 'center',
-    borderTopWidth: Rule.major,
+    borderTopLeftRadius: SheetMetrics.radius,
+    borderTopRightRadius: SheetMetrics.radius,
+    overflow: 'hidden',
+  },
+  grabberSlot: {
+    paddingTop: Space.md + 2,
+    alignItems: 'center',
+  },
+  grabber: {
+    width: SheetMetrics.grabberW,
+    height: SheetMetrics.grabberH,
+    borderRadius: SheetMetrics.grabberH / 2,
   },
   sheetHead: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingLeft: Space.md,
-    paddingRight: Space.xs,
-    paddingTop: Space.md,
-    paddingBottom: Space.sm + 2,
-    borderBottomWidth: Rule.major,
+    gap: Space.md,
+    paddingHorizontal: Space.xxl,
+    paddingTop: Space.lg + 2,
+    paddingBottom: Space.md + 2,
   },
   sheetTitle: {
-    ...Type.heading(15),
-    letterSpacing: tracking(15, 0.03),
+    ...Type.display(20),
+    letterSpacing: tracking(20, -0.025),
     flex: 1,
-  },
-  sheetClose: {
-    minHeight: TOUCH_TARGET,
-    minWidth: TOUCH_TARGET,
-    alignItems: 'flex-end',
-    justifyContent: 'center',
-    paddingHorizontal: Space.xs,
-  },
-  sheetCloseLabel: {
-    ...Type.heading(10),
-    letterSpacing: tracking(10, 0.1),
-  },
-  sheetBody: {
-    padding: Space.md,
-    paddingTop: Space.xxl,
-    paddingBottom: Space.xxl,
-    gap: Space.md,
-  },
-  codeFrame: {
-    borderWidth: Rule.major,
-    paddingHorizontal: Space.lg,
-    paddingVertical: Space.xl,
-  },
-  code: {
-    ...readout(CODE_SIZE),
-    letterSpacing: CODE_TRACKING,
-    // Tracking leaves a gap after the last glyph; pulling it back keeps the
-    // string flush against the frame as drawn.
-    marginRight: -CODE_TRACKING,
+    minWidth: 0,
   },
 
   detailSkeleton: {
-    padding: Space.md,
-    paddingTop: Space.xl,
-    gap: Space.md,
+    paddingHorizontal: Space.xxl,
+    paddingTop: Space.xxl,
+    gap: Space.xl,
+  },
+  skeletonHero: {
+    flexDirection: 'row',
+    gap: 17,
+  },
+  skeletonMeta: {
+    flex: 1,
+    minWidth: 0,
+    gap: Space.sm,
+    paddingTop: Space.sm,
   },
 });

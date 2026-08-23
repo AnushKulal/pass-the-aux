@@ -1,21 +1,65 @@
+/**
+ * You — the profile tab. Design canvas: `data-screen-label="You"`.
+ *
+ * A centred identity block over a 132px photo tile, three stat cards, the
+ * connection rows, and the sign-out outline. No lounge list: the artboard
+ * spends that space on the LOUNGES stat and the Lounges tab owns the list.
+ */
+
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { ChevronRight, Pencil, SlidersHorizontal } from 'lucide-react-native';
-import { memo, useCallback } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
-import { Alert, FlatList, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeInDown, useReducedMotion } from 'react-native-reanimated';
+import {
+  Alert,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  type TextStyle,
+} from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useToast } from '@/components/ui';
-import { useMyLounges, type MyLounge } from '@/features/profile/queries';
+import { useMyLounges } from '@/features/profile/queries';
 import { useAuth } from '@/lib/auth';
 import type { ProfileRow } from '@/lib/database.types';
-import { Duration, Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
+import {
+  Duration,
+  Fonts,
+  Radii,
+  Rule,
+  Space,
+  TOUCH_TARGET,
+  Type,
+  dropped,
+  glowShadow,
+  pressedSoft,
+  raised,
+  tracking,
+} from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
-const GUTTER = 12;
-const AVATAR = 72;
+/** The artboard's gutters: 20 for cards, 24 for the kicker above them. */
+const CARD_GUTTER = 20;
+const TEXT_GUTTER = 24;
+
+const PHOTO = 132;
+const CONNECTION_TILE = 38;
+
+/** `Type.readout()` hands back a readonly tuple; `TextStyle` wants a mutable one. */
+const readout = (size: number): TextStyle => ({
+  ...Type.readout(size),
+  fontVariant: ['tabular-nums'],
+});
 
 export default function ProfileScreen() {
   const C = useColors();
@@ -24,357 +68,265 @@ export default function ProfileScreen() {
   const { user, profile, loading, signOut, refreshProfile } = useAuth();
   const lounges = useMyLounges(user?.id);
 
+  /*
+    Driven from a shared value in an effect, never `entering={FadeIn…}`: a
+    Reanimated layout animation marks the view hidden until it runs, and on
+    react-native-web it never runs.
+  */
+  const enter = useSharedValue(0);
+  useEffect(() => {
+    enter.value = reduced ? 1 : withTiming(1, { duration: Duration.enter });
+  }, [reduced, enter]);
+  const enterStyle = useAnimatedStyle(() => ({ opacity: enter.value }));
+
   const confirmSignOut = useCallback(() => {
-    confirmDestructive(
-      'Sign out?',
-      'You will need your email and password to get back in. Any Session you are hosting ends for everyone.',
-      'Sign out',
-      () => {
-        void signOut().catch((caught: unknown) => {
-          toast.show(caught instanceof Error ? caught.message : 'Could not sign out.', 'error');
-        });
-      }
-    );
+    confirmDestructive('Sign out?', 'Any Session you are hosting ends.', 'Sign out', () => {
+      void signOut().catch((caught: unknown) => {
+        toast.show(caught instanceof Error ? caught.message : 'Could not sign out.', 'error');
+      });
+    });
   }, [signOut, toast]);
 
-  const renderLounge = useCallback(({ item }: { item: MyLounge }) => <LoungeRow item={item} />, []);
+  const memberships = lounges.data;
+  const stats = useMemo(() => {
+    const rows = memberships ?? [];
+    return {
+      lounges: rows.length,
+      hosting: rows.filter((row) => row.role === 'owner').length,
+    };
+  }, [memberships]);
 
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={[styles.root, { backgroundColor: C.bg }]}>
-      <Animated.View
-        style={styles.flex}
-        entering={
-          reduced
-            ? undefined
-            : FadeInDown.duration(Duration.enter).withInitialValues({
-                opacity: 0,
-                transform: [{ translateY: 8 }],
-              })
-        }>
-        {/*
-          A FlatList rather than a ScrollView: a heavy lounge user has dozens of
-          memberships, and the identity block rides along as the list header so
-          there is no VirtualizedList-inside-ScrollView nesting.
-        */}
-        <FlatList
-          data={lounges.data ?? []}
-          keyExtractor={keyExtractor}
-          renderItem={renderLounge}
-          contentContainerStyle={styles.content}
-          showsVerticalScrollIndicator={false}
-          ListHeaderComponent={
-            <ProfileHeader
-              profile={profile}
+      <Animated.View style={[styles.flex, enterStyle]}>
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          {profile ? (
+            <>
+              <Identity profile={profile} />
+
+              <View style={styles.stats}>
+                <Stat value={String(stats.lounges)} label="Lounges" />
+                <Stat value={String(stats.hosting)} label="Hosting" />
+                <Stat value={monthOf(profile.created_at)} label={sinceOf(profile.created_at)} />
+              </View>
+
+              <Kicker>Connections</Kicker>
+              <View style={styles.group}>
+                <ConnectionRow
+                  name="Spotify"
+                  value={spotifyValue(profile)}
+                  linked={profile.spotify_linked}
+                  onPress={() => router.push('/settings/connections')}
+                />
+                <ConnectionRow name="YouTube" value="Not linked" linked={false} />
+              </View>
+            </>
+          ) : (
+            <Unavailable
               loading={loading}
-              onEdit={() => router.push('/(auth)/claim-username')}
               onRetry={() => {
                 void refreshProfile();
               }}
             />
-          }
-          ListEmptyComponent={lounges.isPending ? <LoungePlaceholders /> : <NoLounges />}
-          ListFooterComponent={
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Sign out"
-              onPress={confirmSignOut}
-              style={({ pressed }) => [
-                styles.signOut,
-                {
-                  borderColor: C.dangerBorder,
-                  backgroundColor: pressed ? C.dangerWash : 'transparent',
-                },
-              ]}>
-              <Text style={[styles.signOutLabel, { color: C.danger }]}>SIGN OUT</Text>
-            </Pressable>
-          }
-        />
+          )}
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Sign out"
+            onPress={confirmSignOut}
+            style={({ pressed }) => [
+              styles.signOut,
+              { borderColor: C.live, backgroundColor: pressed ? C.liveWash : 'transparent' },
+            ]}>
+            <Text style={[styles.signOutLabel, { color: C.liveText }]}>Sign out</Text>
+          </Pressable>
+        </ScrollView>
       </Animated.View>
     </SafeAreaView>
   );
 }
 
-const keyExtractor = (item: MyLounge) => item.lounge.id;
+/* --------------------------------------------------------------- identity */
 
-/* ------------------------------------------------------------------ header */
+function Identity({ profile }: { profile: ProfileRow }) {
+  const C = useColors();
+  const name = profile.display_name || profile.username;
+  const photo = profile.photo_url ?? profile.avatar_url;
 
-function ProfileHeader({
-  profile,
-  loading,
-  onEdit,
-  onRetry,
-}: {
-  profile: ProfileRow | null;
-  loading: boolean;
-  onEdit: () => void;
-  onRetry: () => void;
-}) {
+  return (
+    <View style={styles.hero}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Edit your photo"
+        onPress={() => router.push('/(auth)/claim-username')}
+        style={[styles.photo, { backgroundColor: C.artwork }, glowShadow(C.glow, 44)]}>
+        {photo ? (
+          <Image
+            source={{ uri: photo }}
+            style={styles.photoImage}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            transition={Duration.press}
+            accessibilityIgnoresInvertColors
+          />
+        ) : (
+          <Text style={[styles.photoInitial, { color: C.artInk }]}>
+            {name.charAt(0).toUpperCase()}
+          </Text>
+        )}
+      </Pressable>
+
+      <Text numberOfLines={1} style={[styles.name, { color: C.ink }]}>
+        {name}
+      </Text>
+      <Text numberOfLines={1} style={[styles.handle, { color: C.ink2 }]}>
+        @{profile.username}
+      </Text>
+      {profile.bio ? (
+        <Text style={[styles.bio, { color: C.ink2 }]} numberOfLines={3}>
+          {profile.bio}
+        </Text>
+      ) : null}
+
+      <View style={styles.heroActions}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Edit profile"
+          onPress={() => router.push('/(auth)/claim-username')}
+          style={({ pressed }) => [
+            styles.action,
+            { backgroundColor: pressed ? C.cream : C.pill },
+            dropped(C, 'md'),
+          ]}>
+          <Text style={[styles.actionLabel, { color: C.pillInk }]}>Edit profile</Text>
+        </Pressable>
+
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Settings"
+          onPress={() => router.push('/settings')}
+          style={({ pressed }) => [
+            styles.action,
+            { backgroundColor: pressed ? C.surface2 : C.surface },
+            raised(C),
+          ]}>
+          <Text style={[styles.actionLabel, { color: C.ink2 }]}>Settings</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * The signed-in-but-profileless case. The artboard has no state for it, so it
+ * borrows the hero's centre line and says the one thing worth saying.
+ */
+function Unavailable({ loading, onRetry }: { loading: boolean; onRetry: () => void }) {
   const C = useColors();
 
-  if (!profile) {
-    return (
-      <View style={[styles.identity, { borderBottomColor: C.rule }]}>
-        <Text style={[styles.name, { color: C.ink }]}>
-          {loading ? 'Loading your profile…' : 'Profile unavailable'}
-        </Text>
-        <Text style={[styles.bio, { color: C.ink2 }]}>
-          {loading
-            ? 'One second.'
-            : 'We could not load your profile. Check your connection and try again.'}
-        </Text>
-        {loading ? null : (
+  return (
+    <View style={styles.hero}>
+      <View style={[styles.photo, { backgroundColor: C.surface }, raised(C)]} />
+      <Text style={[styles.name, { color: C.ink }]}>{loading ? 'Loading…' : 'No profile'}</Text>
+      {loading ? null : (
+        <View style={styles.heroActions}>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Try again"
             onPress={onRetry}
-            style={({ pressed: isPressed }) => [
-              styles.edit,
-              styles.retry,
-              { borderColor: C.rule2, backgroundColor: isPressed ? C.surface : 'transparent' },
+            style={({ pressed }) => [
+              styles.action,
+              { backgroundColor: pressed ? C.surface2 : C.surface },
+              raised(C),
             ]}>
-            <Text style={[styles.editLabel, { color: C.ink }]}>TRY AGAIN</Text>
+            <Text style={[styles.actionLabel, { color: C.ink2 }]}>Try again</Text>
           </Pressable>
-        )}
-      </View>
-    );
-  }
-
-  const name = profile.display_name || profile.username;
-  const connection = !profile.spotify_linked
-    ? 'SPOTIFY NOT LINKED'
-    : profile.is_premium
-      ? 'SPOTIFY LINKED (PREMIUM)'
-      : 'SPOTIFY LINKED (FREE)';
-
-  return (
-    <View>
-      <View style={[styles.identity, { borderBottomColor: C.rule }]}>
-        <View style={styles.identityRow}>
-          <View style={styles.avatarWell}>
-            <View style={[styles.avatar, { backgroundColor: C.live }]}>
-              {profile.avatar_url ? (
-                <Image
-                  source={{ uri: profile.avatar_url }}
-                  style={styles.avatarImage}
-                  contentFit="cover"
-                  cachePolicy="memory-disk"
-                  transition={Duration.press}
-                  accessibilityIgnoresInvertColors
-                />
-              ) : (
-                <Text style={[styles.avatarInitial, { color: C.onLive }]}>
-                  {name.charAt(0).toUpperCase()}
-                </Text>
-              )}
-            </View>
-            {/* On aux, on the app: the presence mark is the one accent the
-                identity block is allowed. */}
-            <View style={[styles.presence, { backgroundColor: C.live, borderColor: C.bg }]} />
-          </View>
-
-          <View style={styles.identityText}>
-            <View style={styles.nameRow}>
-              <View style={styles.nameColumn}>
-                <Text numberOfLines={1} style={[styles.name, { color: C.ink }]}>
-                  {name}
-                </Text>
-                <Text numberOfLines={1} style={[styles.handle, { color: C.ink2 }]}>
-                  @{profile.username}
-                </Text>
-              </View>
-
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Edit profile"
-                onPress={onEdit}
-                style={({ pressed: isPressed }) => [
-                  styles.edit,
-                  { borderColor: isPressed ? C.live : C.rule2 },
-                ]}>
-                <Pencil size={14} strokeWidth={2} color={C.ink} />
-                <Text style={[styles.editLabel, { color: C.ink }]}>EDIT</Text>
-              </Pressable>
-            </View>
-
-            <View style={styles.chips}>
-              {profile.spotify_linked ? <Chip>SPOTIFY</Chip> : <Chip>YOUTUBE</Chip>}
-              {profile.is_premium ? <Chip accent>PREMIUM</Chip> : null}
-            </View>
-          </View>
         </View>
-
-        <Text style={[styles.since, { color: C.ink3 }]}>
-          MEMBER SINCE {formatMonth(profile.created_at)} · {connection}
-        </Text>
-      </View>
-
-      <NavRow
-        leading={<SlidersHorizontal size={19} strokeWidth={2} color={C.ink2} />}
-        title="Settings"
-        detail="Appearance, accounts, about the developer"
-        onPress={() => router.push('/settings')}
-      />
-      <NavRow
-        title="Connections"
-        detail={
-          !profile.spotify_linked
-            ? 'NOT LINKED — PLAYING VIA YOUTUBE'
-            : profile.is_premium
-              ? 'SPOTIFY LINKED · PREMIUM'
-              : 'SPOTIFY LINKED · FREE — PLAYING VIA YOUTUBE'
-        }
-        onPress={() => router.push('/settings/connections')}
-      />
-
-      <Text style={[styles.kicker, { color: C.ink3 }]}>YOUR LOUNGES</Text>
+      )}
     </View>
   );
 }
 
-/* ------------------------------------------------------------------- parts */
+/* ------------------------------------------------------------------ parts */
 
-function Chip({ children, accent = false }: { children: ReactNode; accent?: boolean }) {
+function Kicker({ children }: { children: ReactNode }) {
+  const C = useColors();
+  return <Text style={[styles.kicker, { color: C.ink3 }]}>{children}</Text>;
+}
+
+function Stat({ value, label }: { value: string; label: string }) {
   const C = useColors();
   return (
-    <View
-      style={[
-        styles.chip,
-        accent ? { backgroundColor: C.live } : { borderWidth: Rule.hair, borderColor: C.rule2 },
-      ]}>
-      <Text style={[styles.chipLabel, { color: accent ? C.onLive : C.ink2 }]}>{children}</Text>
+    <View style={[styles.stat, { backgroundColor: C.surface }, raised(C)]}>
+      <Text numberOfLines={1} style={[styles.statValue, { color: C.ink }]}>
+        {value}
+      </Text>
+      <Text numberOfLines={1} style={[styles.statLabel, { color: C.ink3 }]}>
+        {label}
+      </Text>
     </View>
   );
 }
 
-function NavRow({
-  leading,
-  title,
-  detail,
+function ConnectionRow({
+  name,
+  value,
+  linked,
   onPress,
 }: {
-  leading?: ReactNode;
-  title: string;
-  detail: string;
-  onPress: () => void;
+  name: string;
+  value: string;
+  linked: boolean;
+  onPress?: () => void;
 }) {
   const C = useColors();
 
+  const body = (
+    <>
+      <View style={[styles.connectionTile, { backgroundColor: C.bgRecessed }, pressedSoft(C)]} />
+      <Text style={[styles.connectionName, { color: C.ink }]}>{name}</Text>
+      <Text style={[styles.connectionValue, { color: linked ? C.ink2 : C.ink3 }]}>{value}</Text>
+    </>
+  );
+
+  if (!onPress) {
+    return (
+      <View style={[styles.connection, { backgroundColor: C.surface }, raised(C)]}>{body}</View>
+    );
+  }
+
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${title}. ${detail}`}
+      accessibilityLabel={`${name}. ${value}`}
       onPress={onPress}
-      style={({ pressed: isPressed }) => [
-        styles.navRow,
-        {
-          borderBottomColor: C.rule,
-          backgroundColor: isPressed ? C.surface : 'transparent',
-        },
+      style={({ pressed }) => [
+        styles.connection,
+        { backgroundColor: pressed ? C.surface2 : C.surface },
+        raised(C),
       ]}>
-      {leading}
-      <View style={styles.navText}>
-        <Text style={[styles.navTitle, { color: C.ink }]}>{title}</Text>
-        <Text numberOfLines={1} style={[styles.navDetail, { color: C.ink2 }]}>
-          {detail}
-        </Text>
-      </View>
-      <ChevronRight size={20} strokeWidth={2} color={C.ink3} />
+      {body}
     </Pressable>
-  );
-}
-
-/* -------------------------------------------------------------------- list */
-
-const LoungeRow = memo(function LoungeRow({ item }: { item: MyLounge }) {
-  const C = useColors();
-  const { lounge, role } = item;
-
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`${lounge.name}. You are ${role === 'owner' ? 'the owner' : `a ${role}`}.`}
-      onPress={() => router.push({ pathname: '/lounge/[id]', params: { id: lounge.id } })}
-      style={({ pressed: isPressed }) => [
-        styles.loungeRow,
-        {
-          borderBottomColor: C.rule,
-          backgroundColor: isPressed ? C.surface : 'transparent',
-        },
-      ]}>
-      <View style={[styles.loungeTag, { borderColor: C.rule2 }]}>
-        <Text style={[styles.loungeTagLabel, { color: C.ink2 }]}>{tagFor(lounge.name)}</Text>
-      </View>
-      <View style={styles.navText}>
-        <Text numberOfLines={1} style={[styles.navTitle, { color: C.ink }]}>
-          {lounge.name}
-        </Text>
-        <Text numberOfLines={1} style={[styles.loungeMeta, { color: C.ink3 }]}>
-          {role === 'member' ? 'MEMBER' : role === 'mod' ? 'MODERATOR' : 'OWNER'} ·{' '}
-          {lounge.is_public ? 'PUBLIC' : 'PRIVATE'}
-        </Text>
-      </View>
-      <ChevronRight size={20} strokeWidth={2} color={C.ink3} />
-    </Pressable>
-  );
-});
-
-/**
- * Ruled placeholders rather than a shimmer: the grid is the thing that is
- * already true while the rows load, so it is what we draw.
- */
-function LoungePlaceholders() {
-  const C = useColors();
-  return (
-    <View>
-      {[0, 1, 2].map((key) => (
-        <View key={key} style={[styles.loungeRow, { borderBottomColor: C.rule }]}>
-          <View style={[styles.loungeTag, { borderColor: C.rule }]} />
-          <View style={styles.navText}>
-            <View style={[styles.barWide, { backgroundColor: C.surface2 }]} />
-            <View style={[styles.barNarrow, { backgroundColor: C.surface }]} />
-          </View>
-        </View>
-      ))}
-    </View>
-  );
-}
-
-function NoLounges() {
-  const C = useColors();
-  return (
-    <View style={styles.empty}>
-      <Text style={[styles.emptyText, { color: C.ink2 }]}>
-        No lounges yet — create one or join with a code.
-      </Text>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Find a lounge"
-        onPress={() => router.push('/(tabs)/explore')}
-        style={({ pressed: isPressed }) => [
-          styles.emptyAction,
-          { borderColor: C.live, backgroundColor: isPressed ? C.liveWash : 'transparent' },
-        ]}>
-        <Text style={[styles.emptyActionLabel, { color: C.liveText }]}>FIND A LOUNGE</Text>
-      </Pressable>
-    </View>
   );
 }
 
 /* ------------------------------------------------------------------ utils */
 
-/** Two letters, the way the artboard tags a lounge tile. */
-function tagFor(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return '??';
-  const first = words[0]?.[0] ?? '';
-  const second = words.length > 1 ? (words[1]?.[0] ?? '') : (words[0]?.[1] ?? '');
-  return (first + second).toUpperCase();
+function spotifyValue(profile: ProfileRow): string {
+  if (!profile.spotify_linked) return 'Not linked';
+  return profile.is_premium ? 'Premium · linked' : 'Free · linked';
 }
 
-function formatMonth(iso: string): string {
+function monthOf(iso: string): string {
   const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return 'RECENTLY';
-  return date.toLocaleDateString(undefined, { month: 'short', year: 'numeric' }).toUpperCase();
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleDateString(undefined, { month: 'short' });
+}
+
+function sinceOf(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return 'Member';
+  return `Since '${String(date.getFullYear()).slice(-2)}`;
 }
 
 /**
@@ -386,7 +338,7 @@ function confirmDestructive(
   title: string,
   message: string,
   confirmLabel: string,
-  onConfirm: () => void
+  onConfirm: () => void,
 ) {
   if (Platform.OS === 'web') {
     if (globalThis.confirm?.(`${title}\n\n${message}`)) onConfirm();
@@ -412,197 +364,131 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 720,
     alignSelf: 'center',
-    paddingBottom: Space.xxxl,
+    paddingTop: Space.md,
+    paddingBottom: Space.huge,
   },
-  identity: {
-    paddingHorizontal: GUTTER,
-    paddingTop: Space.lg,
-    paddingBottom: 14,
-    borderBottomWidth: Rule.hair,
+
+  hero: {
+    alignItems: 'center',
+    paddingHorizontal: TEXT_GUTTER,
   },
-  identityRow: {
-    flexDirection: 'row',
-    gap: Space.md,
-  },
-  avatarWell: {
-    position: 'relative',
-  },
-  avatar: {
-    width: AVATAR,
-    height: AVATAR,
+  photo: {
+    width: PHOTO,
+    height: PHOTO,
+    borderRadius: Radii.xxl,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
   },
-  avatarImage: {
+  photoImage: {
     width: '100%',
     height: '100%',
   },
-  avatarInitial: {
-    ...Type.display(36),
-    letterSpacing: 0,
-  },
-  presence: {
-    position: 'absolute',
-    right: -4,
-    bottom: -4,
-    width: 15,
-    height: 15,
-    borderWidth: 3,
-  },
-  identityText: {
-    flex: 1,
-    minWidth: 0,
-  },
-  nameRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: Space.sm,
-  },
-  nameColumn: {
-    flex: 1,
-    minWidth: 0,
+  photoInitial: {
+    ...Type.display(48),
   },
   name: {
-    ...Type.display(22),
-    letterSpacing: tracking(22, -0.02),
+    ...Type.display(27),
+    letterSpacing: tracking(27, -0.03),
+    marginTop: Space.xl,
   },
   handle: {
     ...Type.body(14),
+    marginTop: Space.xs,
   },
   bio: {
-    ...Type.body(16),
+    ...Type.body(13),
+    textAlign: 'center',
     marginTop: Space.md,
   },
-  edit: {
+  heroActions: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+    gap: 11,
+    marginTop: Space.xl,
+  },
+  action: {
     minHeight: TOUCH_TARGET,
-    paddingHorizontal: 11,
-    borderWidth: Rule.hair,
+    justifyContent: 'center',
+    paddingHorizontal: 22,
+    borderRadius: Radii.md - 1,
   },
-  retry: {
-    alignSelf: 'flex-start',
-    marginTop: Space.md,
+  actionLabel: {
+    fontFamily: Fonts.semibold,
+    fontSize: 13.5,
+    lineHeight: 18,
   },
-  editLabel: {
-    ...Type.heading(11),
-    letterSpacing: tracking(11, 0.09),
-  },
-  chips: {
+
+  stats: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginTop: Space.sm,
+    gap: 11,
+    paddingHorizontal: CARD_GUTTER,
+    paddingTop: Space.xxxl,
   },
-  chip: {
-    paddingHorizontal: 6,
-    paddingVertical: 3,
+  stat: {
+    flex: 1,
+    padding: Space.lg,
+    borderRadius: Radii.lg,
   },
-  chipLabel: {
-    ...Type.heading(11),
-    letterSpacing: tracking(11, 0.09),
+  statValue: {
+    ...readout(24),
+    letterSpacing: tracking(24, -0.02),
   },
-  since: {
-    ...Type.label(11),
-    letterSpacing: tracking(11, 0.09),
-    marginTop: Space.sm,
+  statLabel: {
+    ...Type.label(10.5),
+    letterSpacing: tracking(10.5, 0.13),
+    marginTop: 5,
   },
-  navRow: {
+
+  kicker: {
+    ...Type.label(10.5),
+    letterSpacing: tracking(10.5, 0.15),
+    paddingHorizontal: TEXT_GUTTER,
+    paddingTop: Space.xxxl,
+    paddingBottom: Space.md,
+  },
+  group: {
+    paddingHorizontal: CARD_GUTTER,
+    gap: 10,
+  },
+  connection: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    minHeight: 56,
-    paddingHorizontal: GUTTER,
-    paddingVertical: Space.md,
-    borderBottomWidth: Rule.hair,
+    gap: 14,
+    minHeight: TOUCH_TARGET + Space.xs,
+    padding: 15,
+    borderRadius: Radii.lg,
   },
-  navText: {
+  connectionTile: {
+    width: CONNECTION_TILE,
+    height: CONNECTION_TILE,
+    borderRadius: Radii.sm,
+  },
+  connectionName: {
     flex: 1,
     minWidth: 0,
+    fontFamily: Fonts.semibold,
+    fontSize: 14.5,
+    lineHeight: 19,
   },
-  navTitle: {
-    ...Type.label(14),
-    letterSpacing: 0,
-    textTransform: 'none',
+  connectionValue: {
+    fontFamily: Fonts.semibold,
+    fontSize: 12,
+    lineHeight: 16,
   },
-  navDetail: {
-    ...Type.label(11),
-    letterSpacing: tracking(11, 0.06),
-    marginTop: 2,
-  },
-  kicker: {
-    ...Type.label(11),
-    letterSpacing: tracking(11, 0.12),
-    paddingHorizontal: GUTTER,
-    paddingTop: 14,
-    paddingBottom: 6,
-  },
-  loungeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    minHeight: 56,
-    paddingHorizontal: GUTTER,
-    paddingVertical: 11,
-    borderBottomWidth: Rule.hair,
-  },
-  loungeTag: {
-    width: 32,
-    height: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: Rule.hair,
-  },
-  loungeTagLabel: {
-    ...Type.heading(11),
-    letterSpacing: tracking(11, 0.04),
-  },
-  loungeMeta: {
-    ...Type.label(11),
-    letterSpacing: tracking(11, 0.08),
-    marginTop: 2,
-  },
-  barWide: {
-    width: '60%',
-    height: 12,
-  },
-  barNarrow: {
-    width: '30%',
-    height: 10,
-    marginTop: 6,
-  },
-  empty: {
-    paddingHorizontal: GUTTER,
-    paddingBottom: 14,
-  },
-  emptyText: {
-    ...Type.body(16),
-  },
-  emptyAction: {
-    alignSelf: 'flex-start',
-    justifyContent: 'center',
-    marginTop: Space.md,
-    minHeight: 46,
-    paddingHorizontal: Space.lg,
-    borderWidth: Rule.hair,
-  },
-  emptyActionLabel: {
-    ...Type.heading(11),
-    letterSpacing: tracking(11, 0.1),
-  },
+
   signOut: {
-    marginHorizontal: GUTTER,
-    marginTop: Space.lg,
-    marginBottom: Space.xxl,
-    minHeight: 48,
+    marginHorizontal: CARD_GUTTER,
+    marginTop: Space.xxxl,
+    minHeight: 52,
+    alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: Space.lg,
-    borderWidth: Rule.hair,
+    borderRadius: Radii.button,
+    borderWidth: Rule.thick,
   },
   signOutLabel: {
-    ...Type.heading(11),
-    letterSpacing: tracking(11, 0.1),
+    fontFamily: Fonts.semibold,
+    fontSize: 13.5,
+    lineHeight: 18,
+    letterSpacing: tracking(13.5, 0.04),
   },
 });

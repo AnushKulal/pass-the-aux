@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
-  FadeInDown,
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
@@ -95,20 +94,29 @@ export default function SpotifyCallbackScreen() {
     return () => clearInterval(timer);
   }, [failure]);
 
+  /*
+    Driven by a shared value from an effect, NOT `entering={FadeInDown…}`.
+    Reanimated marks an entering view `visibility: hidden` until its animation
+    runs, and on react-native-web it never runs. This screen renders ONLY on web
+    — native redirects straight to Connections — so the layout animation left it
+    permanently blank on the single platform it exists for.
+  */
+  const enter = useSharedValue(0);
+
+  useEffect(() => {
+    enter.value = reduced ? 1 : withTiming(1, { duration: Duration.enter });
+  }, [reduced, enter]);
+
+  const enterStyle = useAnimatedStyle(() => ({
+    opacity: enter.value,
+    transform: [{ translateY: (1 - enter.value) * 8 }],
+  }));
+
   return (
     <SafeAreaView
       edges={['top', 'bottom', 'left', 'right']}
       style={[styles.root, { backgroundColor: C.bg }]}>
-      <Animated.View
-        style={styles.center}
-        entering={
-          reduced
-            ? undefined
-            : FadeInDown.duration(Duration.enter).withInitialValues({
-                opacity: 0,
-                transform: [{ translateY: 8 }],
-              })
-        }>
+      <Animated.View style={[styles.center, enterStyle]}>
         {failure ? (
           <>
             <Text style={[styles.kicker, { color: C.ink3 }]}>SPOTIFY</Text>

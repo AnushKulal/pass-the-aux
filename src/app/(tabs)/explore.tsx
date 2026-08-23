@@ -1,11 +1,15 @@
 /**
  * Explore — the two ways into a lounge you are not in yet: a code somebody sent
- * you, or a search.
+ * you, or the public list.
  *
- * README §7. The code field is one ruled control split into two cells: a 44px
- * input carrying the code at 800/13 with .14em of tracking, and a 60px accent
- * JOIN cell. That is the only filled accent on the screen, because redeeming a
- * code is the only thing here that puts you in a room.
+ * design/v2 "Explore": a recessed code well with the one filled JOIN cell
+ * beside it, then PUBLIC LOUNGES as raised rows — a tag tile, the name, the
+ * description, and one line of state.
+ *
+ * The row IS the join. Tapping a lounge you are not in writes the membership
+ * and walks straight in; tapping one you are already in just opens it. That is
+ * the design's single target per row, and it is the same mutation the old
+ * per-row button ran.
  *
  * An unmatched code says "No lounge with that code" and nothing else — no
  * colour change on the field, no shake. The sentence is the error.
@@ -30,8 +34,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
-import { LoungeCard, LoungeListSkeleton } from '@/components/lounge/lounge-card';
-import { Screen, useToast } from '@/components/ui';
+import { AuxButton, Screen, Skeleton, useToast } from '@/components/ui';
 import {
   loungeErrorMessage,
   useJoinByCode,
@@ -39,7 +42,17 @@ import {
   usePublicLounges,
   type PublicLoungeSummary,
 } from '@/features/lounges/queries';
-import { Duration, Fonts, Rule, Space, TOUCH_TARGET, Type } from '@/lib/theme';
+import {
+  Duration,
+  Fonts,
+  Radii,
+  Space,
+  Type,
+  dropped,
+  pressed as pressedShadow,
+  raised,
+  tracking,
+} from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
 /**
@@ -49,12 +62,33 @@ import { useColors } from '@/lib/theme-context';
 const SEARCH_DEBOUNCE_MS = 400;
 const CODE_LENGTH = 8;
 
-const GUTTER = 12;
-const JOIN_CELL = 60;
-const LIST_TAIL = 32;
+const GUTTER = 24;
+const FIELD_GUTTER = 20;
+const ROW_GUTTER = 14;
+const LIST_TAIL = 48;
 
-/** README §7, verbatim. Any other wording for this case is a bug. */
+/** design/v2: the code well and the JOIN cell are both 52 tall. */
+const FIELD = 52;
+const JOIN_CELL = 84;
+const TILE = 54;
+
+const SKELETON_ROWS = [0, 1, 2];
+
+/** Any other wording for an unmatched code is a bug. */
 const NO_MATCH = 'No lounge with that code';
+
+/** The tag on a lounge's tile: initials for a phrase, the first letters if not. */
+function tagFor(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length > 1) {
+    return words
+      .slice(0, 4)
+      .map((word) => word[0] ?? '')
+      .join('')
+      .toUpperCase();
+  }
+  return (words[0] ?? '').slice(0, 4).toUpperCase() || '·';
+}
 
 function useModuleEnter() {
   const reduced = useReducedMotion();
@@ -74,34 +108,94 @@ function useModuleEnter() {
   }));
 }
 
-/** A ruled prose block: kicker, sentence, optional accent-outlined action. */
-function Notice({
-  kicker,
-  body,
+/** A raised card carrying one line and one action. Every non-happy path. */
+function QuietCard({
+  line,
   action,
 }: {
-  kicker: string;
-  body: string;
+  line: string;
   action?: { label: string; onPress: () => void };
 }) {
   const C = useColors();
 
   return (
-    <View style={[styles.notice, { borderBottomColor: C.rule }]}>
-      <Text style={[styles.noticeKicker, { color: C.ink3 }]}>{kicker}</Text>
-      <Text style={[styles.noticeBody, { color: C.ink2 }]}>{body}</Text>
+    <View style={[styles.quiet, { backgroundColor: C.surface }, raised(C)]}>
+      <Text style={[styles.quietLine, { color: C.ink2 }]}>{line}</Text>
       {action ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={action.label}
+        <AuxButton
+          label={action.label}
           onPress={action.onPress}
-          style={({ pressed }) => [
-            styles.action,
-            { borderColor: C.live, backgroundColor: pressed ? C.liveWash : 'transparent' },
-          ]}>
-          <Text style={[styles.actionLabel, { color: C.liveText }]}>{action.label}</Text>
-        </Pressable>
+          variant="cream"
+          size="sm"
+          align="center"
+        />
       ) : null}
+    </View>
+  );
+}
+
+/** One public lounge. The whole row is the target — see the file header. */
+function LoungeRow({
+  item,
+  busy,
+  onPress,
+}: {
+  item: PublicLoungeSummary;
+  busy: boolean;
+  onPress: () => void;
+}) {
+  const C = useColors();
+  const state = busy ? 'Joining' : item.isMember ? 'Joined' : 'Tap to join';
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={item.lounge.name}
+      accessibilityHint={item.isMember ? 'Opens this lounge' : 'Joins this lounge'}
+      accessibilityState={{ busy }}
+      disabled={busy}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.row,
+        { backgroundColor: C.surface },
+        raised(C),
+        pressed && styles.pressedRow,
+      ]}>
+      <View style={[styles.tile, { backgroundColor: C.artwork }]}>
+        <Text numberOfLines={1} style={[styles.tag, { color: C.artInk }]}>
+          {tagFor(item.lounge.name)}
+        </Text>
+      </View>
+
+      <View style={styles.rowInfo}>
+        <Text numberOfLines={1} style={[styles.rowName, { color: C.ink }]}>
+          {item.lounge.name}
+        </Text>
+        {item.lounge.description ? (
+          <Text numberOfLines={2} style={[styles.rowDesc, { color: C.ink2 }]}>
+            {item.lounge.description}
+          </Text>
+        ) : null}
+        <Text style={[styles.rowMeta, { color: C.ink3 }]}>{state}</Text>
+      </View>
+    </Pressable>
+  );
+}
+
+function ExploreSkeleton() {
+  const C = useColors();
+
+  return (
+    <View style={styles.list}>
+      {SKELETON_ROWS.map((row) => (
+        <View key={row} style={[styles.row, { backgroundColor: C.surface }, raised(C)]}>
+          <Skeleton width={TILE} height={TILE} />
+          <View style={styles.skeletonInfo}>
+            <Skeleton width="52%" height={13} />
+            <Skeleton width="86%" height={11} />
+          </View>
+        </View>
+      ))}
     </View>
   );
 }
@@ -154,34 +248,26 @@ export default function ExploreScreen() {
   );
 
   const renderItem = useCallback(
-    ({ item, index }: ListRenderItemInfo<PublicLoungeSummary>) => (
-      <LoungeCard
-        name={item.lounge.name}
-        description={item.lounge.description || undefined}
-        iconUrl={item.lounge.icon_url}
-        isPublic={item.lounge.is_public}
-        showJoined={item.isMember}
-        index={index}
-        onPress={() => openLounge(item.lounge.id)}
-        onJoin={() => join(item)}
-        joining={joinLounge.isPending && joinLounge.variables === item.lounge.id}
+    ({ item }: ListRenderItemInfo<PublicLoungeSummary>) => (
+      <LoungeRow
+        item={item}
+        busy={joinLounge.isPending && joinLounge.variables === item.lounge.id}
+        onPress={() => join(item)}
       />
     ),
-    [join, joinLounge.isPending, joinLounge.variables, openLounge]
+    [join, joinLounge.isPending, joinLounge.variables]
   );
 
-  const resultCount = data?.length ?? 0;
   const query = debounced.trim();
 
   const empty = useMemo(
     () =>
       query.length > 0 ? (
-        <Notice kicker="NOTHING MATCHED" body={`No public lounge mentions "${query}".`} />
+        <QuietCard line={`Nothing matched "${query}".`} />
       ) : (
-        <Notice
-          kicker="NO PUBLIC LOUNGES YET"
-          body="Be the first — create one and make it public."
-          action={{ label: 'CREATE A LOUNGE', onPress: () => router.push('/lounge/create') }}
+        <QuietCard
+          line="No public lounges yet."
+          action={{ label: 'Create one', onPress: () => router.push('/lounge/create') }}
         />
       ),
     [query]
@@ -191,48 +277,46 @@ export default function ExploreScreen() {
     <Screen padded={false}>
       <Animated.View style={[styles.flex, moduleStyle]}>
         {/*
-          The code field and the search field sit OUTSIDE the FlatList on
-          purpose. As a ListHeaderComponent they would remount whenever the list
-          re-renders, which drops the keyboard mid-word.
+          The code and search fields sit OUTSIDE the FlatList on purpose. As a
+          ListHeaderComponent they would remount whenever the list re-renders,
+          which drops the keyboard mid-word.
         */}
-        <View style={[styles.head, { borderBottomColor: C.rule }]}>
-          <Text style={[styles.headTitle, { color: C.ink }]}>Explore</Text>
+        <View style={styles.head}>
+          <View style={styles.masthead}>
+            <Text style={[styles.title, { color: C.ink }]}>Explore</Text>
+            <Text style={[styles.summary, { color: C.ink2 }]}>
+              Public lounges, or drop in a code.
+            </Text>
+          </View>
 
           <JoinByCode onJoined={handleJoined} />
 
           <TextInput
             value={search}
             onChangeText={setSearch}
-            placeholder="Search public lounges"
+            placeholder="Search"
             placeholderTextColor={C.ink3}
             autoCapitalize="none"
             autoComplete="off"
             autoCorrect={false}
             accessibilityLabel="Search public lounges"
             selectionColor={C.live}
-            style={[
-              styles.search,
-              { backgroundColor: C.bgRecessed, borderColor: C.rule, color: C.ink },
-            ]}
+            style={[styles.well, styles.search, { backgroundColor: C.bgRecessed, color: C.ink }, pressedShadow(C)]}
           />
         </View>
 
         {isError ? (
-          <Notice
-            kicker="COULD NOT REACH EXPLORE"
-            body={loungeErrorMessage(error, 'Check your connection and try again.')}
-            action={{ label: 'TRY AGAIN', onPress: () => void refetch() }}
-          />
+          <View style={styles.list}>
+            <QuietCard
+              line={loungeErrorMessage(error, 'Could not reach Explore.')}
+              action={{ label: 'Try again', onPress: () => void refetch() }}
+            />
+          </View>
         ) : isPending ? (
-          <LoungeListSkeleton count={3} />
+          <ExploreSkeleton />
         ) : (
           <>
-            <View style={[styles.rule, { borderBottomColor: C.rule }]}>
-              <Text style={[styles.ruleKicker, { color: C.ink3 }]}>PUBLIC LOUNGES</Text>
-              <Text style={[styles.ruleCount, { color: C.ink3 }]}>
-                {`${resultCount} ${resultCount === 1 ? 'RESULT' : 'RESULTS'}`}
-              </Text>
-            </View>
+            <Text style={[styles.sectionKicker, { color: C.ink3 }]}>Public lounges</Text>
 
             <FlatList
               data={data}
@@ -281,8 +365,8 @@ function JoinByCode({ onJoined }: { onJoined: (loungeId: string) => void }) {
         onJoined(loungeId);
       },
       /*
-        The query layer's message for a miss is a longer sentence; §7 pins this
-        one string, so an unmatched code always reports exactly that and only a
+        The query layer's message for a miss is a longer sentence; this string is
+        pinned, so an unmatched code always reports exactly that and only a
         genuinely different failure (offline, RLS) gets its own wording.
       */
       onError: (err) => {
@@ -294,11 +378,11 @@ function JoinByCode({ onJoined }: { onJoined: (loungeId: string) => void }) {
 
   return (
     <View style={styles.codeBlock}>
-      <View style={[styles.codeRow, { borderColor: C.rule2 }]}>
+      <View style={styles.codeRow}>
         <TextInput
           value={code}
           onChangeText={handleChange}
-          placeholder="8-CHARACTER INVITE CODE"
+          placeholder="INVITE CODE"
           placeholderTextColor={C.ink3}
           autoCapitalize="characters"
           autoComplete="off"
@@ -308,27 +392,29 @@ function JoinByCode({ onJoined }: { onJoined: (loungeId: string) => void }) {
           selectionColor={C.live}
           onSubmitEditing={handleSubmit}
           returnKeyType="go"
-          style={[styles.codeInput, { backgroundColor: C.surface, color: C.ink }]}
+          style={[styles.well, styles.code, { backgroundColor: C.bgRecessed, color: C.ink }, pressedShadow(C)]}
         />
 
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Join with this code"
+          accessibilityState={{ busy: join.isPending }}
           disabled={join.isPending}
           onPress={handleSubmit}
           style={({ pressed }) => [
             styles.joinCell,
-            { backgroundColor: pressed ? C.liveText : C.live },
-            join.isPending && styles.joinBusy,
+            { backgroundColor: C.pill },
+            dropped(C, 'md'),
+            (pressed || join.isPending) && styles.pressedRow,
           ]}>
-          <Text style={[styles.joinLabel, { color: C.onLive }]}>
-            {join.isPending ? '···' : 'JOIN'}
+          <Text style={[styles.joinLabel, { color: C.pillInk }]}>
+            {join.isPending ? '···' : 'Join'}
           </Text>
         </Pressable>
       </View>
 
       {error ? (
-        <Text accessibilityLiveRegion="polite" style={[styles.codeError, { color: C.danger }]}>
+        <Text accessibilityLiveRegion="polite" style={[styles.codeError, { color: C.liveText }]}>
           {error}
         </Text>
       ) : null}
@@ -344,112 +430,146 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
   },
+  pressedRow: {
+    opacity: 0.7,
+  },
 
   head: {
-    paddingHorizontal: GUTTER,
     paddingTop: 14,
-    paddingBottom: 12,
-    borderBottomWidth: Rule.major,
+    paddingHorizontal: FIELD_GUTTER,
   },
-  headTitle: {
-    ...Type.display(22),
-    marginBottom: 10,
+  masthead: {
+    paddingHorizontal: GUTTER - FIELD_GUTTER,
+  },
+  title: {
+    ...Type.display(30),
+    letterSpacing: tracking(30, -0.03),
+  },
+  summary: {
+    ...Type.body(13.5),
+    marginTop: 5,
   },
 
+  /* ------------------------------------------------------- the two wells */
+
+  /** The recessed control: 52 tall, house corner, sunk into the ground. */
+  well: {
+    height: FIELD,
+    borderRadius: Radii.md,
+    paddingHorizontal: Space.lg,
+    /*
+      A fixed line height inside a fixed-height TextInput mis-centres the caret
+      on Android, so these set the family and size only.
+    */
+    paddingVertical: 0,
+  },
   codeBlock: {
-    gap: 6,
+    marginTop: 22,
+    gap: Space.sm,
   },
   codeRow: {
     flexDirection: 'row',
-    borderWidth: Rule.hair,
+    gap: 11,
   },
-  /*
-    Explicit font parts rather than a spread of Type.heading: a lineHeight on a
-    RN TextInput mis-centres the caret on Android, and this control's height is
-    fixed by the 44px floor anyway.
-  */
-  codeInput: {
+  code: {
     flex: 1,
     minWidth: 0,
-    height: TOUCH_TARGET,
-    paddingHorizontal: 10,
-    fontFamily: Fonts.extrabold,
-    fontSize: 13,
-    letterSpacing: 13 * 0.14,
+    fontFamily: Fonts.semibold,
+    fontSize: 15,
+    letterSpacing: tracking(15, 0.08),
   },
-  joinCell: {
-    width: JOIN_CELL,
-    minHeight: TOUCH_TARGET,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  joinBusy: {
-    opacity: 0.6,
-  },
-  joinLabel: {
-    ...Type.heading(11),
-    letterSpacing: 11 * 0.08,
-  },
-  codeError: {
-    ...Type.body(13),
-    lineHeight: 18,
-  },
-  /*
-    The prototype draws this at 40px/14px. Raised to the 44px target and 16px
-    body floors — both are non-negotiable and the block has the room.
-  */
   search: {
-    height: TOUCH_TARGET,
-    marginTop: Space.sm,
-    paddingHorizontal: 10,
-    borderWidth: Rule.hair,
+    marginTop: 11,
     fontFamily: Fonts.regular,
     fontSize: 16,
   },
-
-  rule: {
-    flexDirection: 'row',
+  joinCell: {
+    width: JOIN_CELL,
+    height: FIELD,
+    borderRadius: Radii.md,
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: GUTTER,
-    paddingVertical: 10,
-    borderBottomWidth: Rule.hair,
+    justifyContent: 'center',
   },
-  ruleKicker: {
-    ...Type.label(10),
+  joinLabel: {
+    fontFamily: Fonts.semibold,
+    fontSize: 14,
+    lineHeight: 18,
   },
-  ruleCount: {
-    ...Type.label(10),
+  codeError: {
+    ...Type.body(13),
   },
 
+  /* ---------------------------------------------------------- the rows */
+
+  sectionKicker: {
+    ...Type.label(10.5),
+    letterSpacing: tracking(10.5, 0.15),
+    paddingHorizontal: GUTTER,
+    paddingTop: 28,
+    paddingBottom: 10,
+  },
+  list: {
+    paddingHorizontal: ROW_GUTTER,
+    paddingTop: 28,
+  },
   listContent: {
     flexGrow: 1,
+    paddingHorizontal: ROW_GUTTER,
     paddingBottom: LIST_TAIL,
   },
-
-  notice: {
-    paddingVertical: 26,
-    paddingHorizontal: 14,
-    borderBottomWidth: Rule.hair,
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: ROW_GUTTER,
+    padding: 13,
+    borderRadius: Radii.xl,
+    marginBottom: 10,
   },
-  noticeKicker: {
-    ...Type.label(10),
-    marginBottom: 8,
-  },
-  noticeBody: {
-    ...Type.body(14),
-    lineHeight: 21,
-  },
-  action: {
-    marginTop: 14,
-    alignSelf: 'flex-start',
-    minHeight: 46,
+  tile: {
+    width: TILE,
+    height: TILE,
+    borderRadius: Radii.lg,
+    alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: Space.lg,
-    borderWidth: Rule.hair,
+    paddingHorizontal: Space.xs,
   },
-  actionLabel: {
-    ...Type.heading(11),
-    letterSpacing: 11 * 0.1,
+  tag: {
+    fontFamily: Fonts.extrabold,
+    fontSize: 14,
+    lineHeight: 17,
+    letterSpacing: tracking(14, -0.02),
+  },
+  rowInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  rowName: {
+    fontFamily: Fonts.semibold,
+    fontSize: 15,
+    lineHeight: 19,
+  },
+  rowDesc: {
+    ...Type.body(12.5),
+    lineHeight: 17,
+    marginTop: 3,
+  },
+  rowMeta: {
+    ...Type.label(11),
+    marginTop: 5,
+  },
+  skeletonInfo: {
+    flex: 1,
+    gap: Space.sm,
+  },
+
+  quiet: {
+    marginTop: Space.sm,
+    padding: Space.xl,
+    borderRadius: Radii.xl,
+    alignItems: 'flex-start',
+    gap: Space.lg,
+  },
+  quietLine: {
+    ...Type.body(14),
   },
 });
