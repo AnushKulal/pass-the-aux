@@ -31,6 +31,8 @@ import {
   ChevronRight,
   Film,
   Gamepad2,
+  HeadphoneOff,
+  Headphones,
   ListMusic,
   MessageCircle,
   Mic,
@@ -133,6 +135,9 @@ export default function RoomScreen() {
   const [peopleView, setPeopleView] = useState<PeopleView>('chart');
   const [addVisible, setAddVisible] = useState(false);
   const [micOn, setMicOn] = useState(false);
+  const [deafened, setDeafened] = useState(false);
+  /** Muted for this listener only. Never published, never announced. */
+  const [mutedIds, setMutedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [requestSent, setRequestSent] = useState(false);
   const requestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -246,12 +251,50 @@ export default function RoomScreen() {
   const openChat = useCallback(() => setSheet('chat'), []);
   const openPeople = useCallback(() => setSheet('people'), []);
 
+  /*
+    Mic, deafen and per-person mute are UI state only — there is no voice
+    transport in this build. They are here because the controls have to exist
+    and behave correctly before the audio layer arrives, and because their
+    RELATIONSHIPS are the part worth getting right now: deafening mutes you,
+    and un-deafening does not un-mute you.
+  */
   const handleMic = useCallback(() => {
     setMicOn((on) => {
       if (!on) toast.show('Voice is not live yet', 'info');
       return !on;
     });
   }, [toast]);
+
+  /**
+   * Deafen: stop hearing the room, and stop the room hearing you.
+   *
+   * Deafening forces the mic off — talking to people you cannot hear is not a
+   * state anyone wants to be in by accident. Un-deafening deliberately does NOT
+   * restore the mic: coming back should be a decision, not a surprise.
+   */
+  const handleDeafen = useCallback(() => {
+    setDeafened((on) => {
+      const next = !on;
+      if (next) setMicOn(false);
+      else toast.show('Voice is not live yet', 'info');
+      return next;
+    });
+  }, [toast]);
+
+  /**
+   * Mute one person, for you only.
+   *
+   * A local decision that never leaves the device — nobody is told they have
+   * been muted, because that would make a private preference into a social act.
+   */
+  const toggleMemberMute = useCallback((personId: string) => {
+    setMutedIds((current) => {
+      const next = new Set(current);
+      if (next.has(personId)) next.delete(personId);
+      else next.add(personId);
+      return next;
+    });
+  }, []);
 
   const handleShuffle = useCallback(() => toast.show('Shuffle is off', 'info'), [toast]);
   const handleRepeat = useCallback(() => toast.show('Repeat is off', 'info'), [toast]);
@@ -404,6 +447,8 @@ export default function RoomScreen() {
 
         {peopleView === 'chart' ? (
           <ParticipantStrip
+            mutedIds={mutedIds}
+            onSelectPerson={toggleMemberMute}
             roomId={roomId}
             hostId={room?.host_id ?? null}
             currentUserId={userId}
@@ -426,8 +471,14 @@ export default function RoomScreen() {
           <LobbyRow
             icon={micOn ? Mic : MicOff}
             label="Microphone"
-            value={micOn ? 'On' : 'Off'}
+            value={deafened ? 'Off — deafened' : micOn ? 'On' : 'Off'}
             onPress={handleMic}
+          />
+          <LobbyRow
+            icon={deafened ? HeadphoneOff : Headphones}
+            label="Deafen"
+            value={deafened ? 'On' : 'Off'}
+            onPress={handleDeafen}
           />
           <LobbyRow icon={MessageCircle} label="Chat" onPress={openChat} />
           <LobbyRow

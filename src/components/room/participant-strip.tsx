@@ -33,6 +33,7 @@
  */
 
 import { Image } from 'expo-image';
+import { VolumeX } from 'lucide-react-native';
 import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   FlatList,
@@ -150,6 +151,8 @@ function readingFor(isMe: boolean, isSynced: boolean, driftMs: number, C: Palett
 // ------------------------------------------------------------ drift chart
 
 export type ParticipantStripProps = {
+  /** Ids this listener has muted locally. Never published, never announced. */
+  mutedIds?: ReadonlySet<string>;
   roomId: string | null;
   hostId: string | null;
   currentUserId: string | null;
@@ -169,6 +172,7 @@ export function ParticipantStrip({
   header,
   footer,
   onSelectPerson,
+  mutedIds,
   contentBottomInset = 0,
 }: ParticipantStripProps) {
   const C = useColors();
@@ -190,11 +194,12 @@ export function ParticipantStrip({
           // constant keeps their props stable, so a 3s drift tick re-renders
           // exactly one row instead of the whole list.
           driftMs={isMe ? driftMs : 0}
+          muted={mutedIds?.has(item.userId) ?? false}
           onSelect={onSelectPerson}
         />
       );
     },
-    [hostId, currentUserId, driftMs, onSelectPerson]
+    [hostId, currentUserId, driftMs, mutedIds, onSelectPerson]
   );
 
   const participants = data ?? [];
@@ -240,6 +245,8 @@ type DriftRowProps = {
   isMe: boolean;
   /** The viewer's own measured drift. Only applied to the viewer's own row. */
   driftMs: number;
+  /** Muted for THIS listener only. Never published, never announced. */
+  muted?: boolean;
   onSelect?: (userId: string) => void;
 };
 
@@ -248,6 +255,7 @@ const DriftRow = memo(function DriftRow({
   isOnAux,
   isMe,
   driftMs,
+  muted = false,
   onSelect,
 }: DriftRowProps) {
   const C = useColors();
@@ -260,7 +268,7 @@ const DriftRow = memo(function DriftRow({
   const name = isMe ? 'You' : firstNameOf(participant.displayName);
   const label = `${isMe ? 'You' : participant.displayName}${isOnAux ? ', on aux' : ''}, ${
     reading.measured ? `off by ${reading.value}, ${reading.rung}` : reading.rung
-  }`;
+  }${muted ? ', muted for you' : ''}`;
 
   const body = (
     <>
@@ -275,6 +283,13 @@ const DriftRow = memo(function DriftRow({
       <Text numberOfLines={1} style={[styles.rowName, { color: reading.color }]}>
         {name}
       </Text>
+
+      {/*
+        Muted, for this listener only. Ink rather than accent: red is reserved
+        for live/playing/in-sync here, and someone you have quietly turned down
+        is the opposite of an event. It reads as absence, which is correct.
+      */}
+      {muted ? <VolumeX size={13} strokeWidth={2} color={C.ink3} /> : null}
 
       <View style={styles.plot}>
         {/* The zero point: where the Session says everyone should be. */}
