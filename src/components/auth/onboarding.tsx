@@ -14,7 +14,7 @@
  */
 
 import { Check } from 'lucide-react-native';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -36,16 +36,16 @@ import {
   Duration,
   Fonts,
   Radii,
+  Rule,
   Space,
   TOUCH_TARGET,
   Type,
   dropped,
-  pressed as recessed,
   tracking,
 } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
-/** The design's field well. No border — the recess is the whole affordance. */
+/** The field. A hairline at rest, an accent ring while you are in it. */
 const FIELD_HEIGHT = 52;
 /** The multiline variant: the bio well on Profile setup. */
 const AREA_MIN_HEIGHT = 46;
@@ -143,11 +143,28 @@ export function OnboardingField({
 }: OnboardingFieldProps) {
   const C = useColors();
 
+  /**
+   * Focus is tracked so the field can answer when you touch it.
+   *
+   * DELIBERATE DEVIATION from the design, which draws these as inset wells.
+   * That recipe works in a static mock and fails at 52px in the running app:
+   * on a dark ground the light half of the pair sits at 3.2% alpha, so all you
+   * actually see is the dark smudge, and the field reads as dirty rather than
+   * recessed. A hairline gives the same containment cleanly, and spending the
+   * feedback on FOCUS instead puts the emphasis where a form needs it.
+   */
+  const [focused, setFocused] = useState(false);
+
+  const active = focused || Boolean(error);
+  const edge = error ? C.live : focused ? C.live : C.rule;
+
   return (
     <View>
       {label ? <Text style={[styles.kicker, { color: C.ink3 }]}>{label}</Text> : null}
 
       <TextInput
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
@@ -166,8 +183,16 @@ export function OnboardingField({
         selectionColor={C.live}
         style={[
           multiline ? styles.area : styles.field,
-          { backgroundColor: C.bgRecessed, color: C.ink },
-          recessed(C),
+          { backgroundColor: C.bgRecessed, color: C.ink, borderColor: edge },
+          /*
+            A soft ring while focused — the one moment this screen answers back.
+            Nothing at rest, so a quiet form stays quiet.
+
+            The CSS string form, not the array: `TextStyle` types `boxShadow` as
+            a string, and only `ViewStyle` accepts the structured array. Same
+            renderer either way.
+          */
+          active ? { boxShadow: `0 0 0 3px ${C.liveWash}` } : null,
         ]}
       />
 
@@ -295,6 +320,7 @@ const styles = StyleSheet.create({
   field: {
     height: FIELD_HEIGHT,
     borderRadius: Radii.md,
+    borderWidth: Rule.hair,
     paddingHorizontal: Space.lg,
     paddingVertical: 0,
     fontFamily: Fonts.regular,
@@ -303,6 +329,7 @@ const styles = StyleSheet.create({
   area: {
     minHeight: AREA_MIN_HEIGHT,
     borderRadius: Radii.sm,
+    borderWidth: Rule.hair,
     paddingHorizontal: 14,
     paddingVertical: 13,
     fontFamily: Fonts.regular,

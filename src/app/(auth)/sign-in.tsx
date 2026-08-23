@@ -2,8 +2,8 @@
  * Sign in.
  *
  * Built from design/v2/aux-v2.dc.html, screen "Sign in": title, two recessed
- * wells, the filled Continue, a rule with OR through it, and Google on a raised
- * card. The wordmark, the pitch paragraph and the Spotify note the previous
+ * fields, the filled Continue, a rule with OR through it, and Google outlined
+ * beside it. The wordmark, the pitch paragraph and the Spotify note the previous
  * version opened with are gone — the lede carries the one fact that changes
  * what someone does here.
  *
@@ -39,7 +39,7 @@ import {
 import { useToast } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
-import { Fonts, Radii, Rule, Space, Type, raisedLarge, tracking } from '@/lib/theme';
+import { Fonts, Radii, Rule, Space, Type, tracking } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
 // Hands the redirect URL back to `openAuthSessionAsync` and closes the popup.
@@ -240,10 +240,15 @@ export default function SignInScreen() {
               onPress={() => {
                 void continueWithGoogle();
               }}
+              /*
+                Outlined, not raised. With the fields drawn as hairlines now, a
+                heavy lift here made the SECONDARY action the loudest object on
+                the page. One filled thing — Continue — and everything else
+                outlined: that is the whole hierarchy of this screen.
+              */
               style={({ pressed }) => [
                 styles.google,
-                { backgroundColor: C.surface },
-                raisedLarge(C),
+                { backgroundColor: C.surface, borderColor: C.rule },
                 busy !== null && busy !== 'google' ? styles.blocked : null,
                 pressed ? styles.held : null,
               ]}>
@@ -353,7 +358,7 @@ const styles = StyleSheet.create({
     maxWidth: 560,
     alignSelf: 'center',
     paddingHorizontal: GUTTER,
-    paddingTop: Space.xxxl,
+    paddingTop: 44,
     paddingBottom: Space.huge,
   },
 
@@ -383,6 +388,7 @@ const styles = StyleSheet.create({
   google: {
     height: GOOGLE_HEIGHT,
     borderRadius: Radii.button,
+    borderWidth: Rule.hair,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
