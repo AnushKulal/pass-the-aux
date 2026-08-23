@@ -121,10 +121,8 @@ function RootNavigator({ fontsSettled }: { fontsSettled: boolean }) {
         }}>
         <Stack.Screen name="(auth)" options={{ animation: 'fade' }} />
         <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
-        <Stack.Screen name="lounge/[id]" />
         {/* A Session is a place you drop into, so it rises from the bottom. */}
         <Stack.Screen name="room/[id]" options={{ animation: 'slide_from_bottom' }} />
-        <Stack.Screen name="settings/connections" />
         <Stack.Screen name="spotify-callback" />
         <Stack.Screen name="+not-found" options={{ animation: 'fade' }} />
       </Stack>
