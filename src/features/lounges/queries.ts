@@ -57,7 +57,7 @@ export type LoungeSessionSummary = {
   room: RoomRow;
   listeners: number;
   hostName: string;
-  nowPlaying: { title: string; artist: string } | null;
+  nowPlaying: { title: string; artist: string; artworkUrl: string | null } | null;
 };
 
 export type CreateLoungeInput = {
@@ -414,7 +414,7 @@ async function fetchLoungeSessions(loungeId: string): Promise<LoungeSessionSumma
     supabase.from('profiles').select('*').in('id', hostIds),
     // A brand-new Session has no track yet; skip the round trip entirely.
     trackIds.length > 0
-      ? supabase.from('tracks').select('id, title, artist').in('id', trackIds)
+      ? supabase.from('tracks').select('id, title, artist, artwork_url').in('id', trackIds)
       : Promise.resolve(null),
   ]);
 
@@ -432,7 +432,9 @@ async function fetchLoungeSessions(loungeId: string): Promise<LoungeSessionSumma
       room,
       listeners: listeners.get(room.id) ?? 0,
       hostName: hosts.get(room.host_id)?.display_name || 'Someone',
-      nowPlaying: track ? { title: track.title, artist: track.artist } : null,
+      nowPlaying: track
+          ? { title: track.title, artist: track.artist, artworkUrl: track.artwork_url }
+          : null,
     };
   });
 }

@@ -1,9 +1,10 @@
 /**
  * The app shell.
  *
- * A row: the 58px lounge rail on the left, the screen column on the right, and
- * the 54px tab bar pinned to the bottom of that column — so the bar starts
- * where the rail's rule ends rather than running under it.
+ * A row: the 58px lounge rail on the left and the screen column on the right,
+ * with the navigation dock FLOATING over the bottom of that column rather than
+ * being pinned to it. The dock takes no layout space, so the column gives that
+ * space back as `sceneStyle` padding — see DOCK_CLEARANCE.
  *
  * The profile gate is enforced by REDIRECTING to profile-setup, not by hiding
  * the rail and bar in place. Hiding them alone left a signed-in user on an
@@ -13,93 +14,15 @@
 
 import { Redirect } from 'expo-router';
 import { Tabs, type BottomTabBarProps } from 'expo-router/js-tabs';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { StyleSheet, View } from 'react-native';
 
 import { LoungeRail } from '@/components/shell/lounge-rail';
 import { NavDock } from '@/components/shell/nav-dock';
 import { UpdateBanner } from '@/components/shell/update-banner';
 import { useAuth } from '@/lib/auth';
 import { useLocalProfile } from '@/lib/providers';
-import { Dock, Rule, Space, Type } from '@/lib/theme';
+import { Dock } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
-
-/** Content height of the bar, above the device's bottom safe-area inset. */
-const TAB_BAR_HEIGHT = 54;
-/** The mark under the active cell's label. */
-const ACTIVE_BAR_WIDTH = 22;
-
-/**
- * The three cells, in order, keyed by route name.
- *
- * `lounges` is deliberately absent: lounges are the rail's job in this
- * direction. The route still exists and is still reachable — it just has no
- * cell competing with FEED / EXPLORE / YOU.
- */
-const CELLS = [
-  { name: 'index', label: 'FEED' },
-  { name: 'explore', label: 'EXPLORE' },
-  { name: 'profile', label: 'YOU' },
-] as const;
-
-function PatchbayTabBar({ state, navigation }: BottomTabBarProps) {
-  const C = useColors();
-  const insets = useSafeAreaInsets();
-
-  return (
-    <View
-      style={[
-        styles.tabBar,
-        {
-          height: TAB_BAR_HEIGHT + insets.bottom,
-          paddingBottom: insets.bottom,
-          backgroundColor: C.bg,
-          borderTopColor: C.rule,
-        },
-      ]}>
-      {CELLS.map((cell, position) => {
-        const index = state.routes.findIndex((route) => route.name === cell.name);
-        if (index === -1) return null;
-
-        const route = state.routes[index];
-        const focused = state.index === index;
-
-        const onPress = () => {
-          const event = navigation.emit({
-            type: 'tabPress',
-            target: route.key,
-            canPreventDefault: true,
-          });
-          if (!focused && !event.defaultPrevented) {
-            navigation.navigate(route.name, route.params);
-          }
-        };
-
-        return (
-          <Pressable
-            key={route.key}
-            onPress={onPress}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: focused }}
-            accessibilityLabel={cell.label}
-            style={[
-              styles.cell,
-              position > 0 && { borderLeftWidth: Rule.hair, borderLeftColor: C.rule },
-            ]}>
-            <Text style={[styles.cellLabel, { color: focused ? C.ink : C.ink2 }]}>
-              {cell.label}
-            </Text>
-            {/*
-              The one accent in the bar. It marks the cell you are actually on —
-              which is a "you are here", not a decoration, so it earns the red.
-            */}
-            {focused ? <View style={[styles.activeBar, { backgroundColor: C.live }]} /> : null}
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}
 
 const renderTabBar = (props: BottomTabBarProps) => <NavDock {...props} />;
 
@@ -195,31 +118,5 @@ const styles = StyleSheet.create({
   column: {
     flex: 1,
     minWidth: 0,
-  },
-  tabBar: {
-    flexDirection: 'row',
-    /*
-      2px, not a hairline: this is a boundary between major sections of the
-      app, and in this direction that weight is what separation is made of.
-      No elevation — Android's default would add a shadow competing with it.
-    */
-    borderTopWidth: Rule.major,
-    elevation: 0,
-  },
-  cell: {
-    flex: 1,
-    alignItems: 'flex-start',
-    justifyContent: 'center',
-    paddingHorizontal: Space.md,
-    gap: 3,
-  },
-  cellLabel: {
-    ...Type.heading(11),
-    // .1em, per the spec's tab label. Wider than Type.heading's default.
-    letterSpacing: 1.1,
-  },
-  activeBar: {
-    width: ACTIVE_BAR_WIDTH,
-    height: Rule.major,
   },
 });
