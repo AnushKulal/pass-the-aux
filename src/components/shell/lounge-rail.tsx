@@ -32,6 +32,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useTotalUnread } from '@/features/dm';
 import { useMyLounges, type LoungeSummary } from '@/features/lounges/queries';
 import { Rule, Space, Type } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
@@ -67,13 +68,15 @@ export type LoungeRailProps = {
   /**
    * Unread direct messages, summed across conversations. `0` hides the badge.
    *
-   * TODO(schema): there are no `conversations` / `direct_messages` tables yet
-   * (see the handoff's Schema gaps), so nothing can supply this today.
+   * Optional, and normally left unset: the tile reads `useTotalUnread()` for
+   * itself, which shares the inbox query key so the badge and the Messages
+   * screen cost one fetch between them and can never disagree. Pass a number
+   * only to override it (a screenshot, a test).
    */
   unreadCount?: number;
   /**
-   * Opens Messages. Left optional because the DM screens are not routed yet —
-   * wire it in one line from `(tabs)/_layout` once they are.
+   * Overrides where the DM tile goes. Unset, it routes to the inbox — the tile
+   * is the only way into Messages, so it cannot depend on a caller wiring it.
    */
   onOpenMessages?: () => void;
 };
@@ -168,11 +171,29 @@ function keyExtractor(item: LoungeSummary) {
   return item.lounge.id;
 }
 
-export function LoungeRail({ unreadCount = 0, onOpenMessages }: LoungeRailProps) {
+export function LoungeRail({ unreadCount, onOpenMessages }: LoungeRailProps) {
   const C = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { data: lounges } = useMyLounges();
+
+  /*
+    The rail is mounted for the whole session, so this doubles as the app's
+    inbox warm-up: by the time the tile is tapped, Messages has rows to paint.
+    An explicit `unreadCount` still wins, for callers that want to drive it.
+  */
+  const totalUnread = useTotalUnread();
+  const unread = unreadCount ?? totalUnread;
+
+  const openMessages = useCallback(() => {
+    if (onOpenMessages) {
+      onOpenMessages();
+      return;
+    }
+    // `navigate`, not `push`: Messages is a screen of the tabs navigator, and
+    // tapping the tile twice should land on it, not stack a second copy.
+    router.navigate('/messages');
+  }, [onOpenMessages, router]);
 
   const openLounge = useCallback(
     (id: string) => router.push({ pathname: '/lounge/[id]', params: { id } }),
@@ -237,18 +258,20 @@ export function LoungeRail({ unreadCount = 0, onOpenMessages }: LoungeRailProps)
       </Pressable>
 
       <Pressable
-        onPress={onOpenMessages}
-        disabled={onOpenMessages === undefined}
+        onPress={openMessages}
         accessibilityRole="button"
-        accessibilityLabel={unreadCount > 0 ? `Messages, ${unreadCount} unread` : 'Messages'}
+        accessibilityLabel={unread > 0 ? `Messages, ${unread} unread` : 'Messages'}
         style={styles.target}>
         {({ pressed }) => (
           <View style={[styles.visual, { borderColor: pressed ? C.ink : C.rule2 }]}>
             <MessageCircle size={ICON_SIZE} color={pressed ? C.ink : C.ink2} strokeWidth={2} />
-            {unreadCount > 0 ? (
+            {/* Inset at the tile's top-right corner, per §5. The accent is
+                earned: an unread badge is one of the few things in DMs the
+                reserved colour is actually for. */}
+            {unread > 0 ? (
               <View style={[styles.badge, { backgroundColor: C.live }]}>
                 <Text style={[styles.badgeText, { color: C.onLive }]} numberOfLines={1}>
-                  {unreadCount > 99 ? '99+' : unreadCount}
+                  {unread > 99 ? '99+' : unread}
                 </Text>
               </View>
             ) : null}
