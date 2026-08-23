@@ -48,11 +48,30 @@
       "eas": {
         "projectId": "3c252219-3619-434b-9ab4-f0931d09722a"
       },
+      "patch": 3,
       "releaseNotes": [
-        "This sheet is the new update prompt — it rises from the bottom and lists the patch",
-        "Navigation fades everywhere now; only a Session slides up",
-        "Direct messages: inbox, threads and composer",
-        "Follows light and dark with the rest of the app"
+        "Update notes now cover every patch you skipped, not just the newest",
+        "The update sheet rises from the bottom and follows light and dark"
+      ],
+      "changelog": [
+        {
+          "patch": 3,
+          "notes": [
+            "Update notes now cover every patch you skipped, not just the newest",
+            "The update sheet rises from the bottom and follows light and dark"
+          ]
+        },
+        {
+          "patch": 2,
+          "notes": [
+            "Navigation fades everywhere; only a Session slides up",
+            "Returning to a screen animates properly instead of snapping"
+          ]
+        },
+        {
+          "patch": 1,
+          "notes": ["Direct messages: inbox, threads and composer"]
+        }
       ]
     },
     "owner": "anush_kulal",

@@ -13,14 +13,24 @@
  * Nothing here is destructive, so none of the three needs a confirmation.
  *
  * WHERE THE NOTES COME FROM, AND WHY IT HAS TO WORK THIS WAY:
- * this component is running on the OLD bundle, so it cannot import the new
- * version's changelog — that code does not exist on the device yet. What it CAN
- * read is the incoming update's manifest, which carries that update's whole app
- * config. So the notes live in `expo.extra.releaseNotes` in app.json: they ship
- * inside the update that they describe, and are readable before it is applied.
- * Editing that array is how you change what this prompt says.
+ * this component runs on the OLD bundle, so it cannot import the new version's
+ * changelog — that code is not on the device yet. What it CAN read is the
+ * incoming update's manifest, which carries that update's entire app config. So
+ * the changelog lives in `expo.extra.changelog` in app.json: it ships inside the
+ * update it describes, and is readable before that update is applied.
+ *
+ * WHY IT IS CUMULATIVE:
+ * updates are not applied one at a time. Someone who has not opened the app in
+ * a month jumps straight from patch 2 to patch 7, and listing only patch 7 hides
+ * five patches' worth of fixes they are also getting. So the prompt compares the
+ * incoming changelog against the patch THIS bundle is on and shows everything in
+ * between — which is why every entry carries its own `patch` number.
+ *
+ * To publish a patch: add an entry to the top of `changelog` and set `patch` to
+ * the same number. Those two must agree or the newest entry will not be shown.
  */
 
+import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -33,6 +43,12 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X } from 'lucide-react-native';
 
+import {
+  at,
+  NOTHING_PENDING,
+  readPendingNotes,
+  type Pending,
+} from '@/lib/release-notes';
 import { Duration, PointerEvents, Rule, Space, TOUCH_TARGET, Type, ZIndex } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
@@ -45,38 +61,26 @@ const FIRST_CHECK_DELAY_MS = 4_000;
  * A fixed value rather than a measured height: the card is absolutely
  * positioned against the bottom edge, so anything larger than the card puts it
  * fully off-screen, and measuring first would cost a frame in which the sheet
- * is visible but un-animated. 480 clears the tallest form this card takes (a
- * title, four notes and the action row) on every phone size.
+ * is visible but un-animated. 480 clears the tallest form this card takes.
  */
 const SHEET_TRAVEL = 480;
-
-/** Past this the sheet stops being a prompt and starts being a changelog. */
-const MAX_NOTES = 4;
 
 type Phase = 'idle' | 'available' | 'applying';
 
 /**
- * Digs `expo.extra.releaseNotes` out of an update manifest.
+ * Which patch this running bundle is on.
  *
- * Every level is checked rather than cast through, because this reads a
- * document fetched over the network: a manifest from an older publish simply
- * will not have the key, and that has to degrade to "no notes" rather than
- * throw inside the update check and silently disable updating altogether.
+ * `Constants.expoConfig` is the config of the bundle actually executing, which
+ * is what we need — `Updates.manifest` is empty in development and reports the
+ * embedded manifest on a freshly installed build.
+ *
+ * Zero when absent, which is the useful default: a bundle predating the
+ * changelog is treated as older than every entry, so its user sees the full
+ * history rather than nothing.
  */
-function readReleaseNotes(manifest: unknown): string[] {
-  const at = (value: unknown, key: string): unknown =>
-    typeof value === 'object' && value !== null
-      ? (value as Record<string, unknown>)[key]
-      : undefined;
-
-  const notes = at(at(at(manifest, 'extra'), 'expoClient'), 'extra');
-  const list = at(notes, 'releaseNotes');
-
-  if (!Array.isArray(list)) return [];
-
-  return list
-    .filter((note): note is string => typeof note === 'string' && note.trim().length > 0)
-    .slice(0, MAX_NOTES);
+function readCurrentPatch(): number {
+  const patch = at(Constants.expoConfig?.extra, 'patch');
+  return typeof patch === 'number' && Number.isFinite(patch) ? patch : 0;
 }
 
 export function UpdatePrompt() {
@@ -85,7 +89,7 @@ export function UpdatePrompt() {
   const reduced = useReducedMotion();
 
   const [phase, setPhase] = useState<Phase>('idle');
-  const [notes, setNotes] = useState<string[]>([]);
+  const [pending, setPending] = useState<Pending>(NOTHING_PENDING);
   const dismissed = useRef(false);
 
   const y = useSharedValue(SHEET_TRAVEL);
@@ -120,7 +124,7 @@ export function UpdatePrompt() {
 
       // Read the notes off the manifest BEFORE fetching: this is the only
       // description of the new version available to the old bundle.
-      setNotes(readReleaseNotes(result.manifest));
+      setPending(readPendingNotes(result.manifest, readCurrentPatch()));
 
       // Fetch BEFORE offering. "Update now" should restart immediately rather
       // than sit on a spinner over an unknown download on a phone network.
@@ -192,19 +196,28 @@ export function UpdatePrompt() {
 
         {/*
           What actually changed. Omitted entirely rather than shown empty when
-          the incoming manifest predates `extra.releaseNotes` — an empty
-          "What's new" heading is worse than no heading.
+          the incoming manifest predates the changelog — an empty heading is
+          worse than no heading.
         */}
-        {notes.length > 0 ? (
+        {pending.notes.length > 0 ? (
           <View style={[styles.notes, { borderTopColor: C.rule }]}>
-            <Text style={[styles.notesKicker, { color: C.ink3 }]}>IN THIS PATCH</Text>
-            {notes.map((note) => (
+            <Text style={[styles.notesKicker, { color: C.ink3 }]}>
+              {pending.patchCount > 1 ? `IN THE LAST ${pending.patchCount} PATCHES` : 'IN THIS PATCH'}
+            </Text>
+
+            {pending.notes.map((note) => (
               <View key={note} style={styles.note}>
                 {/* A rule, not a bullet glyph — separation is the rule here. */}
                 <View style={[styles.noteMark, { backgroundColor: C.ink3 }]} />
                 <Text style={[styles.noteText, { color: C.ink2 }]}>{note}</Text>
               </View>
             ))}
+
+            {pending.hidden > 0 ? (
+              <Text style={[styles.more, { color: C.ink3 }]}>
+                {`+${pending.hidden} more ${pending.hidden === 1 ? 'fix' : 'fixes'}`}
+              </Text>
+            ) : null}
           </View>
         ) : null}
 
@@ -294,6 +307,11 @@ const styles = StyleSheet.create({
   noteText: {
     ...Type.body(13),
     flex: 1,
+  },
+  more: {
+    ...Type.label(10),
+    // Aligns with the note text, past the 8px mark and its gap.
+    marginLeft: 8 + Space.sm,
   },
   body: {
     ...Type.body(14),
