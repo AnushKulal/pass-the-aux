@@ -139,6 +139,20 @@ export default function TabsLayout() {
             // Each tab screen renders its own header.
             headerShown: false,
             sceneStyle: { backgroundColor: C.bg },
+            /*
+              Every screen in this group animates the same way, and that
+              includes the ones with no tab cell — lounge/[id], settings/*,
+              messages/* and lounges are all siblings of FEED/EXPLORE/YOU here,
+              because none of them declares a nested layout.
+
+              Without this the navigator's default is an instant swap, which is
+              why a screen only ever appeared to animate the FIRST time: what
+              was moving was the content's own entrance stagger firing on mount.
+              Come back to an already-mounted screen and there was no stagger
+              and no transition, so it snapped. Naming the transition here makes
+              arriving look the same every time, mounted or not.
+            */
+            animation: 'fade',
           }}>
           <Tabs.Screen
             name="index"

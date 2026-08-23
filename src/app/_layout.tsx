@@ -117,11 +117,24 @@ function RootNavigator({ fontsSettled }: { fontsSettled: boolean }) {
           // only ever be a second, competing one.
           headerShown: false,
           contentStyle: { backgroundColor: C.bg },
-          animation: 'slide_from_right',
+          /*
+            Fade, not slide.
+            A lateral push reads as "one level deeper into a hierarchy", which
+            is the wrong claim in this app: the rail and the tab bar make almost
+            every destination a SIBLING you can reach from anywhere, not a child
+            of the screen you happen to be on. Fading is also what switching
+            tabs already does, so the whole app now moves one single way.
+            The Session below is the one deliberate exception.
+          */
+          animation: 'fade',
         }}>
         <Stack.Screen name="(auth)" options={{ animation: 'fade' }} />
         <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
-        {/* A Session is a place you drop into, so it rises from the bottom. */}
+        {/*
+          A Session is a place you drop INTO — the one destination that is not a
+          sibling of the rest. It keeps the vertical rise so that arriving in a
+          party feels unlike any other navigation in the app.
+        */}
         <Stack.Screen name="room/[id]" options={{ animation: 'slide_from_bottom' }} />
         <Stack.Screen name="spotify-callback" />
         <Stack.Screen name="+not-found" options={{ animation: 'fade' }} />

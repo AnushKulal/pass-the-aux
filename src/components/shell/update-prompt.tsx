@@ -11,6 +11,14 @@
  *   X           — same as Not now, for anyone who reads a dismiss glyph first
  *
  * Nothing here is destructive, so none of the three needs a confirmation.
+ *
+ * WHERE THE NOTES COME FROM, AND WHY IT HAS TO WORK THIS WAY:
+ * this component is running on the OLD bundle, so it cannot import the new
+ * version's changelog — that code does not exist on the device yet. What it CAN
+ * read is the incoming update's manifest, which carries that update's whole app
+ * config. So the notes live in `expo.extra.releaseNotes` in app.json: they ship
+ * inside the update that they describe, and are readable before it is applied.
+ * Editing that array is how you change what this prompt says.
  */
 
 import * as Updates from 'expo-updates';
@@ -31,7 +39,45 @@ import { useColors } from '@/lib/theme-context';
 /** How long after launch to look, so the check never competes with first paint. */
 const FIRST_CHECK_DELAY_MS = 4_000;
 
+/**
+ * How far below its resting place the sheet starts.
+ *
+ * A fixed value rather than a measured height: the card is absolutely
+ * positioned against the bottom edge, so anything larger than the card puts it
+ * fully off-screen, and measuring first would cost a frame in which the sheet
+ * is visible but un-animated. 480 clears the tallest form this card takes (a
+ * title, four notes and the action row) on every phone size.
+ */
+const SHEET_TRAVEL = 480;
+
+/** Past this the sheet stops being a prompt and starts being a changelog. */
+const MAX_NOTES = 4;
+
 type Phase = 'idle' | 'available' | 'applying';
+
+/**
+ * Digs `expo.extra.releaseNotes` out of an update manifest.
+ *
+ * Every level is checked rather than cast through, because this reads a
+ * document fetched over the network: a manifest from an older publish simply
+ * will not have the key, and that has to degrade to "no notes" rather than
+ * throw inside the update check and silently disable updating altogether.
+ */
+function readReleaseNotes(manifest: unknown): string[] {
+  const at = (value: unknown, key: string): unknown =>
+    typeof value === 'object' && value !== null
+      ? (value as Record<string, unknown>)[key]
+      : undefined;
+
+  const notes = at(at(at(manifest, 'extra'), 'expoClient'), 'extra');
+  const list = at(notes, 'releaseNotes');
+
+  if (!Array.isArray(list)) return [];
+
+  return list
+    .filter((note): note is string => typeof note === 'string' && note.trim().length > 0)
+    .slice(0, MAX_NOTES);
+}
 
 export function UpdatePrompt() {
   const C = useColors();
@@ -39,15 +85,17 @@ export function UpdatePrompt() {
   const reduced = useReducedMotion();
 
   const [phase, setPhase] = useState<Phase>('idle');
+  const [notes, setNotes] = useState<string[]>([]);
   const dismissed = useRef(false);
 
-  const y = useSharedValue(24);
+  const y = useSharedValue(SHEET_TRAVEL);
   const opacity = useSharedValue(0);
 
   const show = useCallback(() => {
     setPhase('available');
-    // 280ms and the standard curve, matching every other module entrance.
-    const ms = reduced ? 0 : Duration.enter;
+    // Sheet duration, not the shorter entrance one — this travels the full
+    // height of the card rather than nudging a module into place.
+    const ms = reduced ? 0 : Duration.sheet;
     y.value = withTiming(0, { duration: ms });
     opacity.value = withTiming(1, { duration: ms });
   }, [opacity, reduced, y]);
@@ -55,9 +103,9 @@ export function UpdatePrompt() {
   const hide = useCallback(() => {
     dismissed.current = true;
     const ms = reduced ? 0 : Duration.press;
+    // Back down the way it came, so dismissing is the entrance reversed.
+    y.value = withTiming(SHEET_TRAVEL, { duration: ms });
     opacity.value = withTiming(0, { duration: ms });
-    y.value = withTiming(24, { duration: ms });
-    // Unmount after the exit rather than mid-animation.
     setTimeout(() => setPhase('idle'), ms);
   }, [opacity, reduced, y]);
 
@@ -69,6 +117,11 @@ export function UpdatePrompt() {
     try {
       const result = await Updates.checkForUpdateAsync();
       if (!result.isAvailable) return;
+
+      // Read the notes off the manifest BEFORE fetching: this is the only
+      // description of the new version available to the old bundle.
+      setNotes(readReleaseNotes(result.manifest));
+
       // Fetch BEFORE offering. "Update now" should restart immediately rather
       // than sit on a spinner over an unknown download on a phone network.
       await Updates.fetchUpdateAsync();
@@ -119,11 +172,7 @@ export function UpdatePrompt() {
     <View
       style={[styles.layer, { paddingBottom: insets.bottom + Space.lg }, PointerEvents.boxNone]}>
       <Animated.View
-        style={[
-          styles.card,
-          animated,
-          { backgroundColor: C.surface, borderColor: C.rule2 },
-        ]}>
+        style={[styles.card, animated, { backgroundColor: C.surface, borderColor: C.rule2 }]}>
         <View style={styles.head}>
           <View style={styles.headText}>
             <Text style={[styles.kicker, { color: C.liveText }]}>UPDATE READY</Text>
@@ -140,6 +189,24 @@ export function UpdatePrompt() {
             <X size={20} strokeWidth={2} color={C.ink2} />
           </Pressable>
         </View>
+
+        {/*
+          What actually changed. Omitted entirely rather than shown empty when
+          the incoming manifest predates `extra.releaseNotes` — an empty
+          "What's new" heading is worse than no heading.
+        */}
+        {notes.length > 0 ? (
+          <View style={[styles.notes, { borderTopColor: C.rule }]}>
+            <Text style={[styles.notesKicker, { color: C.ink3 }]}>IN THIS PATCH</Text>
+            {notes.map((note) => (
+              <View key={note} style={styles.note}>
+                {/* A rule, not a bullet glyph — separation is the rule here. */}
+                <View style={[styles.noteMark, { backgroundColor: C.ink3 }]} />
+                <Text style={[styles.noteText, { color: C.ink2 }]}>{note}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
 
         <Text style={[styles.body, { color: C.ink2 }]}>
           It installs instantly. The app restarts, so finish what you are listening to first if you
@@ -203,10 +270,34 @@ const styles = StyleSheet.create({
     marginTop: -Space.sm,
     marginRight: -Space.sm,
   },
+  notes: {
+    borderTopWidth: Rule.hair,
+    marginHorizontal: Space.lg,
+    paddingTop: Space.md,
+    gap: Space.sm,
+  },
+  notesKicker: {
+    ...Type.label(10),
+    marginBottom: 2,
+  },
+  note: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Space.sm,
+  },
+  noteMark: {
+    width: 8,
+    height: Rule.major,
+    // Sits on the text's first-line baseline rather than its box top.
+    marginTop: 8,
+  },
+  noteText: {
+    ...Type.body(13),
+    flex: 1,
+  },
   body: {
     ...Type.body(14),
-    paddingHorizontal: Space.lg,
-    paddingBottom: Space.lg,
+    padding: Space.lg,
   },
   actions: {
     flexDirection: 'row',

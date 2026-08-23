@@ -47,7 +47,12 @@
       "router": {},
       "eas": {
         "projectId": "3c252219-3619-434b-9ab4-f0931d09722a"
-      }
+      },
+      "releaseNotes": [
+        "Direct messages — inbox, threads and a working composer",
+        "Navigation now fades everywhere instead of sliding",
+        "This prompt tells you what changed"
+      ]
     },
     "owner": "anush_kulal",
     "runtimeVersion": {
