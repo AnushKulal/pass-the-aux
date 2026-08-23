@@ -4,17 +4,26 @@
  * Two views of the same fact, both exported from here because both are the
  * roster drawn against the drift ladder:
  *
- *   `ParticipantStrip` — the drift chart. One 44px row per listener: avatar,
- *   first name, a ±400ms deviation plot against a centre axis, the drift
- *   readout, the rung. This is the thing that makes the sync engine visible.
+ *   `ParticipantStrip` — the drift chart. One raised card per listener: avatar,
+ *   name over rung, a ±400ms deviation plot against a centre axis, the drift
+ *   readout, and the speaker glyph that says whether you are hearing them.
+ *   This is the thing that makes the sync engine visible.
  *
  *   `SyncOrbit` — the same people plotted as distance from a centre. Rings at
- *   ±40 (2px accent) and ±220 (dashed). The LEGEND IS A NORMAL-FLOW SIBLING of
- *   the dial, never absolutely positioned inside it: a listener who lands in
- *   the bottom slot sits exactly where an inset legend would be.
+ *   ±40 (accent) and ±220 (dashed). The LEGEND IS A NORMAL-FLOW SIBLING of the
+ *   dial, never absolutely positioned inside it: a listener who lands in the
+ *   bottom slot sits exactly where an inset legend would be.
  *
  * Both are FlatLists that take the rest of the screen as `header`/`footer`, so
- * the Session has exactly one scroller and the roster stays virtualised.
+ * the Session has exactly one scroller and the roster stays virtualised. Both
+ * carry all four states — skeleton cards, an empty notice, an error with a
+ * retry, and the roster itself.
+ *
+ * MUTE IS THE ROW. Tapping anyone mutes them for you and nobody else, so the
+ * affordance has to be visible before it is used: every row carries a speaker
+ * glyph at the thumb end, the list is headed by the sentence that says what a
+ * tap does, and a muted row keeps a filled well around that glyph so the state
+ * survives a glance.
  *
  * HONESTY RULES, because the backend does not publish per-person milliseconds:
  *
@@ -33,7 +42,7 @@
  */
 
 import { Image } from 'expo-image';
-import { VolumeX } from 'lucide-react-native';
+import { RotateCw, Users, Volume2, VolumeX } from 'lucide-react-native';
 import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   FlatList,
@@ -47,7 +56,18 @@ import {
 } from 'react-native';
 
 import { BLURHASH_SURFACE, Skeleton } from '@/components/ui';
-import { PointerEvents, Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
+import {
+  Fonts,
+  PointerEvents,
+  Radii,
+  Rule,
+  Space,
+  TOUCH_TARGET,
+  Type,
+  pressed as pressedDepth,
+  raised,
+  tracking,
+} from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 import type { Palette } from '@/lib/theme';
 import { useRoomParticipants, type ParticipantView } from '@/features/rooms/queries';
@@ -68,17 +88,19 @@ import {
   rungColor,
 } from './drift';
 
-const GUTTER = Space.md;
-const TILE = 28;
-const ORBIT_TILE = 30;
-const NAME_WIDTH = 46;
+const GUTTER = Space.lg - 2;
+const TILE = 34;
+const ORBIT_TILE = 32;
+const NAME_WIDTH = 62;
 const PLOT_HEIGHT = 22;
 const MARK_WIDTH = 3;
-const MARK_HEIGHT = 12;
+const MARK_HEIGHT = 14;
 const SKELETON_ROWS = 3;
 const TICK_MS = 250;
+/** The speaker glyph's well. Sits inside a 44px row target, at the thumb end. */
+const SPEAKER = 32;
 
-/** The dial and its rings, straight off the artboard. All squares — radius 0. */
+/** The dial and its rings. */
 const DIAL_HEIGHT = 340;
 const DIAL_CENTRE_Y = 170;
 const RING_OUTER = 284;
@@ -160,7 +182,7 @@ export type ParticipantStripProps = {
   header?: ReactNode;
   /** Everything below it. */
   footer?: ReactNode;
-  /** Tapping a row opens that person's voice controls. Not wired this pass. */
+  /** Tapping a row mutes that person, for this listener only. */
   onSelectPerson?: (userId: string) => void;
   contentBottomInset?: number;
 };
@@ -176,11 +198,15 @@ export function ParticipantStrip({
   contentBottomInset = 0,
 }: ParticipantStripProps) {
   const C = useColors();
-  const { data, isLoading } = useRoomParticipants(roomId);
+  const { data, isLoading, error, refetch } = useRoomParticipants(roomId);
   // Read straight from the store rather than through a prop: this is the one
   // real measurement on the screen and it changes every 3s, so keeping it local
   // means a drift tick re-renders this list and nothing else.
   const driftMs = usePlayback((state) => state.driftMs);
+
+  const handleRetry = useCallback(() => {
+    void refetch();
+  }, [refetch]);
 
   const renderItem = useCallback(
     ({ item }: ListRenderItemInfo<ParticipantView>) => {
@@ -211,25 +237,37 @@ export function ParticipantStrip({
       keyExtractor={keyExtractor}
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
-      contentContainerStyle={{ paddingBottom: contentBottomInset }}
+      contentContainerStyle={[styles.list, { paddingBottom: contentBottomInset + Space.xxl }]}
       ListHeaderComponent={
         <>
           {header}
-          <View style={[styles.sectionHead, { borderTopColor: C.rule }]}>
-            <Text style={[styles.sectionKicker, { color: C.ink3 }]}>
-              Drift — every listener, live
+          <View style={styles.hintRow}>
+            <Text style={[styles.hint, { color: C.ink3 }]}>
+              {onSelectPerson ? 'Tap anyone to mute them, for you only' : 'Who is in the Session'}
             </Text>
-            <Text style={[styles.sectionScale, { color: C.ink3 }]}>±400ms</Text>
+            <Text style={[styles.scale, { color: C.ink3 }]}>±400ms</Text>
           </View>
           {isLoading && !data ? <ChartSkeleton /> : null}
         </>
       }
+      ListEmptyComponent={
+        isLoading && !data ? null : error ? (
+          <RosterNotice
+            title="Could not load who is here"
+            body={error instanceof Error ? error.message : 'The connection dropped.'}
+            onPress={handleRetry}
+          />
+        ) : (
+          <RosterNotice
+            title="The roster is empty"
+            body="You are in the Session — this list is still catching up."
+            onPress={handleRetry}
+          />
+        )
+      }
       ListFooterComponent={
         <>
-          <Text style={[styles.ladderNote, { color: C.ink3 }]}>
-            Under 40ms we leave it alone. Under 220ms the playback rate nudges ±2% — inaudible.
-            Past that it&apos;s a hard seek, and you hear it.
-          </Text>
+          {participants.length > 0 ? <LadderKey /> : null}
           {footer}
         </>
       }
@@ -280,16 +318,14 @@ const DriftRow = memo(function DriftRow({
         live={reading.color === C.liveText}
       />
 
-      <Text numberOfLines={1} style={[styles.rowName, { color: reading.color }]}>
-        {name}
-      </Text>
-
-      {/*
-        Muted, for this listener only. Ink rather than accent: red is reserved
-        for live/playing/in-sync here, and someone you have quietly turned down
-        is the opposite of an event. It reads as absence, which is correct.
-      */}
-      {muted ? <VolumeX size={13} strokeWidth={2} color={C.ink3} /> : null}
+      <View style={styles.rowMeta}>
+        <Text numberOfLines={1} style={[styles.rowName, { color: C.ink }]}>
+          {name}
+        </Text>
+        <Text numberOfLines={1} style={[styles.rowRung, { color: reading.color }]}>
+          {reading.rung}
+        </Text>
+      </View>
 
       <View style={styles.plot}>
         {/* The zero point: where the Session says everyone should be. */}
@@ -312,15 +348,33 @@ const DriftRow = memo(function DriftRow({
         {reading.value}
       </Text>
 
-      <Text numberOfLines={1} style={[styles.rowRung, { color: C.ink3 }]}>
-        {reading.rung}
-      </Text>
+      {/*
+        Muted, for this listener only. Ink rather than accent: red is reserved
+        for live/playing/in-sync here, and someone you have quietly turned down
+        is the opposite of an event. The well is what makes it read as a state
+        rather than as an icon that happened to change.
+      */}
+      {onSelect ? (
+        <View
+          style={[
+            styles.speaker,
+            muted
+              ? { backgroundColor: C.bgRecessed, borderColor: C.rule2 }
+              : { borderColor: 'transparent' },
+          ]}>
+          {muted ? (
+            <VolumeX size={16} strokeWidth={2} color={C.ink2} />
+          ) : (
+            <Volume2 size={16} strokeWidth={2} color={C.ink3} />
+          )}
+        </View>
+      ) : null}
     </>
   );
 
   if (!onSelect) {
     return (
-      <View accessible accessibilityLabel={label} style={[styles.row, { borderTopColor: C.ruleSoft }]}>
+      <View accessible accessibilityLabel={label} style={[styles.row, { backgroundColor: C.surface }, raised(C)]}>
         {body}
       </View>
     );
@@ -330,12 +384,13 @@ const DriftRow = memo(function DriftRow({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityHint="Opens voice controls for this person"
+      accessibilityState={{ selected: muted }}
+      accessibilityHint={muted ? 'Unmutes this person for you' : 'Mutes this person, for you only'}
       onPress={() => onSelect(participant.userId)}
       style={({ pressed }) => [
         styles.row,
-        { borderTopColor: C.ruleSoft },
-        pressed ? { backgroundColor: C.surface } : null,
+        { backgroundColor: pressed ? C.surface2 : C.surface },
+        raised(C),
       ]}>
       {body}
     </Pressable>
@@ -346,16 +401,79 @@ const ChartSkeleton = memo(function ChartSkeleton() {
   const C = useColors();
 
   return (
-    <View>
+    <View style={styles.skeletonStack}>
       {Array.from({ length: SKELETON_ROWS }, (_, index) => (
-        <View key={index} style={[styles.row, { borderTopColor: C.ruleSoft }]}>
-          <Skeleton width={TILE} height={TILE} radius={0} />
-          <Skeleton width={NAME_WIDTH} height={12} radius={0} />
+        <View key={index} style={[styles.row, { backgroundColor: C.surface }, raised(C)]}>
+          <Skeleton width={TILE} height={TILE} style={styles.tileSkeleton} />
+          <View style={styles.rowMeta}>
+            <Skeleton width={NAME_WIDTH} height={12} style={styles.lineSkeleton} />
+            <Skeleton width={NAME_WIDTH - 14} height={9} style={styles.lineSkeleton} />
+          </View>
           <View style={styles.plot}>
             <View style={[styles.axis, { backgroundColor: C.rule3 }]} />
           </View>
         </View>
       ))}
+    </View>
+  );
+});
+
+/**
+ * The ladder as a key, not a paragraph. The thresholds are the only part a
+ * reader needs; the sentence explaining rate correction was three lines of
+ * theory in a sheet people open to find out whether their friend is behind.
+ */
+const LadderKey = memo(function LadderKey() {
+  const C = useColors();
+
+  return (
+    <View style={styles.legend}>
+      <View style={styles.legendItem}>
+        <View style={[styles.swatch, { backgroundColor: C.live }]} />
+        <Text style={[styles.legendLabel, { color: C.liveText }]}>Locked ≤40ms</Text>
+      </View>
+      <View style={styles.legendItem}>
+        <View style={[styles.swatch, { backgroundColor: C.ink }]} />
+        <Text style={[styles.legendLabel, { color: C.ink2 }]}>Nudging ≤220ms</Text>
+      </View>
+      <View style={styles.legendItem}>
+        <View style={[styles.swatch, { borderWidth: Rule.hair, borderColor: C.ink2 }]} />
+        <Text style={[styles.legendLabel, { color: C.ink2 }]}>Seeking</Text>
+      </View>
+    </View>
+  );
+});
+
+// -------------------------------------------------------------- notices
+
+type RosterNoticeProps = {
+  title: string;
+  body: string;
+  onPress: () => void;
+};
+
+/** Empty and error, one shape: where you are, and the button out of it. */
+const RosterNotice = memo(function RosterNotice({ title, body, onPress }: RosterNoticeProps) {
+  const C = useColors();
+
+  return (
+    <View style={[styles.notice, { backgroundColor: C.surface }, raised(C)]}>
+      <Users size={20} strokeWidth={2} color={C.ink3} />
+      <Text style={[styles.noticeTitle, { color: C.ink }]}>{title}</Text>
+      <Text style={[styles.noticeBody, { color: C.ink2 }]}>{body}</Text>
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Try again"
+        onPress={onPress}
+        style={({ pressed }) => [
+          styles.noticeAction,
+          { backgroundColor: C.pill },
+          pressed ? styles.dim : null,
+        ]}>
+        <RotateCw size={15} strokeWidth={2.4} color={C.pillInk} />
+        <Text style={[styles.noticeActionLabel, { color: C.pillInk }]}>Try again</Text>
+      </Pressable>
     </View>
   );
 });
@@ -370,6 +488,8 @@ export type SyncOrbitProps = {
   timeline: RoomTimeline | null;
   header?: ReactNode;
   footer?: ReactNode;
+  /** Ids this listener has muted locally. Never published, never announced. */
+  mutedIds?: ReadonlySet<string>;
   onSelectPerson?: (userId: string) => void;
   contentBottomInset?: number;
 };
@@ -382,12 +502,13 @@ export function SyncOrbit({
   timeline,
   header,
   footer,
+  mutedIds,
   onSelectPerson,
   contentBottomInset = 0,
 }: SyncOrbitProps) {
   const C = useColors();
   const { width: windowWidth } = useWindowDimensions();
-  const { data } = useRoomParticipants(roomId);
+  const { data, isLoading, error, refetch } = useRoomParticipants(roomId);
   const driftMs = usePlayback((state) => state.driftMs);
 
   /* Read at render, not mirrored into state — see the note in now-playing.tsx. */
@@ -403,7 +524,11 @@ export function SyncOrbit({
   const positionMs = timeline ? expectedPositionMs(timeline) : 0;
 
   const participants = data ?? [];
-  const dialWidth = Math.min(windowWidth, 720);
+  const dialWidth = Math.min(windowWidth, 480);
+
+  const handleRetry = useCallback(() => {
+    void refetch();
+  }, [refetch]);
 
   const renderItem = useCallback(
     ({ item }: ListRenderItemInfo<ParticipantView>) => {
@@ -414,11 +539,12 @@ export function SyncOrbit({
           isOnAux={item.userId === hostId}
           isMe={isMe}
           driftMs={isMe ? driftMs : 0}
+          muted={mutedIds?.has(item.userId) ?? false}
           onSelect={onSelectPerson}
         />
       );
     },
-    [hostId, currentUserId, driftMs, onSelectPerson]
+    [hostId, currentUserId, driftMs, mutedIds, onSelectPerson]
   );
 
   return (
@@ -427,16 +553,14 @@ export function SyncOrbit({
       renderItem={renderItem}
       keyExtractor={keyExtractor}
       showsVerticalScrollIndicator={false}
-      contentContainerStyle={{ paddingBottom: contentBottomInset }}
+      contentContainerStyle={[styles.list, { paddingBottom: contentBottomInset + Space.xxl }]}
       ListHeaderComponent={
         <>
           {header}
 
-          <View style={[styles.orbitHead, { borderBottomColor: C.rule }]}>
-            <Text style={[styles.sectionKicker, { color: C.ink3 }]}>
-              Distance from centre = drift
-            </Text>
-            <Text style={[styles.orbitScale, { color: C.ink2 }]}>±400ms</Text>
+          <View style={styles.hintRow}>
+            <Text style={[styles.hint, { color: C.ink3 }]}>Distance from centre is drift</Text>
+            <Text style={[styles.scale, { color: C.ink3 }]}>±400ms</Text>
           </View>
 
           <View
@@ -444,10 +568,7 @@ export function SyncOrbit({
             accessibilityLabel={`Sync orbit. ${participants.length} ${
               participants.length === 1 ? 'listener' : 'listeners'
             } plotted by how far they are from the Session's position.`}
-            style={[
-              styles.dial,
-              { backgroundColor: C.bgRecessed, borderBottomColor: C.rule },
-            ]}>
+            style={[styles.dial, { backgroundColor: C.bgRecessed }, pressedDepth(C)]}>
             <ModularGrid />
 
             <Ring size={RING_OUTER} width={dialWidth} style={{ borderColor: C.rule }} />
@@ -466,14 +587,13 @@ export function SyncOrbit({
               style={[
                 styles.dialCore,
                 {
-                  backgroundColor: C.bg,
+                  backgroundColor: C.surface,
                   left: dialWidth / 2 - DIAL_CORE / 2,
                   top: DIAL_CENTRE_Y - DIAL_CORE / 2,
                 },
+                raised(C),
               ]}>
-              <Text style={[styles.dialInitial, { color: C.artwork }]}>
-                {initialFor(track?.title)}
-              </Text>
+              <Text style={[styles.dialInitial, { color: C.ink }]}>{initialFor(track?.title)}</Text>
               <Text style={[styles.dialClock, { color: C.liveText }]}>
                 {formatClock(positionMs)}
               </Text>
@@ -498,7 +618,7 @@ export function SyncOrbit({
             bottom slot of the dial sits exactly where an inset legend would be,
             and the two would collide.
           */}
-          <View style={[styles.legend, { borderBottomColor: C.rule }]}>
+          <View style={styles.legend}>
             <View style={styles.legendItem}>
               <View style={[styles.swatch, { backgroundColor: C.live }]} />
               <Text style={[styles.legendLabel, { color: C.liveText }]}>±40 locked</Text>
@@ -518,25 +638,34 @@ export function SyncOrbit({
               {track?.title ?? 'Nothing playing'}
             </Text>
             <Text numberOfLines={1} style={[styles.orbitArtist, { color: C.ink2 }]}>
-              {track?.artist ?? 'Queue something to get started'}
+              {track?.artist ?? 'Queue a track to start the Session'}
             </Text>
           </View>
         </>
       }
-      ListFooterComponent={
-        <>
-          <Text style={[styles.ladderNote, { color: C.ink3 }]}>
-            Every reading here was written to sync_metrics. &ldquo;It feels synced&rdquo; is a
-            measurement.
-          </Text>
-          {footer}
-        </>
+      ListEmptyComponent={
+        isLoading && !data ? (
+          <ChartSkeleton />
+        ) : error ? (
+          <RosterNotice
+            title="Could not load who is here"
+            body={error instanceof Error ? error.message : 'The connection dropped.'}
+            onPress={handleRetry}
+          />
+        ) : (
+          <RosterNotice
+            title="The roster is empty"
+            body="You are in the Session — this list is still catching up."
+            onPress={handleRetry}
+          />
+        )
       }
+      ListFooterComponent={footer ? <>{footer}</> : null}
     />
   );
 }
 
-/** One concentric square. Zero radius — the dial is a grid, not a gauge face. */
+/** One concentric ring. Circles here: the dial is an orbit, not a grid. */
 const Ring = memo(function Ring({
   size,
   width,
@@ -614,6 +743,8 @@ type OrbitRowProps = {
   isOnAux: boolean;
   isMe: boolean;
   driftMs: number;
+  /** Muted for THIS listener only. Never published, never announced. */
+  muted?: boolean;
   onSelect?: (userId: string) => void;
 };
 
@@ -622,6 +753,7 @@ const OrbitRow = memo(function OrbitRow({
   isOnAux,
   isMe,
   driftMs,
+  muted = false,
   onSelect,
 }: OrbitRowProps) {
   const C = useColors();
@@ -651,19 +783,35 @@ const OrbitRow = memo(function OrbitRow({
         <Text style={[styles.orbitRowValue, { color: reading.color }]}>{reading.value}</Text>
         <Text style={[styles.orbitRowRung, { color: C.ink3 }]}>{reading.rung}</Text>
       </View>
+
+      {onSelect ? (
+        <View
+          style={[
+            styles.speaker,
+            muted
+              ? { backgroundColor: C.bgRecessed, borderColor: C.rule2 }
+              : { borderColor: 'transparent' },
+          ]}>
+          {muted ? (
+            <VolumeX size={16} strokeWidth={2} color={C.ink2} />
+          ) : (
+            <Volume2 size={16} strokeWidth={2} color={C.ink3} />
+          )}
+        </View>
+      ) : null}
     </>
   );
 
   const label = `${isMe ? 'You' : participant.displayName}, ${
     reading.measured ? `off by ${reading.value}, ${reading.rung}` : reading.rung
-  }`;
+  }${muted ? ', muted for you' : ''}`;
 
   if (!onSelect) {
     return (
       <View
         accessible
         accessibilityLabel={label}
-        style={[styles.orbitRow, { borderBottomColor: C.ruleSoft }]}>
+        style={[styles.row, { backgroundColor: C.surface }, raised(C)]}>
         {content}
       </View>
     );
@@ -673,11 +821,13 @@ const OrbitRow = memo(function OrbitRow({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ selected: muted }}
+      accessibilityHint={muted ? 'Unmutes this person for you' : 'Mutes this person, for you only'}
       onPress={() => onSelect(participant.userId)}
       style={({ pressed }) => [
-        styles.orbitRow,
-        { borderBottomColor: C.ruleSoft },
-        pressed ? { backgroundColor: C.surface } : null,
+        styles.row,
+        { backgroundColor: pressed ? C.surface2 : C.surface },
+        raised(C),
       ]}>
       {content}
     </Pressable>
@@ -695,7 +845,7 @@ type InitialTileProps = {
 };
 
 /**
- * A square letter tile, with a real photo dropping straight over it. Accent
+ * A rounded letter tile, with a real photo dropping straight over it. Accent
  * fill is reserved for the person on aux — they are the timeline everyone else
  * is measured against, which is the literal meaning of the colour here.
  */
@@ -707,15 +857,14 @@ const InitialTile = memo(function InitialTile({
   live,
 }: InitialTileProps) {
   const C = useColors();
-  const box = { width: size, height: size };
 
   return (
     <View
       style={[
         styles.tile,
-        box,
+        { width: size, height: size, borderRadius: size >= 32 ? Radii.sm : Radii.xs },
         {
-          backgroundColor: onAux ? C.live : live ? C.avatar : C.surface3,
+          backgroundColor: onAux ? C.live : C.avatar,
           borderWidth: live && !onAux ? Rule.major : Rule.hair,
           borderColor: live && !onAux ? C.live : C.rule2,
         },
@@ -730,7 +879,7 @@ const InitialTile = memo(function InitialTile({
           accessibilityIgnoresInvertColors
         />
       ) : (
-        <Text style={[styles.tileInitial, { color: onAux ? C.onLive : live ? C.ink : C.ink2 }]}>
+        <Text style={[styles.tileInitial, { color: onAux ? C.onLive : C.ink2 }]}>
           {initialFor(name)}
         </Text>
       )}
@@ -755,53 +904,64 @@ const HatchSwatch = memo(function HatchSwatch() {
 });
 
 const styles = StyleSheet.create({
+  list: {
+    paddingHorizontal: GUTTER,
+    gap: Space.sm + 1,
+  },
+  skeletonStack: {
+    gap: Space.sm + 1,
+  },
+  dim: {
+    opacity: 0.7,
+  },
+
   // ------------------------------------------------------------- sections
-  sectionHead: {
+  hintRow: {
     flexDirection: 'row',
-    alignItems: 'baseline',
+    alignItems: 'center',
     justifyContent: 'space-between',
     gap: Space.md,
-    marginTop: Space.lg + 2,
-    paddingHorizontal: GUTTER,
-    paddingTop: Space.md - 2,
-    paddingBottom: Space.sm,
-    borderTopWidth: Rule.major,
+    /** The list's own 9px gap follows this row; only a hair is needed here. */
+    paddingBottom: Space.xs,
   },
-  sectionKicker: {
+  hint: {
     ...Type.label(10),
+    letterSpacing: tracking(10, 0.1),
     flexShrink: 1,
   },
-  sectionScale: {
+  scale: {
     ...readout(10),
     letterSpacing: tracking(10, 0.09),
-  },
-  ladderNote: {
-    ...Type.body(16),
-    paddingHorizontal: GUTTER,
-    paddingTop: Space.md - 2,
-    paddingBottom: Space.xl - 2,
   },
 
   // ---------------------------------------------------------- drift chart
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Space.sm,
-    minHeight: TOUCH_TARGET,
-    paddingHorizontal: GUTTER,
+    gap: Space.sm + 2,
+    minHeight: TOUCH_TARGET + Space.md,
     paddingVertical: Space.sm + 1,
-    borderTopWidth: Rule.hair,
+    paddingHorizontal: Space.md - 1,
+    borderRadius: Radii.button,
   },
-  rowName: {
-    ...Type.heading(12),
-    letterSpacing: tracking(12, 0.02),
+  rowMeta: {
     width: NAME_WIDTH,
     flexGrow: 0,
     flexShrink: 0,
+    gap: 1,
+  },
+  rowName: {
+    fontFamily: Fonts.semibold,
+    fontSize: 13,
+    letterSpacing: tracking(13, -0.005),
+  },
+  rowRung: {
+    ...Type.label(9),
+    letterSpacing: tracking(9, 0.09),
   },
   plot: {
     flex: 1,
-    minWidth: 56,
+    minWidth: 48,
     height: PLOT_HEIGHT,
     position: 'relative',
   },
@@ -818,6 +978,7 @@ const styles = StyleSheet.create({
     right: '44%',
     top: (PLOT_HEIGHT - Rule.major) / 2,
     height: Rule.major,
+    borderRadius: 1,
   },
   mark: {
     position: 'absolute',
@@ -825,6 +986,7 @@ const styles = StyleSheet.create({
     width: MARK_WIDTH,
     height: MARK_HEIGHT,
     marginLeft: -MARK_WIDTH / 2,
+    borderRadius: 1.5,
   },
   rowValue: {
     ...readout(12),
@@ -832,38 +994,63 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     textAlign: 'right',
   },
-  rowRung: {
-    ...Type.heading(10),
-    letterSpacing: tracking(10, 0.05),
-    textTransform: 'uppercase',
+  speaker: {
+    width: SPEAKER,
+    height: SPEAKER,
     flexGrow: 0,
     flexShrink: 0,
-    textAlign: 'right',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radii.sm,
+    borderWidth: Rule.hair,
+  },
+  tileSkeleton: {
+    borderRadius: Radii.sm,
+  },
+  lineSkeleton: {
+    borderRadius: Radii.xs,
+  },
+
+  // ------------------------------------------------------------- notices
+  notice: {
+    alignItems: 'flex-start',
+    gap: Space.sm,
+    padding: Space.lg,
+    borderRadius: Radii.lg,
+  },
+  noticeTitle: {
+    ...Type.heading(15),
+  },
+  noticeBody: {
+    ...Type.body(13),
+    maxWidth: 380,
+  },
+  noticeAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.sm - 2,
+    marginTop: Space.xs,
+    minHeight: TOUCH_TARGET,
+    paddingHorizontal: Space.lg,
+    borderRadius: Radii.sm,
+  },
+  noticeActionLabel: {
+    fontFamily: Fonts.semibold,
+    fontSize: 13,
+    letterSpacing: tracking(13, 0.02),
   },
 
   // ----------------------------------------------------------- sync orbit
-  orbitHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Space.md,
-    paddingHorizontal: GUTTER,
-    paddingVertical: Space.md - 2,
-    borderBottomWidth: Rule.hair,
-  },
-  orbitScale: {
-    ...readout(10),
-    letterSpacing: tracking(10, 0.09),
-  },
   dial: {
     position: 'relative',
     height: DIAL_HEIGHT,
     overflow: 'hidden',
-    borderBottomWidth: Rule.hair,
+    borderRadius: Radii.xl,
   },
   ring: {
     position: 'absolute',
     borderWidth: Rule.hair,
+    borderRadius: Radii.pill,
   },
   dialCore: {
     position: 'absolute',
@@ -871,10 +1058,11 @@ const styles = StyleSheet.create({
     height: DIAL_CORE,
     alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: Radii.pill,
   },
   dialInitial: {
-    ...Type.display(30),
-    lineHeight: 30,
+    ...Type.display(28),
+    lineHeight: 28,
   },
   dialClock: {
     ...readout(10),
@@ -898,9 +1086,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexWrap: 'wrap',
     gap: Space.lg,
-    paddingHorizontal: GUTTER,
-    paddingVertical: Space.md - 2,
-    borderBottomWidth: Rule.major,
+    paddingTop: Space.md,
+    paddingBottom: Space.sm,
   },
   legendItem: {
     flexDirection: 'row',
@@ -916,6 +1103,7 @@ const styles = StyleSheet.create({
     height: 9,
     flexGrow: 0,
     flexShrink: 0,
+    borderRadius: 2,
   },
   hatch: {
     overflow: 'hidden',
@@ -929,30 +1117,22 @@ const styles = StyleSheet.create({
   },
 
   orbitTitleBlock: {
-    paddingHorizontal: GUTTER,
-    paddingTop: Space.md,
+    paddingTop: Space.xs,
     paddingBottom: Space.sm,
   },
   orbitTitle: {
     ...Type.display(20),
     lineHeight: 22,
+    letterSpacing: tracking(20, -0.025),
   },
   orbitArtist: {
-    ...Type.body(16),
-    marginTop: 2,
-  },
-  orbitRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space.sm + 1,
-    minHeight: TOUCH_TARGET,
-    paddingHorizontal: GUTTER,
-    paddingVertical: Space.sm + 1,
-    borderBottomWidth: Rule.hair,
+    ...Type.body(13),
+    marginTop: 3,
   },
   orbitRowMeta: {
     flex: 1,
     minWidth: 0,
+    gap: 1,
   },
   orbitRowName: {
     ...Type.heading(13),

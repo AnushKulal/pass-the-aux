@@ -156,7 +156,20 @@ export function OnboardingField({
   const [focused, setFocused] = useState(false);
 
   const active = focused || Boolean(error);
-  const edge = error ? C.live : focused ? C.live : C.rule;
+
+  /**
+   * Focus and failure must not paint the same edge.
+   *
+   * This read `error ? C.live : focused ? C.live : C.rule` — two branches, one
+   * colour, so a field that failed validation looked exactly like a field being
+   * typed into. That hid every error at the one moment it fires, since a field
+   * is almost always focused when its own validation runs.
+   *
+   * Failure keeps the alarm; focus steps down to the brightest neutral rule and
+   * keeps the accent ring below, which is enough to answer back without
+   * claiming something is wrong.
+   */
+  const edge = error ? C.live : focused ? C.rule3 : C.rule;
 
   return (
     <View>

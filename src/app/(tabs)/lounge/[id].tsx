@@ -33,6 +33,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ChatNotice } from '@/components/chat/bubble-kit';
 import { ChatComposer } from '@/components/chat/chat-composer';
 import { ChatList } from '@/components/chat/chat-list';
 import { LoungeMenuModal } from '@/components/lounge/lounge-menu-modal';
@@ -56,12 +57,13 @@ import { supabase } from '@/lib/supabase';
 import {
   Fonts,
   Radii,
+  Rule,
   Sheet as SheetMetrics,
   Space,
   TOUCH_TARGET,
   Type,
+  bloom,
   dropped,
-  pressedSoft,
   raised,
   tracking,
 } from '@/lib/theme';
@@ -261,7 +263,7 @@ export default function LoungeDetailScreen() {
             style={[
               styles.art,
               { backgroundColor: C.artwork },
-              { boxShadow: [{ offsetX: 0, offsetY: 16, blurRadius: 40, color: C.glow }] },
+              bloom(C.glow, 'md'),
             ]}>
             <Text style={[styles.artTag, { color: C.artInk }]}>{tagFor(lounge.name)}</Text>
           </View>
@@ -318,8 +320,17 @@ export default function LoungeDetailScreen() {
             <Skeleton width="100%" height={86} radius={Radii.xl} />
             <Skeleton width="100%" height={86} radius={Radii.xl} />
           </View>
+        ) : sessions.isError ? (
+          <View style={styles.notice}>
+            <ChatNotice
+              label="Sessions didn't load."
+              action={{ label: 'Retry', onPress: () => void sessions.refetch() }}
+            />
+          </View>
         ) : liveSessions.length === 0 ? (
-          <Text style={[styles.quiet, { color: C.ink2 }]}>Nobody is on aux right now.</Text>
+          <Text style={[styles.quiet, { color: C.ink2 }]}>
+            Nobody is on aux. Start one above.
+          </Text>
         ) : (
           <View style={styles.sessions}>
             {liveSessions.map((entry) => (
@@ -353,7 +364,7 @@ export default function LoungeDetailScreen() {
     openChat,
     openMenu,
     role,
-    sessions.isPending,
+    sessions,
     shareInvite,
     startSession.isPending,
   ]);
@@ -407,8 +418,20 @@ export default function LoungeDetailScreen() {
                 <Skeleton width="100%" height={54} radius={Radii.md} />
                 <Skeleton width="100%" height={54} radius={Radii.md} />
               </View>
+            ) : members.isError ? (
+              <View style={styles.notice}>
+                <ChatNotice
+                  label="The roster didn't load."
+                  action={{ label: 'Retry', onPress: () => void members.refetch() }}
+                />
+              </View>
             ) : (
-              <Text style={[styles.quiet, { color: C.ink2 }]}>No members listed.</Text>
+              <View style={styles.notice}>
+                <ChatNotice
+                  label="Only you in here so far."
+                  action={{ label: 'Invite someone', onPress: shareInvite }}
+                />
+              </View>
             )
           }
         />
@@ -503,7 +526,12 @@ const Row = memo(function Row({
         raised(C),
         pressed ? styles.dim : null,
       ]}>
-      <View style={[styles.rowWell, { backgroundColor: C.bgRecessed }, pressedSoft(C)]}>
+      {/*
+        A 38px well takes a hairline, NOT `pressedSoft()`. On a dark ground the
+        light half of the inset pair sits at 3.2% alpha, so at this size only
+        the dark half lands and it reads as dirt rather than as depth.
+      */}
+      <View style={[styles.rowWell, { backgroundColor: C.bgRecessed, borderColor: C.rule }]}>
         <Icon size={17} strokeWidth={2} color={C.ink2} />
       </View>
       <Text style={[styles.rowLabel, { color: C.ink }]}>{label}</Text>
@@ -572,8 +600,7 @@ function ChatSheet({
             <ChatList
               loungeId={loungeId}
               roomId={null}
-              emptyTitle="No messages yet"
-              emptyDescription="Say hello, or drop a track everyone should hear."
+              emptyLabel="Say hello, or drop a track everyone should hear."
               onOpenProfile={onOpenProfile}
             />
             <ChatComposer
@@ -783,6 +810,7 @@ const styles = StyleSheet.create({
     borderRadius: Radii.sm,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: Rule.hair,
   },
   rowLabel: {
     flex: 1,
@@ -819,6 +847,9 @@ const styles = StyleSheet.create({
   quiet: {
     ...Type.body(13.5),
     paddingHorizontal: Space.xxl,
+  },
+  notice: {
+    paddingHorizontal: Space.xl,
   },
 
   /* lists */

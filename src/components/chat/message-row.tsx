@@ -1,28 +1,21 @@
 /**
  * One message in a lounge or Session log, and the sheet its long-press opens.
  *
- * README §8 (Chat): 30px avatar carried inside its own 44px target, the name a
- * 44px target too, a timestamp in tabular figures, the body with @mentions in
- * accent at 600, then reaction chips at 44px and a dashed `+`.
+ * This log used to be a flat Discord-style row while the DM thread was a bubble
+ * column — two chat surfaces in one app that did not look like each other. It
+ * now renders through `./bubble-kit`, the same drawing the DM thread uses: your
+ * words on the accent against the right edge, everyone else's on a raised
+ * `surface` bubble against the left, with the identity line above the first of
+ * each run.
  *
- * Both targets are grown with negative margins rather than by making the row
- * taller: a chat log is read as a column of text, and 44px of padding per line
- * would turn it into a list of cards.
+ * What is NOT shared is what only a lounge has: reaction chips under the
+ * bubble, and the actions sheet the long press opens.
  */
 
 import * as Haptics from 'expo-haptics';
 import { Plus, Trash2 } from 'lucide-react-native';
 import { memo, useCallback, useEffect, useMemo } from 'react';
-import {
-  BackHandler,
-  Modal,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-  type TextStyle,
-} from 'react-native';
+import { BackHandler, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useReducedMotion,
@@ -31,45 +24,44 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Avatar } from '@/components/ui';
+import {
+  Bubble,
+  BubbleBody,
+  BubbleIdentity,
+  BubbleStamp,
+  DaySeparator,
+  readout,
+  styles as kit,
+  type BubbleTone,
+} from '@/components/chat/bubble-kit';
 import type { ChatMessage } from '@/features/chat/queries';
 import {
   Duration,
   Fonts,
   PointerEvents,
+  Radii,
   Rule,
+  Sheet as SheetMetrics,
   Space,
   TOUCH_TARGET,
   Type,
+  dropped,
+  raised,
   tracking,
 } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
-const AVATAR = 30;
-/** Half the difference between the avatar and its 44px target. */
-const AVATAR_SLOP = (TOUCH_TARGET - AVATAR) / 2;
-/** Pulls a 44px name target back to the height of the text inside it. */
-const NAME_INSET = 13;
-
 /** Content, not iconography — the lucide-only rule governs UI affordances. */
 const QUICK_REACTIONS = ['❤️', '🔥', '😂', '🎵', '👍', '😭'] as const;
 
-/** `@mira`, `@sol_r`. Split, not replace, so the surrounding text survives. */
-const MENTION = /(@[A-Za-z0-9_]{1,32})/g;
-
-/**
- * `Type.readout` carries its `fontVariant` as a readonly tuple; RN's TextStyle
- * wants a mutable array. Restating it here is the whole fix.
- */
-const readout = (size: number): TextStyle => ({
-  ...Type.readout(size),
-  fontVariant: ['tabular-nums'],
-});
-
 export type MessageRowProps = {
   message: ChatMessage;
-  /** First message of a run: shows avatar, name and time. */
+  /** The viewer wrote it: the accent fill and the right edge. */
+  mine: boolean;
+  /** First message of a run: draws the identity line. */
   showHeader: boolean;
+  /** Last message of a run: draws the stamp. */
+  showStamp?: boolean;
   /** Day label to print above this row, or null. */
   daySeparator: string | null;
   onLongPress: (message: ChatMessage) => void;
@@ -78,38 +70,11 @@ export type MessageRowProps = {
   onOpenProfile?: (userId: string) => void;
 };
 
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-}
-
-/**
- * The body, with handles lifted into accent at 600.
- *
- * Nested `<Text>` rather than a row of views, so a mention still wraps mid-line
- * with the words around it instead of becoming an unbreakable block.
- */
-function Body({ text, color, mention }: { text: string; color: string; mention: string }) {
-  const parts = useMemo(() => text.split(MENTION), [text]);
-
-  return (
-    <Text selectable style={[styles.body, { color }]}>
-      {parts.map((part, index) =>
-        // split() with one capture group puts the matches on the odd indices.
-        index % 2 === 1 ? (
-          <Text key={`${index}-${part}`} style={[styles.mention, { color: mention }]}>
-            {part}
-          </Text>
-        ) : (
-          part
-        ),
-      )}
-    </Text>
-  );
-}
-
 function MessageRowBase({
   message,
+  mine,
   showHeader,
+  showStamp = true,
   daySeparator,
   onLongPress,
   onToggleReaction,
@@ -117,6 +82,7 @@ function MessageRowBase({
 }: MessageRowProps) {
   const C = useColors();
   const name = message.author?.display_name ?? message.author?.username ?? 'Someone';
+  const tone: BubbleTone = mine ? 'fill' : 'surface';
 
   const openActions = useCallback(() => {
     // A pending message has no server id yet, so neither reacting nor deleting
@@ -130,18 +96,22 @@ function MessageRowBase({
     onOpenProfile?.(message.userId);
   }, [onOpenProfile, message.userId]);
 
+  const align = mine ? kit.alignEnd : kit.alignStart;
+
   return (
     <View>
-      {daySeparator ? (
-        <View accessibilityRole="header" style={styles.daySeparator}>
-          <View style={[styles.dayRule, { backgroundColor: C.rule }]} />
-          <Text style={[styles.dayLabel, { color: C.ink3 }]}>{daySeparator}</Text>
-          <View style={[styles.dayRule, { backgroundColor: C.rule }]} />
-        </View>
+      {daySeparator ? <DaySeparator label={daySeparator} /> : null}
+
+      {showHeader && !mine ? (
+        <BubbleIdentity
+          name={name}
+          avatarUrl={message.author?.avatar_url}
+          onPress={onOpenProfile ? openProfile : undefined}
+        />
       ) : null}
 
       <Pressable
-        accessibilityLabel={`${name}, ${formatTime(message.createdAt)}. ${message.body}`}
+        accessible={false}
         // Long press is the only way into the actions sheet, so it has to be an
         // announced action too — a screen reader cannot discover a gesture.
         accessibilityActions={
@@ -150,84 +120,73 @@ function MessageRowBase({
         onAccessibilityAction={openActions}
         onLongPress={openActions}
         delayLongPress={350}
-        style={({ pressed }) => [
-          styles.row,
-          showHeader && styles.rowLeading,
-          pressed ? { backgroundColor: C.bgRecessed } : null,
+        style={[
+          kit.row,
+          align,
+          showHeader && kit.rowLeading,
           // Pending is carried by weight, not by a spinner: the text is already
           // readable and in place, it simply has not landed yet.
-          message.pending && styles.rowPending,
+          message.pending && kit.pending,
         ]}>
-        <View style={styles.gutter}>
-          {showHeader ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`Open ${name}'s profile`}
-              disabled={!onOpenProfile}
-              onPress={openProfile}
-              style={({ pressed }) => [styles.avatarTarget, pressed && styles.dim]}>
-              <Avatar uri={message.author?.avatar_url} name={name} size={AVATAR} />
-            </Pressable>
-          ) : null}
-        </View>
+        <View style={[kit.column, align]}>
+          <Bubble mine={mine} tone={tone}>
+            <BubbleBody text={message.body} tone={tone} />
+          </Bubble>
 
-        <View style={styles.content}>
-          {showHeader ? (
-            <View style={styles.headerLine}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Open ${name}'s profile`}
-                disabled={!onOpenProfile}
-                onPress={openProfile}
-                style={({ pressed }) => [styles.nameTarget, pressed && styles.dim]}>
-                <Text numberOfLines={1} style={[styles.name, { color: C.ink }]}>
-                  {name}
-                </Text>
-              </Pressable>
+          {/*
+            Only drawn once there is something to draw. A 44px add-chip under
+            every single message doubles the height of a log to offer an action
+            almost nobody takes on almost every line; the FIRST reaction comes
+            from the long press, which is already the only way to the sheet.
+          */}
+          {message.reactions.length > 0 ? (
+            <View style={[styles.reactions, align]}>
+              {message.reactions.map((reaction) => (
+                <Pressable
+                  key={reaction.emoji}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: reaction.mine }}
+                  accessibilityLabel={`${reaction.emoji} ${reaction.count}${
+                    reaction.mine ? ', including you' : ''
+                  }`}
+                  onPress={() => onToggleReaction(message.id, reaction.emoji)}
+                  style={({ pressed }) => [
+                    styles.chip,
+                    reaction.mine
+                      ? { backgroundColor: pressed ? C.liveText : C.live }
+                      : {
+                          backgroundColor: pressed ? C.surface : C.chip,
+                          borderWidth: Rule.hair,
+                          borderColor: C.rule,
+                        },
+                  ]}>
+                  <Text style={styles.chipEmoji}>{reaction.emoji}</Text>
+                  <Text style={[styles.chipCount, { color: reaction.mine ? C.onLive : C.ink2 }]}>
+                    {reaction.count}
+                  </Text>
+                </Pressable>
+              ))}
 
-              <Text style={[styles.time, { color: C.ink3 }]}>{formatTime(message.createdAt)}</Text>
+              {/* Dashed, because it is an opening rather than a value: the only
+                  control in the log that is not yet a reaction. */}
+              {message.pending ? null : (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Add a reaction"
+                  onPress={openActions}
+                  style={({ pressed }) => [
+                    styles.addChip,
+                    { borderColor: pressed ? C.rule3 : C.rule2 },
+                  ]}>
+                  <Plus size={17} color={C.ink3} strokeWidth={2} />
+                </Pressable>
+              )}
             </View>
           ) : null}
 
-          <Body text={message.body} color={C.ink} mention={C.liveText} />
-
-          <View style={styles.reactions}>
-            {message.reactions.map((reaction) => (
-              <Pressable
-                key={reaction.emoji}
-                accessibilityRole="button"
-                accessibilityState={{ selected: reaction.mine }}
-                accessibilityLabel={`${reaction.emoji} ${reaction.count}${
-                  reaction.mine ? ', including you' : ''
-                }`}
-                onPress={() => onToggleReaction(message.id, reaction.emoji)}
-                style={[
-                  styles.chip,
-                  {
-                    borderColor: reaction.mine ? C.live : C.rule2,
-                    backgroundColor: reaction.mine ? C.liveWash : 'transparent',
-                  },
-                ]}>
-                <Text style={styles.chipEmoji}>{reaction.emoji}</Text>
-                <Text style={[styles.chipCount, { color: C.liveText }]}>{reaction.count}</Text>
-              </Pressable>
-            ))}
-
-            {/* Dashed, because it is an opening rather than a value: the only
-                control in the log that is not yet a reaction. */}
-            {message.pending ? null : (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Add a reaction"
-                onPress={openActions}
-                style={({ pressed }) => [
-                  styles.addChip,
-                  { borderColor: pressed ? C.live : C.rule2 },
-                ]}>
-                <Plus size={18} color={C.ink3} strokeWidth={2} />
-              </Pressable>
-            )}
-          </View>
+          {showStamp || message.pending ? (
+            <BubbleStamp iso={message.createdAt} pending={message.pending} />
+          ) : null}
         </View>
       </Pressable>
     </View>
@@ -249,6 +208,13 @@ export type MessageActionsSheetProps = {
   onDelete: (messageId: string) => void;
 };
 
+/**
+ * React, or delete.
+ *
+ * DELETE is a `live` OUTLINE, not a fill. There is one alarm colour in this
+ * palette and the fill is spoken for; an outline says "destructive" without
+ * claiming "live".
+ */
 export function MessageActionsSheet({
   message,
   canDelete,
@@ -315,12 +281,17 @@ export function MessageActionsSheet({
         <Animated.View
           style={[
             styles.sheet,
-            { backgroundColor: C.bg, borderTopColor: C.live, paddingBottom: insets.bottom },
+            { backgroundColor: C.bg, paddingBottom: insets.bottom + Space.md },
+            dropped(C, 'lg'),
             sheetStyle,
           ]}>
-          <View style={[styles.sheetHead, { borderBottomColor: C.rule }]}>
+          <View style={styles.grabberSlot}>
+            <View style={[styles.grabber, { backgroundColor: C.rule3 }]} />
+          </View>
+
+          <View style={styles.sheetHead}>
             <View style={styles.sheetHeadText}>
-              <Text style={[styles.sheetTitle, { color: C.ink }]}>MESSAGE</Text>
+              <Text style={[styles.sheetTitle, { color: C.ink }]}>Message</Text>
               <Text numberOfLines={1} style={[styles.sheetQuote, { color: C.ink3 }]}>
                 {message?.body ?? ''}
               </Text>
@@ -330,36 +301,43 @@ export function MessageActionsSheet({
               accessibilityRole="button"
               accessibilityLabel="Close"
               onPress={onClose}
-              style={({ pressed }) => [styles.sheetClose, pressed && styles.dim]}>
-              <Text style={[styles.sheetCloseLabel, { color: C.ink2 }]}>CLOSE</Text>
+              style={({ pressed }) => [
+                styles.closeTile,
+                { backgroundColor: pressed ? C.surface2 : C.surface },
+                raised(C),
+              ]}>
+              <Text style={[styles.closeLabel, { color: C.ink2 }]}>Close</Text>
             </Pressable>
           </View>
 
           <View style={styles.sheetBody}>
-            <Text style={[styles.kicker, { color: C.ink3 }]}>REACT</Text>
+            <Text style={[styles.kicker, { color: C.ink3 }]}>React</Text>
 
             <View style={styles.picker}>
-              {QUICK_REACTIONS.map((emoji) => (
-                <Pressable
-                  key={emoji}
-                  accessibilityRole="button"
-                  accessibilityLabel={`React with ${emoji}`}
-                  accessibilityState={{ selected: mine.has(emoji) }}
-                  onPress={() => {
-                    if (!message) return;
-                    onReact(message.id, emoji);
-                    onClose();
-                  }}
-                  style={[
-                    styles.pickerButton,
-                    {
-                      borderColor: mine.has(emoji) ? C.live : C.rule2,
-                      backgroundColor: mine.has(emoji) ? C.liveWash : 'transparent',
-                    },
-                  ]}>
-                  <Text style={styles.pickerEmoji}>{emoji}</Text>
-                </Pressable>
-              ))}
+              {QUICK_REACTIONS.map((emoji) => {
+                const selected = mine.has(emoji);
+                return (
+                  <Pressable
+                    key={emoji}
+                    accessibilityRole="button"
+                    accessibilityLabel={`React with ${emoji}`}
+                    accessibilityState={{ selected }}
+                    onPress={() => {
+                      if (!message) return;
+                      onReact(message.id, emoji);
+                      onClose();
+                    }}
+                    style={({ pressed }) => [
+                      styles.pickerButton,
+                      selected
+                        ? { backgroundColor: C.live }
+                        : { backgroundColor: pressed ? C.surface2 : C.surface },
+                      selected ? null : raised(C),
+                    ]}>
+                    <Text style={styles.pickerEmoji}>{emoji}</Text>
+                  </Pressable>
+                );
+              })}
             </View>
 
             {canDelete ? (
@@ -374,12 +352,12 @@ export function MessageActionsSheet({
                 style={({ pressed }) => [
                   styles.destructive,
                   {
-                    borderColor: C.dangerBorder,
-                    backgroundColor: pressed ? C.dangerWash : 'transparent',
+                    borderColor: C.live,
+                    backgroundColor: pressed ? C.liveWash : 'transparent',
                   },
                 ]}>
-                <Trash2 size={18} color={C.danger} strokeWidth={2} />
-                <Text style={[styles.destructiveLabel, { color: C.danger }]}>DELETE MESSAGE</Text>
+                <Trash2 size={17} color={C.liveText} strokeWidth={2} />
+                <Text style={[styles.destructiveLabel, { color: C.liveText }]}>Delete message</Text>
               </Pressable>
             ) : null}
           </View>
@@ -390,81 +368,11 @@ export function MessageActionsSheet({
 }
 
 const styles = StyleSheet.create({
-  daySeparator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space.md,
-    paddingVertical: Space.lg,
-    paddingHorizontal: Space.md,
-  },
-  dayRule: {
-    flex: 1,
-    height: Rule.hair,
-  },
-  dayLabel: {
-    ...Type.label(11),
-  },
-  row: {
-    flexDirection: 'row',
-    gap: 9,
-    paddingHorizontal: Space.md,
-    paddingVertical: Space.sm,
-  },
-  rowLeading: {
-    marginTop: Space.xs,
-  },
-  rowPending: {
-    opacity: 0.6,
-  },
-  dim: {
-    opacity: 0.6,
-  },
-  gutter: {
-    width: AVATAR,
-    flexShrink: 0,
-  },
-  /** 30px of avatar inside 44px of target, without costing 14px of layout. */
-  avatarTarget: {
-    padding: AVATAR_SLOP,
-    margin: -AVATAR_SLOP,
-  },
-  content: {
-    flex: 1,
-    minWidth: 0,
-    gap: 2,
-  },
-  headerLine: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-  },
-  nameTarget: {
-    minHeight: TOUCH_TARGET,
-    minWidth: TOUCH_TARGET,
-    justifyContent: 'center',
-    marginVertical: -NAME_INSET,
-    flexShrink: 1,
-  },
-  name: {
-    ...Type.heading(12),
-    letterSpacing: tracking(12, 0.02),
-  },
-  time: {
-    // A timestamp measures. Tabular figures, so a log of them holds its column.
-    ...readout(11),
-  },
-  body: {
-    ...Type.body(16),
-  },
-  mention: {
-    fontFamily: Fonts.semibold,
-  },
   reactions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     // 8px minimum between adjacent tappables, on both axes.
     gap: Space.sm,
-    marginTop: Space.xs,
   },
   chip: {
     flexDirection: 'row',
@@ -479,23 +387,25 @@ const styles = StyleSheet.create({
     height: TOUCH_TARGET,
     minWidth: TOUCH_TARGET,
     paddingHorizontal: 11,
-    borderWidth: Rule.hair,
+    borderRadius: Radii.md,
   },
   chipEmoji: {
     fontSize: 15,
     lineHeight: 20,
   },
   chipCount: {
-    ...readout(13),
+    ...readout(12),
   },
   addChip: {
     height: TOUCH_TARGET,
     minWidth: TOUCH_TARGET,
     alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: Radii.md,
     borderWidth: Rule.hair,
     borderStyle: 'dashed',
   },
+
   scrim: {
     position: 'absolute',
     top: 0,
@@ -511,19 +421,25 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 720,
     alignSelf: 'center',
-    // The one 2px accent rule on a sheet: it says the surface arrived, and it
-    // is the only elevation cue in a design with no shadows.
-    borderTopWidth: Rule.major,
+    borderTopLeftRadius: SheetMetrics.radius,
+    borderTopRightRadius: SheetMetrics.radius,
+  },
+  grabberSlot: {
+    paddingTop: Space.md + 2,
+    alignItems: 'center',
+  },
+  grabber: {
+    width: SheetMetrics.grabberW,
+    height: SheetMetrics.grabberH,
+    borderRadius: SheetMetrics.grabberH / 2,
   },
   sheetHead: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Space.md,
-    paddingLeft: Space.md,
-    paddingRight: Space.xs,
-    paddingTop: Space.md,
-    paddingBottom: Space.sm + 2,
-    borderBottomWidth: Rule.major,
+    paddingHorizontal: Space.xl,
+    paddingTop: Space.lg,
+    paddingBottom: Space.md,
   },
   sheetHeadText: {
     flex: 1,
@@ -531,29 +447,33 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   sheetTitle: {
-    ...Type.heading(15),
-    letterSpacing: tracking(15, 0.03),
+    ...Type.display(20),
+    letterSpacing: tracking(20, -0.025),
   },
   sheetQuote: {
-    ...Type.body(11),
+    ...Type.body(12),
   },
-  sheetClose: {
+  closeTile: {
     minHeight: TOUCH_TARGET,
-    minWidth: TOUCH_TARGET,
-    alignItems: 'flex-end',
+    flexShrink: 0,
+    alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: Space.xs,
+    paddingHorizontal: Space.lg,
+    borderRadius: Radii.md,
   },
-  sheetCloseLabel: {
-    ...Type.heading(10),
-    letterSpacing: tracking(10, 0.1),
+  closeLabel: {
+    fontFamily: Fonts.semibold,
+    fontSize: 12.5,
+    lineHeight: 16,
   },
   sheetBody: {
-    padding: Space.md,
+    paddingHorizontal: Space.xl,
+    paddingBottom: Space.md,
     gap: Space.md,
   },
   kicker: {
-    ...Type.label(10),
+    ...Type.label(10.5),
+    letterSpacing: tracking(10.5, 0.15),
   },
   picker: {
     flexDirection: 'row',
@@ -566,7 +486,7 @@ const styles = StyleSheet.create({
     height: TOUCH_TARGET,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: Rule.hair,
+    borderRadius: Radii.md,
   },
   pickerEmoji: {
     fontSize: 22,
@@ -575,13 +495,17 @@ const styles = StyleSheet.create({
   destructive: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: Space.md,
     minHeight: 52,
+    marginTop: Space.xs,
     paddingHorizontal: Space.lg,
+    borderRadius: Radii.button,
     borderWidth: Rule.hair,
   },
   destructiveLabel: {
-    ...Type.heading(11),
-    letterSpacing: tracking(11, 0.1),
+    fontFamily: Fonts.semibold,
+    fontSize: 14,
+    lineHeight: 18,
   },
 });

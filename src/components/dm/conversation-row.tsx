@@ -4,11 +4,11 @@
  * The row carries THREE facts and TWO destinations, and the design leans on
  * both:
  *
- *  - **Unread renders bright.** Name 800 / preview `ink` 600 when there is
- *    something to read; name 600 / preview `ink2` 400 once there is not. That
- *    contrast is the screen — an inbox where every row shouts equally is a list,
- *    not an inbox — so the weights are picked from `row.unreadCount` and nothing
- *    else, never softened for "consistency".
+ *  - **Unread LIFTS.** An unread conversation is a raised card on `surface`
+ *    with its name and preview in full ink; a read one lies flat on the ground
+ *    in `ink2`. The lift and the weights both come from `row.unreadCount` and
+ *    nothing else, and neither may be softened for "consistency" — that
+ *    contrast IS the screen.
  *  - **The avatar and the name open the person; the rest opens the thread.**
  *    Two nested 44pt targets inside one big one. React Native's responder system
  *    hands a gesture to exactly one view — the innermost that claims it — so the
@@ -41,16 +41,25 @@ import Animated, {
 import { Avatar } from '@/components/ui';
 import type { DmAuthor, InboxRow } from '@/features/dm';
 import { serverNow } from '@/lib/clock';
-import { Duration, Fonts, Rule, Space, Stagger, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
+import {
+  Duration,
+  Fonts,
+  Radii,
+  Space,
+  Stagger,
+  TOUCH_TARGET,
+  Type,
+  raised,
+} from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
-/** §13: a 40px avatar. The row is that plus its 10px band, and a hairline. */
-const AVATAR = 40;
-const ROW_PAD_V = 10;
-export const CONVERSATION_ROW_HEIGHT = AVATAR + ROW_PAD_V * 2 + Rule.hair;
+/** The design's 50px avatar. The row is that plus its 12px band. */
+const AVATAR = 50;
+const ROW_PAD_V = 12;
+export const CONVERSATION_ROW_HEIGHT = AVATAR + ROW_PAD_V * 2;
 
-/** The presence dot, and the ground-coloured ring that lifts it off the well. */
-const DOT = 11;
+/** The presence dot, and the surface-coloured ring that lifts it off the well. */
+const DOT = 13;
 
 /** 40 + 2 on every side clears the 44pt floor without moving the avatar. */
 const AVATAR_SLOP = { top: 2, bottom: 2, left: 2, right: 2 };
@@ -267,10 +276,11 @@ function ConversationRowBase({
         onPress={openThread}
         style={({ pressed }) => [
           styles.row,
-          {
-            borderBottomColor: C.rule,
-            backgroundColor: pressed ? C.surface : 'transparent',
-          },
+          unread
+            ? [{ backgroundColor: pressed ? C.surface2 : C.surface }, raised(C)]
+            : pressed
+              ? { backgroundColor: C.surface }
+              : null,
         ]}>
         {/* Target 1: the avatar. */}
         <Pressable
@@ -283,16 +293,14 @@ function ConversationRowBase({
           <Avatar name={name} uri={person?.avatar_url} size={AVATAR} />
 
           {/*
-            Square, like everything in this direction, with a 2px ring in the
-            ground colour instead of a shadow.
-
-            Deliberately NOT accent: red is reserved for live / playing /
-            joinable / on aux, and "opened the app recently" is none of those.
-            The moment presence can say somebody is in a Session, that dot has
-            earned the colour — this one has not.
+            The accent, ringed in whatever the row is sitting on. Here it IS
+            earned: "here now" is the joinable state this palette reserves the
+            red for, and the design draws this dot in it.
           */}
           {presence === 'online' ? (
-            <View style={[styles.dot, { backgroundColor: C.ink, borderColor: C.bg }]} />
+            <View
+              style={[styles.dot, { backgroundColor: C.live, borderColor: unread ? C.surface : C.bg }]}
+            />
           ) : null}
         </Pressable>
 
@@ -369,11 +377,11 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Space.sm + 2,
-    minHeight: CONVERSATION_ROW_HEIGHT - Rule.hair,
-    paddingHorizontal: Space.md,
-    paddingVertical: ROW_PAD_V,
-    borderBottomWidth: Rule.hair,
+    gap: 14,
+    minHeight: CONVERSATION_ROW_HEIGHT,
+    marginBottom: 9,
+    padding: ROW_PAD_V,
+    borderRadius: Radii.lg,
   },
   avatarWell: {
     flexShrink: 0,
@@ -383,11 +391,12 @@ const styles = StyleSheet.create({
   },
   dot: {
     position: 'absolute',
-    right: -1,
-    bottom: -1,
+    right: -2,
+    bottom: -2,
     width: DOT,
     height: DOT,
-    borderWidth: Rule.major,
+    borderRadius: Radii.pill,
+    borderWidth: 2.5,
   },
   identity: {
     flex: 1,
@@ -411,38 +420,40 @@ const styles = StyleSheet.create({
     minHeight: 20,
   },
   name: {
-    ...Type.body(15),
-    lineHeight: 20,
+    ...Type.body(14.5),
+    lineHeight: 19,
   },
   status: {
     ...Type.label(10),
     flexShrink: 0,
   },
   preview: {
-    ...Type.body(14),
-    lineHeight: 18,
+    ...Type.body(12.5),
+    lineHeight: 17,
+    marginTop: 2,
   },
   meta: {
     flexShrink: 0,
     alignItems: 'flex-end',
     justifyContent: 'center',
-    gap: 5,
-    // Keeps the stamp column from shuffling as `NOW` becomes `MAR 4`.
+    gap: 6,
+    // Keeps the stamp column from shuffling as `Now` becomes `Mar 4`.
     minWidth: 42,
   },
   stamp: {
-    ...readout(10),
-    letterSpacing: tracking(10, 0.06),
+    ...readout(11),
+    fontFamily: Fonts.semibold,
   },
   badge: {
-    minWidth: 18,
-    height: 18,
-    paddingHorizontal: Space.xs,
+    minWidth: 19,
+    height: 19,
+    paddingHorizontal: 6,
     alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: 10,
   },
   badgeText: {
-    ...readout(10),
-    lineHeight: 18,
+    ...readout(10.5),
+    lineHeight: 19,
   },
 });

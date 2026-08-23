@@ -1,17 +1,25 @@
 /**
  * Starting a lounge.
  *
- * A form, drawn flat: kicker, field, kicker, field, a segmented choice, and one
- * accent cell at the bottom. No cards, no radius, no shadow — separation is the
- * 1px rule around each field and the gap between blocks.
+ * A back tile and a title, then kicker / field / kicker / field / a segmented
+ * choice, and the inverted pill at the bottom. Every field is a surface with a
+ * hairline; the visibility control is the design's segmented track — a recessed
+ * well with a RAISED tile riding in it, which is the one place `pressed()` is
+ * used on this screen because a full-width track is big enough to show both
+ * halves of the inset pair.
  *
- * The created panel that follows is where the invite code lives, and it gets
- * the loudest readout in the app: a community starts as eight characters
- * somebody reads out over a room.
+ * CREATE is not the accent. Making a lounge is not a live state, and the red
+ * has to keep meaning one. The panel that follows is where the invite code
+ * lives, and that gets the loudest readout in the app: a community starts as
+ * eight characters somebody reads out over a room.
+ *
+ * All four states are here: the empty form, the form being filled, the submit
+ * in flight (every control inert, the button spinning), and the database
+ * refusing — quoted verbatim, with the retry beside it.
  */
 
 import { router } from 'expo-router';
-import { ArrowLeft } from 'lucide-react-native';
+import { ChevronLeft } from 'lucide-react-native';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
@@ -28,13 +36,27 @@ import { Screen, useToast } from '@/components/ui';
 import { shareInviteCode } from '@/features/lounges/invite';
 import { loungeErrorMessage, useCreateLounge } from '@/features/lounges/queries';
 import type { LoungeRow } from '@/lib/database.types';
-import { Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
+import {
+  Fonts,
+  Radii,
+  Rule,
+  Space,
+  TOUCH_TARGET,
+  Type,
+  dropped,
+  pressed as pressedWell,
+  raised,
+  tracking,
+} from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
 /** Mirrors the `char_length(name) between 2 and 50` check on `lounges`. */
 const NAME_MIN = 2;
 const NAME_MAX = 50;
 const DESCRIPTION_MAX = 200;
+
+const BACK_TILE = 38;
+const BACK_SLOP = { top: 3, bottom: 3, left: 6, right: 6 };
 
 const CODE_SIZE = 32;
 const CODE_TRACKING = tracking(CODE_SIZE, 0.14);
@@ -51,8 +73,8 @@ const VISIBILITY = [
 ];
 
 const VISIBILITY_HINT: Record<string, string> = {
-  public: 'Anyone can find this lounge in Explore and join it.',
-  private: 'Invite-only. It stays hidden until someone redeems the code.',
+  public: 'Anyone can find it in Explore and join.',
+  private: 'Invite-only. Hidden until someone redeems the code.',
 };
 
 export default function CreateLoungeScreen() {
@@ -104,14 +126,14 @@ export default function CreateLoungeScreen() {
     return <CreatedPanel lounge={created} onBack={handleBack} />;
   }
 
+  const busy = create.isPending;
+
   return (
     <Screen padded={false} scroll>
       <View style={styles.page}>
-        <BackRow label="CANCEL" onPress={handleBack} />
+        <Head title="New lounge" onBack={handleBack} label="Cancel" />
 
-        <Text style={[styles.title, { color: C.ink }]}>New lounge</Text>
-
-        <Text style={[styles.kicker, { color: C.ink3 }]}>NAME</Text>
+        <Text style={[styles.kicker, { color: C.ink3 }]}>Name</Text>
         <Field
           value={name}
           onChangeText={(value) => {
@@ -121,48 +143,54 @@ export default function CreateLoungeScreen() {
           placeholder="Late Night Rotation"
           maxLength={NAME_MAX}
           accessibilityLabel="Name"
+          editable={!busy}
+          invalid={nameError !== null}
           strong
         />
         {nameError ? (
-          <Text accessibilityLiveRegion="polite" style={[styles.fieldError, { color: C.danger }]}>
+          <Text accessibilityLiveRegion="polite" style={[styles.fieldError, { color: C.liveText }]}>
             {nameError}
           </Text>
         ) : null}
 
         <Text style={[styles.kicker, styles.kickerSpaced, { color: C.ink3 }]}>
-          DESCRIPTION (OPTIONAL)
+          Description — optional
         </Text>
         <Field
           value={description}
           onChangeText={setDescription}
           placeholder="What gets played here?"
           maxLength={DESCRIPTION_MAX}
-          accessibilityLabel="Description (optional)"
+          accessibilityLabel="Description, optional"
+          editable={!busy}
           multiline
         />
 
-        <Text style={[styles.kicker, styles.kickerSpaced, { color: C.ink3 }]}>VISIBILITY</Text>
-        <View style={[styles.segmented, { borderColor: C.rule3 }]}>
-          {VISIBILITY.map((option, index) => {
+        <Text style={[styles.kicker, styles.kickerSpaced, { color: C.ink3 }]}>Visibility</Text>
+
+        {/*
+          The design's segmented track: a recessed well with a raised tile
+          riding in it. Full width, so both halves of the inset pair land — this
+          is the size the recipe is FOR.
+        */}
+        <View style={[styles.track, { backgroundColor: C.bgRecessed }, pressedWell(C)]}>
+          {VISIBILITY.map((option) => {
             const active = visibility === option.key;
             return (
               <Pressable
                 key={option.key}
                 accessibilityRole="tab"
-                accessibilityState={{ selected: active }}
+                accessibilityState={{ selected: active, disabled: busy }}
                 accessibilityLabel={option.label}
+                disabled={busy}
                 onPress={() => setVisibility(option.key)}
                 style={[
                   styles.segment,
-                  index > 0 && { borderLeftWidth: Rule.hair, borderLeftColor: C.rule3 },
-                  active && { backgroundColor: C.live },
+                  active ? { backgroundColor: C.surface } : null,
+                  active ? raised(C) : null,
                 ]}>
-                <Text
-                  style={[
-                    active ? styles.segmentLabelActive : styles.segmentLabel,
-                    { color: active ? C.onLive : C.ink2 },
-                  ]}>
-                  {option.label.toUpperCase()}
+                <Text style={[styles.segmentLabel, { color: active ? C.ink : C.ink2 }]}>
+                  {option.label}
                 </Text>
               </Pressable>
             );
@@ -173,18 +201,26 @@ export default function CreateLoungeScreen() {
         {failure ? (
           <View
             accessibilityLiveRegion="polite"
-            style={[styles.failure, { borderColor: C.dangerBorder, backgroundColor: C.dangerWash }]}>
-            <Text style={[styles.failureKicker, { color: C.danger }]}>THE DATABASE SAID NO</Text>
+            style={[styles.failure, { borderColor: C.live, backgroundColor: C.dangerWash }]}>
+            <Text style={[styles.failureKicker, { color: C.liveText }]}>The database said no</Text>
             <Text style={[styles.failureText, { color: C.ink }]}>{failure}</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Try again"
+              onPress={handleSubmit}
+              style={({ pressed }) => [
+                styles.failureAction,
+                { backgroundColor: pressed ? C.cream : C.pill },
+              ]}>
+              <Text style={[styles.failureActionLabel, { color: C.pillInk }]}>Try again</Text>
+            </Pressable>
           </View>
         ) : null}
 
         <View style={styles.submit}>
-          <ActionCell
-            label="CREATE LOUNGE"
-            tone="accent"
-            height={52}
-            busy={create.isPending}
+          <PrimaryButton
+            label="Create lounge"
+            busy={busy}
             disabled={name.trim().length < NAME_MIN}
             onPress={handleSubmit}
           />
@@ -215,37 +251,25 @@ function CreatedPanel({ lounge, onBack }: { lounge: LoungeRow; onBack: () => voi
   return (
     <Screen padded={false} scroll>
       <View style={styles.page}>
-        <BackRow label="DONE" onPress={onBack} />
+        <Head title={`${lounge.name} is live`} onBack={onBack} label="Done" />
 
-        <Text style={[styles.kicker, { color: C.ink3 }]}>LOUNGE CREATED</Text>
-        <Text style={[styles.title, { color: C.ink }]}>{lounge.name} is live</Text>
-        <Text style={[styles.body, { color: C.ink2 }]}>
-          Share this code to let people in. You can find it again from the lounge header.
-        </Text>
+        <Text style={[styles.kicker, { color: C.ink3 }]}>Invite code</Text>
 
-        <Text style={[styles.kicker, styles.kickerSpaced, { color: C.ink3 }]}>INVITE CODE</Text>
-        <View style={[styles.codeFrame, { borderColor: C.live }]}>
+        {/* A well big enough for the inset pair to read as depth rather than dirt. */}
+        <View style={[styles.codeWell, { backgroundColor: C.bgRecessed }, pressedWell(C)]}>
           <Text selectable style={[styles.code, { color: C.liveText }]}>
             {lounge.invite_code}
           </Text>
         </View>
 
         <View style={styles.submit}>
-          <ActionCell
-            label="SHARE INVITE CODE"
-            tone="accent"
-            height={52}
-            onPress={() => void handleShare()}
-          />
+          <PrimaryButton label="Share invite code" onPress={() => void handleShare()} />
           <Text style={[styles.note, { color: C.ink3 }]}>
-            {Platform.OS === 'web'
-              ? 'Copies the code to your clipboard.'
-              : 'Opens your share sheet with the code in the message.'}
+            {Platform.OS === 'web' ? 'Copies it to your clipboard.' : 'Opens your share sheet.'}
           </Text>
 
-          <ActionCell
-            label="OPEN LOUNGE"
-            tone="outline"
+          <SecondaryButton
+            label="Open lounge"
             // `replace`, so backing out of the lounge does not land on this panel
             // for a lounge that already exists.
             onPress={() => router.replace(`/lounge/${lounge.id}`)}
@@ -258,25 +282,36 @@ function CreatedPanel({ lounge, onBack }: { lounge: LoungeRow; onBack: () => voi
 
 /* ------------------------------------------------------------------ parts */
 
-function BackRow({ label, onPress }: { label: string; onPress: () => void }) {
+/** The design's header: a raised back tile, then the title. */
+function Head({ title, onBack, label }: { title: string; onBack: () => void; label: string }) {
   const C = useColors();
 
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      onPress={onPress}
-      style={({ pressed }) => [styles.backRow, pressed && styles.dim]}>
-      <ArrowLeft size={15} color={C.ink2} strokeWidth={2} />
-      <Text style={[styles.backLabel, { color: C.ink2 }]}>{label}</Text>
-    </Pressable>
+    <View style={styles.head}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        hitSlop={BACK_SLOP}
+        onPress={onBack}
+        style={({ pressed }) => [
+          styles.backTile,
+          { backgroundColor: pressed ? C.surface2 : C.surface },
+          raised(C),
+        ]}>
+        <ChevronLeft size={20} strokeWidth={2.4} color={C.ink} />
+      </Pressable>
+      <Text numberOfLines={2} style={[styles.title, { color: C.ink }]}>
+        {title}
+      </Text>
+    </View>
   );
 }
 
 /**
- * A field is a rule around a surface. Focus swaps the border to full-strength
- * ink rather than to accent: typing a name is not a live thing, and the border
- * never changes width, so nothing shifts by a pixel when the field is touched.
+ * A field is a surface with a hairline, NOT an inset well. At 52px the light
+ * half of the pressed pair sits at 3.2% alpha on a dark ground and only the
+ * dark half lands, which reads as dirt. Focus swaps the border to full-strength
+ * ink and never changes its width, so nothing shifts by a pixel.
  */
 function Field({
   value,
@@ -284,6 +319,8 @@ function Field({
   placeholder,
   maxLength,
   accessibilityLabel,
+  editable = true,
+  invalid = false,
   multiline = false,
   strong = false,
 }: {
@@ -292,6 +329,8 @@ function Field({
   placeholder: string;
   maxLength: number;
   accessibilityLabel: string;
+  editable?: boolean;
+  invalid?: boolean;
   multiline?: boolean;
   strong?: boolean;
 }) {
@@ -308,6 +347,7 @@ function Field({
       placeholderTextColor={C.ink3}
       maxLength={maxLength}
       multiline={multiline}
+      editable={editable}
       textAlignVertical={multiline ? 'top' : 'center'}
       selectionColor={C.live}
       accessibilityLabel={accessibilityLabel}
@@ -317,35 +357,28 @@ function Field({
         {
           color: C.ink,
           backgroundColor: C.surface,
-          borderColor: focused ? C.ink : C.rule2,
+          borderColor: invalid ? C.live : focused ? C.rule3 : C.rule,
         },
+        editable ? null : styles.dim,
       ]}
     />
   );
 }
 
-type Tone = 'accent' | 'outline';
-
-/** Flat, square, full-width. The same cell the lounge screen uses. */
-function ActionCell({
+/** The inverted pill — the design's one primary action shape. */
+function PrimaryButton({
   label,
-  tone,
   onPress,
-  height = 48,
   busy = false,
   disabled = false,
 }: {
   label: string;
-  tone: Tone;
   onPress: () => void;
-  height?: number;
   busy?: boolean;
   disabled?: boolean;
 }) {
   const C = useColors();
   const blocked = busy || disabled;
-  const fill = tone === 'accent';
-  const ink = fill ? C.onLive : C.ink;
 
   return (
     <Pressable
@@ -355,15 +388,34 @@ function ActionCell({
       disabled={blocked}
       onPress={onPress}
       style={({ pressed }) => [
-        styles.actionCell,
-        { minHeight: height },
-        fill
-          ? { backgroundColor: pressed ? C.liveText : C.live, borderColor: 'transparent' }
-          : { borderColor: C.rule2, backgroundColor: pressed ? C.surface : 'transparent' },
+        styles.primary,
+        { backgroundColor: pressed ? C.cream : C.pill },
+        dropped(C, 'lg'),
         blocked && styles.dim,
       ]}>
-      {busy ? <ActivityIndicator size="small" color={ink} /> : null}
-      <Text numberOfLines={1} style={[styles.actionLabel, { color: ink }]}>
+      {busy ? <ActivityIndicator size="small" color={C.pillInk} /> : null}
+      <Text numberOfLines={1} style={[styles.primaryLabel, { color: C.pillInk }]}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+/** A raised surface cell, for the second-choice action under a primary one. */
+function SecondaryButton({ label, onPress }: { label: string; onPress: () => void }) {
+  const C = useColors();
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.secondary,
+        { backgroundColor: pressed ? C.surface2 : C.surface },
+        raised(C),
+      ]}>
+      <Text numberOfLines={1} style={[styles.primaryLabel, { color: C.ink }]}>
         {label}
       </Text>
     </Pressable>
@@ -372,125 +424,162 @@ function ActionCell({
 
 const styles = StyleSheet.create({
   page: {
-    paddingHorizontal: Space.md,
-    paddingTop: Space.lg,
-    paddingBottom: Space.xxl,
+    paddingHorizontal: Space.xl,
+    paddingTop: Space.md,
+    paddingBottom: Space.xxxl,
   },
   dim: {
     opacity: 0.55,
   },
-  backRow: {
+
+  head: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
-    minHeight: TOUCH_TARGET,
-    alignSelf: 'flex-start',
-    paddingRight: Space.md,
+    gap: 14,
+    marginBottom: Space.xl,
   },
-  backLabel: {
-    ...Type.label(11),
+  backTile: {
+    width: BACK_TILE,
+    height: BACK_TILE,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radii.sm,
   },
   title: {
-    ...Type.display(26),
-    marginTop: Space.xs,
-    marginBottom: Space.lg,
+    flex: 1,
+    minWidth: 0,
+    ...Type.display(24),
+    letterSpacing: tracking(24, -0.03),
   },
+
   kicker: {
-    ...Type.label(10),
-    marginBottom: 6,
-  },
-  kickerSpaced: {
-    marginTop: Space.lg,
-  },
-  body: {
-    ...Type.body(14),
-    marginTop: -Space.sm,
+    ...Type.label(10.5),
+    letterSpacing: tracking(10.5, 0.15),
     marginBottom: Space.sm,
   },
+  kickerSpaced: {
+    marginTop: Space.xl,
+  },
+
   field: {
-    ...Type.body(16),
-    minHeight: 48,
-    paddingHorizontal: Space.md,
+    ...Type.body(15),
+    minHeight: 52,
+    paddingHorizontal: Space.lg,
     paddingVertical: 0,
+    borderRadius: Radii.md,
     borderWidth: Rule.hair,
   },
   fieldStrong: {
-    // The name is the thing being made, so it is set in the display weight.
-    ...Type.heading(16),
-    letterSpacing: tracking(16, 0.02),
-    minHeight: 48,
-    paddingHorizontal: Space.md,
+    // The name is the thing being made, so it is set a step up in weight.
+    fontFamily: Fonts.semibold,
+    fontSize: 16,
+    minHeight: 52,
+    paddingHorizontal: Space.lg,
     paddingVertical: 0,
+    borderRadius: Radii.md,
     borderWidth: Rule.hair,
   },
   fieldMultiline: {
-    minHeight: 80,
-    paddingVertical: 10,
+    minHeight: 88,
+    paddingVertical: Space.md,
   },
   fieldError: {
-    ...Type.body(12),
-    marginTop: 6,
+    ...Type.body(12.5),
+    marginTop: Space.sm,
   },
-  segmented: {
+
+  track: {
     flexDirection: 'row',
-    borderWidth: Rule.hair,
+    gap: 6,
+    padding: 6,
+    borderRadius: Radii.lg,
   },
   segment: {
     flex: 1,
-    minHeight: 46,
+    height: TOUCH_TARGET,
+    alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: Space.lg,
+    borderRadius: Radii.sm + 1,
   },
   segmentLabel: {
-    ...Type.label(11),
-    letterSpacing: tracking(11, 0.08),
-  },
-  segmentLabelActive: {
-    ...Type.heading(11),
-    letterSpacing: tracking(11, 0.08),
+    fontFamily: Fonts.semibold,
+    fontSize: 12.5,
+    lineHeight: 17,
+    letterSpacing: tracking(12.5, 0.06),
   },
   note: {
-    ...Type.body(12),
-    marginTop: Space.sm,
+    ...Type.body(12.5),
+    marginTop: 11,
   },
+
   failure: {
-    marginTop: Space.lg,
-    padding: Space.md,
+    marginTop: Space.xl,
+    padding: Space.lg,
+    borderRadius: Radii.lg,
     borderWidth: Rule.hair,
-    gap: 6,
+    gap: Space.sm,
+    alignItems: 'flex-start',
   },
   failureKicker: {
-    ...Type.heading(11),
-    letterSpacing: tracking(11, 0.1),
+    ...Type.label(10.5),
+    letterSpacing: tracking(10.5, 0.15),
   },
   failureText: {
     ...Type.body(13),
   },
+  failureAction: {
+    minHeight: 40,
+    justifyContent: 'center',
+    marginTop: Space.xs,
+    paddingHorizontal: Space.lg,
+    borderRadius: Radii.xs,
+  },
+  failureActionLabel: {
+    fontFamily: Fonts.semibold,
+    fontSize: 12.5,
+    lineHeight: 16,
+  },
+
   submit: {
-    marginTop: Space.xl,
+    marginTop: Space.xxl,
     gap: Space.md,
   },
-  actionCell: {
+  primary: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Space.sm,
+    justifyContent: 'center',
+    gap: Space.sm + 2,
+    minHeight: 56,
     paddingHorizontal: Space.lg,
-    borderWidth: Rule.hair,
+    borderRadius: Radii.button,
   },
-  actionLabel: {
-    ...Type.heading(12),
-    letterSpacing: tracking(12, 0.1),
+  primaryLabel: {
+    fontFamily: Fonts.semibold,
+    fontSize: 15,
+    lineHeight: 20,
   },
-  codeFrame: {
-    borderWidth: Rule.major,
+  secondary: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 52,
     paddingHorizontal: Space.lg,
-    paddingVertical: Space.xl,
+    borderRadius: Radii.button,
+  },
+
+  codeWell: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    // Tall enough that the inset pair reads as a well and not as a smudge.
+    minHeight: 96,
+    paddingHorizontal: Space.lg,
+    borderRadius: Radii.lg,
   },
   code: {
     ...readout(CODE_SIZE),
     letterSpacing: CODE_TRACKING,
     // Tracking leaves a gap after the last glyph; pulling it back keeps the
-    // string flush against the frame as drawn.
+    // string optically centred in the well.
     marginRight: -CODE_TRACKING,
   },
 });

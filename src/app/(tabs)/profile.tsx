@@ -4,6 +4,13 @@
  * A centred identity block over a 132px photo tile, three stat cards, the
  * connection rows, and the sign-out outline. No lounge list: the artboard
  * spends that space on the LOUNGES stat and the Lounges tab owns the list.
+ *
+ * FOUR STATES, all on the hero's centre line so the layout never jumps:
+ *   loading   a skeleton of the real thing — tile, name, actions, stats, rows
+ *   error     the profile read failed; says why and offers one retry
+ *   empty     signed in but no profile row is readable yet; offers the single
+ *             action that creates one
+ *   ready     the artboard
  */
 
 import { Image } from 'expo-image';
@@ -28,8 +35,8 @@ import Animated, {
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useToast } from '@/components/ui';
-import { useMyLounges } from '@/features/profile/queries';
+import { Skeleton, useToast } from '@/components/ui';
+import { useMyLounges, useProfile } from '@/features/profile/queries';
 import { useAuth } from '@/lib/auth';
 import type { ProfileRow } from '@/lib/database.types';
 import {
@@ -41,8 +48,6 @@ import {
   TOUCH_TARGET,
   Type,
   dropped,
-  glowShadow,
-  pressedSoft,
   raised,
   tracking,
 } from '@/lib/theme';
@@ -54,6 +59,12 @@ const TEXT_GUTTER = 24;
 
 const PHOTO = 132;
 const CONNECTION_TILE = 38;
+/** What the skeleton has to match: 15 padding + 38 tile + 15 padding. */
+const CONNECTION_ROW = 68;
+const STAT_CARD = 79;
+
+/** What the screen is showing. Derived once, read everywhere. */
+type Status = 'loading' | 'error' | 'empty' | 'ready';
 
 /** `Type.readout()` hands back a readonly tuple; `TextStyle` wants a mutable one. */
 const readout = (size: number): TextStyle => ({
@@ -66,6 +77,14 @@ export default function ProfileScreen() {
   const reduced = useReducedMotion();
   const toast = useToast();
   const { user, profile, loading, signOut, refreshProfile } = useAuth();
+  /*
+    Same query key and options as the one AuthProvider runs, so React Query
+    hands back the SAME cache entry rather than firing a second request. The
+    context exposes only the row and a coarse `loading`; the failure lives
+    here, and a screen that cannot tell "still fetching" from "the fetch threw"
+    has no error state to draw.
+  */
+  const profileQuery = useProfile(user?.id);
   const lounges = useMyLounges(user?.id);
 
   /*
@@ -87,6 +106,12 @@ export default function ProfileScreen() {
     });
   }, [signOut, toast]);
 
+  const retry = useCallback(() => {
+    void refreshProfile();
+  }, [refreshProfile]);
+
+  const editProfile = useCallback(() => router.push('/(auth)/claim-username'), []);
+
   const memberships = lounges.data;
   const stats = useMemo(() => {
     const rows = memberships ?? [];
@@ -96,17 +121,33 @@ export default function ProfileScreen() {
     };
   }, [memberships]);
 
+  /*
+    A row already in hand beats every other signal: a background refetch
+    failing is no reason to replace a profile the user can see.
+  */
+  const status: Status = profile
+    ? 'ready'
+    : loading || !user
+      ? 'loading'
+      : profileQuery.isError
+        ? 'error'
+        : 'empty';
+
+  /** Counts are unknown until the memberships land — a 0 there would be a lie. */
+  const countsPending = lounges.isPending || lounges.isError;
+  const count = (n: number) => (countsPending ? '—' : String(n));
+
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={[styles.root, { backgroundColor: C.bg }]}>
       <Animated.View style={[styles.flex, enterStyle]}>
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          {profile ? (
+          {status === 'ready' && profile ? (
             <>
-              <Identity profile={profile} />
+              <Identity profile={profile} onEdit={editProfile} />
 
               <View style={styles.stats}>
-                <Stat value={String(stats.lounges)} label="Lounges" />
-                <Stat value={String(stats.hosting)} label="Hosting" />
+                <Stat value={count(stats.lounges)} label="Lounges" />
+                <Stat value={count(stats.hosting)} label="Hosting" />
                 <Stat value={monthOf(profile.created_at)} label={sinceOf(profile.created_at)} />
               </View>
 
@@ -121,13 +162,17 @@ export default function ProfileScreen() {
                 <ConnectionRow name="YouTube" value="Not linked" linked={false} />
               </View>
             </>
-          ) : (
-            <Unavailable
-              loading={loading}
-              onRetry={() => {
-                void refreshProfile();
-              }}
+          ) : status === 'loading' ? (
+            <ProfileSkeleton />
+          ) : status === 'error' ? (
+            <Notice
+              title="Profile did not load"
+              line={messageOf(profileQuery.error)}
+              action="Try again"
+              onAction={retry}
             />
+          ) : (
+            <Notice title="No profile yet" action="Choose a handle" onAction={editProfile} />
           )}
 
           <Pressable
@@ -148,7 +193,7 @@ export default function ProfileScreen() {
 
 /* --------------------------------------------------------------- identity */
 
-function Identity({ profile }: { profile: ProfileRow }) {
+function Identity({ profile, onEdit }: { profile: ProfileRow; onEdit: () => void }) {
   const C = useColors();
   const name = profile.display_name || profile.username;
   const photo = profile.photo_url ?? profile.avatar_url;
@@ -158,8 +203,8 @@ function Identity({ profile }: { profile: ProfileRow }) {
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Edit your photo"
-        onPress={() => router.push('/(auth)/claim-username')}
-        style={[styles.photo, { backgroundColor: C.artwork }, glowShadow(C.glow, 44)]}>
+        onPress={onEdit}
+        style={[styles.photo, { backgroundColor: C.artwork }, dropped(C, 'lg')]}>
         {photo ? (
           <Image
             source={{ uri: photo }}
@@ -192,7 +237,7 @@ function Identity({ profile }: { profile: ProfileRow }) {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Edit profile"
-          onPress={() => router.push('/(auth)/claim-username')}
+          onPress={onEdit}
           style={({ pressed }) => [
             styles.action,
             { backgroundColor: pressed ? C.cream : C.pill },
@@ -217,32 +262,104 @@ function Identity({ profile }: { profile: ProfileRow }) {
   );
 }
 
+/* ----------------------------------------------------------- other states */
+
 /**
- * The signed-in-but-profileless case. The artboard has no state for it, so it
- * borrows the hero's centre line and says the one thing worth saying.
+ * The loading state: the artboard with its content removed, not a spinner.
+ *
+ * Every block is the size of the thing it stands in for, so nothing moves when
+ * the data lands — which is the only reason to prefer a skeleton at all.
  */
-function Unavailable({ loading, onRetry }: { loading: boolean; onRetry: () => void }) {
+function ProfileSkeleton() {
+  return (
+    <View accessibilityRole="progressbar" accessibilityLabel="Loading your profile">
+      <View style={styles.hero}>
+        <Skeleton width={PHOTO} height={PHOTO} style={styles.skeletonPhoto} />
+        <Skeleton width={168} height={26} style={styles.skeletonName} />
+        <Skeleton width={104} height={14} style={styles.skeletonHandle} />
+        <View style={styles.heroActions}>
+          <Skeleton width={136} height={TOUCH_TARGET} style={styles.skeletonAction} />
+          <Skeleton width={108} height={TOUCH_TARGET} style={styles.skeletonAction} />
+        </View>
+      </View>
+
+      <View style={styles.stats}>
+        <View style={styles.statSlot}>
+          <Skeleton width="100%" height={STAT_CARD} style={styles.skeletonCard} />
+        </View>
+        <View style={styles.statSlot}>
+          <Skeleton width="100%" height={STAT_CARD} style={styles.skeletonCard} />
+        </View>
+        <View style={styles.statSlot}>
+          <Skeleton width="100%" height={STAT_CARD} style={styles.skeletonCard} />
+        </View>
+      </View>
+
+      <Kicker>Connections</Kicker>
+      <View style={styles.group}>
+        <Skeleton width="100%" height={CONNECTION_ROW} style={styles.skeletonCard} />
+        <Skeleton width="100%" height={CONNECTION_ROW} style={styles.skeletonCard} />
+      </View>
+    </View>
+  );
+}
+
+/**
+ * The error and empty states.
+ *
+ * Both borrow the hero's centre line and its 132px tile, so moving between
+ * them and the loaded screen shifts nothing. One line at most, then the single
+ * action that resolves the state.
+ */
+/**
+ * Deliberately NOT `@/components/ui/empty-state`.
+ *
+ * That card stands where a list or a hero card would; this one stands where the
+ * PROFILE HERO is — same 132px tile, same centre line, same action pill — so
+ * the four states of this screen occupy identical geometry and nothing moves
+ * when the row lands. Swapping it for the shared card would make the loading,
+ * error and empty states a different shape from the populated one, which is the
+ * exact jump the skeleton exists to prevent.
+ *
+ * If you are here to unify it: unify the hero instead, not this.
+ */
+function Notice({
+  title,
+  line,
+  action,
+  onAction,
+}: {
+  title: string;
+  line?: string;
+  action: string;
+  onAction: () => void;
+}) {
   const C = useColors();
 
   return (
     <View style={styles.hero}>
       <View style={[styles.photo, { backgroundColor: C.surface }, raised(C)]} />
-      <Text style={[styles.name, { color: C.ink }]}>{loading ? 'Loading…' : 'No profile'}</Text>
-      {loading ? null : (
-        <View style={styles.heroActions}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Try again"
-            onPress={onRetry}
-            style={({ pressed }) => [
-              styles.action,
-              { backgroundColor: pressed ? C.surface2 : C.surface },
-              raised(C),
-            ]}>
-            <Text style={[styles.actionLabel, { color: C.ink2 }]}>Try again</Text>
-          </Pressable>
-        </View>
-      )}
+
+      <Text style={[styles.name, { color: C.ink }]}>{title}</Text>
+      {line ? (
+        <Text numberOfLines={3} style={[styles.bio, { color: C.ink2 }]}>
+          {line}
+        </Text>
+      ) : null}
+
+      <View style={styles.heroActions}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={action}
+          onPress={onAction}
+          style={({ pressed }) => [
+            styles.action,
+            { backgroundColor: pressed ? C.cream : C.pill },
+            dropped(C, 'md'),
+          ]}>
+          <Text style={[styles.actionLabel, { color: C.pillInk }]}>{action}</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -281,9 +398,16 @@ function ConnectionRow({
 }) {
   const C = useColors();
 
+  /*
+    A 38px well, so backgroundColor plus a hairline — NOT `pressedSoft`. On a
+    dark ground the light half of the inset pair sits at 3.2% alpha, and at
+    this size only the dark half lands: it reads as a smudge, not a recess.
+  */
   const body = (
     <>
-      <View style={[styles.connectionTile, { backgroundColor: C.bgRecessed }, pressedSoft(C)]} />
+      <View
+        style={[styles.connectionTile, { backgroundColor: C.bgRecessed, borderColor: C.rule }]}
+      />
       <Text style={[styles.connectionName, { color: C.ink }]}>{name}</Text>
       <Text style={[styles.connectionValue, { color: linked ? C.ink2 : C.ink3 }]}>{value}</Text>
     </>
@@ -315,6 +439,10 @@ function ConnectionRow({
 function spotifyValue(profile: ProfileRow): string {
   if (!profile.spotify_linked) return 'Not linked';
   return profile.is_premium ? 'Premium · linked' : 'Free · linked';
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error && error.message ? error.message : 'Check your connection.';
 }
 
 function monthOf(iso: string): string {
@@ -391,6 +519,7 @@ const styles = StyleSheet.create({
     ...Type.display(27),
     letterSpacing: tracking(27, -0.03),
     marginTop: Space.xl,
+    textAlign: 'center',
   },
   handle: {
     ...Type.body(14),
@@ -423,6 +552,9 @@ const styles = StyleSheet.create({
     gap: 11,
     paddingHorizontal: CARD_GUTTER,
     paddingTop: Space.xxxl,
+  },
+  statSlot: {
+    flex: 1,
   },
   stat: {
     flex: 1,
@@ -462,6 +594,7 @@ const styles = StyleSheet.create({
     width: CONNECTION_TILE,
     height: CONNECTION_TILE,
     borderRadius: Radii.sm,
+    borderWidth: Rule.hair,
   },
   connectionName: {
     flex: 1,
@@ -476,9 +609,27 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
 
+  skeletonPhoto: {
+    borderRadius: Radii.xxl,
+  },
+  skeletonName: {
+    borderRadius: Radii.sm,
+    marginTop: Space.xl,
+  },
+  skeletonHandle: {
+    borderRadius: Radii.sm,
+    marginTop: Space.sm,
+  },
+  skeletonAction: {
+    borderRadius: Radii.md - 1,
+  },
+  skeletonCard: {
+    borderRadius: Radii.lg,
+  },
+
   signOut: {
     marginHorizontal: CARD_GUTTER,
-    marginTop: Space.xxxl,
+    marginTop: 26,
     minHeight: 52,
     alignItems: 'center',
     justifyContent: 'center',

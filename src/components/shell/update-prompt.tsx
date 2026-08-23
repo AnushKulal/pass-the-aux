@@ -18,7 +18,7 @@
  * user is — is decided in `@/lib/release-notes`.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
@@ -50,55 +50,60 @@ export function UpdatePrompt() {
 
   const { promptVisible, pending, status, apply, dismissPrompt } = useUpdates();
 
-  /**
-   * Kept separate from `promptVisible` so the card survives its own exit —
-   * unmounting the instant the flag flips would cut the slide-down off at the
-   * first frame.
-   */
-  const [mounted, setMounted] = useState(false);
-
   const y = useSharedValue(SHEET_TRAVEL);
   const opacity = useSharedValue(0);
 
+  /**
+   * The card stays in the tree and is moved off the bottom edge instead of
+   * being unmounted.
+   *
+   * It used to carry a `mounted` state so it could survive its own exit, but
+   * raising that flag meant a synchronous setState at the top of this effect,
+   * which cascades a render every time the prompt opens. Parking the card is
+   * the cheaper answer to the same problem: nothing has to be kept alive
+   * artificially if nothing ever dies. It starts at `SHEET_TRAVEL` with zero
+   * opacity, so the first paint is already off-screen.
+   */
   useEffect(() => {
-    if (promptVisible) {
-      setMounted(true);
-      // Sheet duration, not the shorter entrance one — this travels a full card
-      // height rather than nudging a module into place.
-      const ms = reduced ? 0 : Duration.sheet;
-      y.value = withTiming(0, { duration: ms });
-      opacity.value = withTiming(1, { duration: ms });
-      return;
-    }
+    // Sheet duration on the way up — this travels a full card height rather
+    // than nudging a module into place. Back down faster, so dismissing feels
+    // like a dismissal and not a second presentation.
+    const ms = reduced ? 0 : promptVisible ? Duration.sheet : Duration.press;
 
-    if (!mounted) return;
-
-    // Back down the way it came, so dismissing is the entrance reversed.
-    const ms = reduced ? 0 : Duration.press;
-    y.value = withTiming(SHEET_TRAVEL, { duration: ms });
-    opacity.value = withTiming(0, { duration: ms });
-
-    const timer = setTimeout(() => setMounted(false), ms);
-    return () => clearTimeout(timer);
-  }, [promptVisible, mounted, reduced, y, opacity]);
+    y.value = withTiming(promptVisible ? 0 : SHEET_TRAVEL, { duration: ms });
+    opacity.value = withTiming(promptVisible ? 1 : 0, { duration: ms });
+  }, [promptVisible, reduced, y, opacity]);
 
   const animated = useAnimatedStyle(() => ({
     opacity: opacity.value,
     transform: [{ translateY: y.value }],
   }));
 
-  if (!mounted) return null;
-
   const applying = status === 'applying';
 
   return (
     <View
       style={[styles.layer, { paddingBottom: insets.bottom + Space.lg }, PointerEvents.boxNone]}>
+      {/*
+        Parked rather than unmounted, so it must be inert while it is parked:
+        off-screen is not the same as gone. Without these three the dismissed
+        card still swallows taps along the bottom edge and still reads out to a
+        screen reader as a live update offer.
+      */}
       <Animated.View
-        style={[styles.card, animated, { backgroundColor: C.surface, borderColor: C.rule2 }]}>
+        accessibilityElementsHidden={!promptVisible}
+        importantForAccessibility={promptVisible ? 'auto' : 'no-hide-descendants'}
+        style={[
+          styles.card,
+          animated,
+          { backgroundColor: C.surface, borderColor: C.rule2 },
+          promptVisible ? PointerEvents.auto : PointerEvents.none,
+        ]}>
         <View style={styles.head}>
           <View style={styles.headText}>
-            <Text style={[styles.kicker, { color: C.liveText }]}>UPDATE READY</Text>
+            {/* Ink, matching the banner's mark and the Settings dot — one
+                event, one loudness, on all three surfaces that report it. */}
+            <Text style={[styles.kicker, { color: C.ink3 }]}>UPDATE READY</Text>
             <Text style={[styles.title, { color: C.ink }]}>A new version of aux is ready</Text>
           </View>
 
@@ -156,12 +161,21 @@ export function UpdatePrompt() {
             <Text style={[styles.actionLabel, { color: C.ink2 }]}>NOT NOW</Text>
           </Pressable>
 
+          {/*
+            The inverted pill, which is what a primary action looks like
+            everywhere else in this app — the Feed's empty card, CREATE on the
+            lounge form, the notice actions in every chat surface.
+
+            It used to be an accent fill. Applying an update is not live, not
+            playing, not joinable and not selected; it was the accent standing
+            in for "primary", which is the one job the accent does not have.
+          */}
           <Pressable
             onPress={() => void apply()}
             disabled={applying}
             accessibilityRole="button"
-            style={[styles.action, { backgroundColor: C.live }]}>
-            <Text style={[styles.actionLabel, { color: C.onLive }]}>
+            style={[styles.action, { backgroundColor: C.pill }]}>
+            <Text style={[styles.actionLabel, { color: C.pillInk }]}>
               {applying ? 'RESTARTING' : 'UPDATE NOW'}
             </Text>
           </Pressable>

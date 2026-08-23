@@ -36,7 +36,12 @@ export {
   type CircleIconButtonSize,
   type CircleIconButtonTone,
 } from '@/components/ui/circle-icon-button';
-export { EmptyState, type EmptyStateProps } from '@/components/ui/empty-state';
+export {
+  EmptyState,
+  type EmptyStateAction,
+  type EmptyStateProps,
+  type EmptyStateSize,
+} from '@/components/ui/empty-state';
 export {
   GlassCard,
   Panel,
@@ -44,12 +49,6 @@ export {
   type PanelProps,
 } from '@/components/ui/glass-card';
 export { LivePulse, type LivePulseProps } from '@/components/ui/live-pulse';
-export {
-  PhotoCard,
-  type PhotoCardCorners,
-  type PhotoCardProps,
-  type PhotoCardRadius,
-} from '@/components/ui/photo-card';
 export { ProgressBar, type ProgressBarProps } from '@/components/ui/progress-bar';
 /*
   `Rule` is also the name of the weight table in '@/lib/theme'. A file that wants

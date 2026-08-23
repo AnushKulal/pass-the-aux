@@ -11,6 +11,12 @@
  * which is a FIXED band of this layout and never unmounts; every other view on
  * this screen is a Modal sheet layered over it, so nothing can take it down.
  *
+ * That is also why loading and empty are drawn INSIDE the bands rather than as
+ * a separate screen swapped in ahead of them: a skeleton that replaces the
+ * whole column would unmount the player on its way out. The one exception is
+ * the "you cannot open this Session" error, which can only happen before the
+ * room row has ever landed — nothing is playing, so there is nothing to lose.
+ *
  * The layout is one fixed column, no scroller:
  *
  *   top bar    close · IN SESSION / lounge · queue
@@ -18,6 +24,7 @@
  *   head       re-anchor · title / artist · lobby controls
  *   waveform   elapsed · rung + drift · duration
  *   transport  shuffle · back · play · skip · repeat
+ *   prompt     only when nothing is queued: the one next move
  *   aux card   who has it, and the one button that changes that
  *   roster     who is here, and how many are in sync
  *
@@ -25,6 +32,7 @@
  * detail — is a sheet.
  */
 
+import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import {
   ChevronDown,
@@ -34,11 +42,14 @@ import {
   HeadphoneOff,
   Headphones,
   ListMusic,
+  LogOut,
   MessageCircle,
   Mic,
   MicOff,
   MonitorUp,
+  Plus,
   Radio,
+  RotateCw,
   X,
   type LucideIcon,
 } from 'lucide-react-native';
@@ -57,12 +68,11 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { AddTrackSheet } from '@/components/room/add-track-sheet';
 import { NowPlaying } from '@/components/room/now-playing';
-import { HeatBackdrop } from '@/components/shell/heat-backdrop';
 import { ParticipantStrip, SyncOrbit } from '@/components/room/participant-strip';
 import { QueueList } from '@/components/room/queue-list';
 import { AuxCard, TransportControls } from '@/components/room/transport-controls';
 import { driftRung, formatClock, initialFor, readout } from '@/components/room/drift';
-import { Avatar, EmptyState, SheetTabs, useToast } from '@/components/ui';
+import { Avatar, EmptyState, SheetTabs, Skeleton, useToast } from '@/components/ui';
 import { RoomChat } from '@/features/chat';
 import {
   useLounge,
@@ -74,6 +84,7 @@ import {
 import { useRoomSync } from '@/features/rooms/use-room-sync';
 import {
   Fonts,
+  PointerEvents,
   Radii,
   Rule,
   Sheet as SheetMetrics,
@@ -81,7 +92,6 @@ import {
   TOUCH_TARGET,
   Type,
   dropped,
-  pressedSoft,
   raised,
   tracking,
 } from '@/lib/theme';
@@ -98,6 +108,8 @@ const SEEK_BACK_MS = 15_000;
 const GUTTER = Space.lg;
 /** Avatars drawn in the roster strip before it stops and counts instead. */
 const ROSTER_FACES = 5;
+/** The ground's three stops, top to bottom. */
+const GROUND_LOCATIONS = [0, 0.46, 1] as const;
 
 type SheetName = 'queue' | 'chat' | 'lobby' | 'people' | null;
 type PeopleView = 'chart' | 'orbit';
@@ -170,7 +182,9 @@ export default function RoomScreen() {
   }, [addVisible, sheet]);
 
   const queueLength = queue.data?.length ?? 0;
-  const roster = participants.data ?? [];
+  // Memoised because `toggleMemberMute` looks a name up in it: a fresh `[]`
+  // every render would hand every roster row a new callback on every tick.
+  const roster = useMemo(() => participants.data ?? [], [participants.data]);
   const listenerCount = roster.length;
   const onAux = roster.find((person) => person.userId === room?.host_id) ?? null;
 
@@ -287,14 +301,23 @@ export default function RoomScreen() {
    * A local decision that never leaves the device — nobody is told they have
    * been muted, because that would make a private preference into a social act.
    */
-  const toggleMemberMute = useCallback((personId: string) => {
-    setMutedIds((current) => {
-      const next = new Set(current);
-      if (next.has(personId)) next.delete(personId);
-      else next.add(personId);
-      return next;
-    });
-  }, []);
+  const toggleMemberMute = useCallback(
+    (personId: string) => {
+      setMutedIds((current) => {
+        const next = new Set(current);
+        if (next.has(personId)) next.delete(personId);
+        else next.add(personId);
+        return next;
+      });
+      const person = roster.find((candidate) => candidate.userId === personId);
+      const name = person ? person.displayName : 'They';
+      toast.show(
+        mutedIds.has(personId) ? `${name} is audible again` : `${name} is muted, for you only`,
+        'info'
+      );
+    },
+    [mutedIds, roster, toast]
+  );
 
   const handleShuffle = useCallback(() => toast.show('Shuffle is off', 'info'), [toast]);
   const handleRepeat = useCallback(() => toast.show('Repeat is off', 'info'), [toast]);
@@ -324,16 +347,29 @@ export default function RoomScreen() {
   const media = useMemo(() => <YouTubePlayerHost visible={stageVisible} />, [stageVisible]);
 
   const loungeName = lounge.data?.name ?? room?.name ?? 'Session';
+  /**
+   * Loaded, and there is genuinely nothing on the deck and nothing behind it.
+   * Both loads have to have finished: showing "nothing queued" while the queue
+   * is still in flight is a promise the next 200ms may break.
+   */
+  const nothingQueued =
+    !isLoading && !queue.isLoading && Boolean(room) && !room?.track_id && queueLength === 0;
 
   if (error && !room) {
     return (
       <Shell>
         <TopBar name={loungeName} onClose={handleBack} onQueue={null} />
-        <View style={styles.gutter}>
+        <View style={styles.errorSlot}>
           <EmptyState
             icon={Radio}
             title="This Session is not open to you"
             description="It may have ended, or it lives in a lounge you have not joined."
+            action={
+              <View style={styles.errorActions}>
+                <FilledAction icon={RotateCw} label="Try again" onPress={resync} />
+                <QuietAction icon={LogOut} label="Back" onPress={handleBack} />
+              </View>
+            }
           />
         </View>
       </Shell>
@@ -382,11 +418,14 @@ export default function RoomScreen() {
 
         <View style={styles.spacer} />
 
+        {nothingQueued ? <QueuePrompt onPress={openAdd} /> : null}
+
         <View style={styles.auxSlot}>
           <AuxCard
             name={onAux?.displayName ?? null}
             avatarUrl={onAux?.avatarUrl ?? null}
             isHost={isHost}
+            isLoading={isLoading && !room}
             requestSent={requestSent}
             onRequestAux={handleRequestAux}
           />
@@ -394,6 +433,7 @@ export default function RoomScreen() {
 
         <RosterStrip
           people={roster}
+          isLoading={participants.isLoading && !participants.data}
           lockedCount={lockedCount}
           listenerCount={listenerCount}
           bottomInset={insets.bottom}
@@ -404,7 +444,7 @@ export default function RoomScreen() {
       <Sheet
         visible={sheet === 'queue'}
         title="Queue"
-        subtitle={`${queueLength} up next · anyone can add`}
+        subtitle={queueLength > 0 ? `${queueLength} up next · anyone can add` : 'Anyone can add'}
         onClose={closeSheet}>
         <QueueList
           roomId={roomId}
@@ -425,8 +465,13 @@ export default function RoomScreen() {
         {room ? (
           <RoomChat roomId={room.id} loungeId={room.lounge_id} bottomInset={0} />
         ) : (
-          <View style={styles.gutter}>
-            <EmptyState icon={MessageCircle} title="Not in the Session yet" />
+          <View style={styles.errorSlot}>
+            <EmptyState
+              icon={MessageCircle}
+              title="Not in the Session yet"
+              description="Chat opens once the Session has loaded."
+              action={<FilledAction icon={RotateCw} label="Try again" onPress={resync} />}
+            />
           </View>
         )}
       </Sheet>
@@ -434,7 +479,7 @@ export default function RoomScreen() {
       <Sheet
         visible={sheet === 'people'}
         title="Listening"
-        subtitle={`${lockedCount} of ${listenerCount} in sync`}
+        subtitle={`${lockedCount} of ${listenerCount} in sync · tap anyone to mute`}
         onClose={closeSheet}>
         <View style={styles.peopleTabs}>
           <SheetTabs
@@ -461,34 +506,43 @@ export default function RoomScreen() {
             currentUserId={userId}
             track={track}
             timeline={sheet === 'people' ? timeline : null}
+            mutedIds={mutedIds}
+            onSelectPerson={toggleMemberMute}
             contentBottomInset={Space.xl}
           />
         )}
       </Sheet>
 
-      <Sheet visible={sheet === 'lobby'} title="Lobby" onClose={closeSheet}>
+      <Sheet visible={sheet === 'lobby'} title="Lobby" subtitle={loungeName} onClose={closeSheet}>
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.lobby}>
-          <LobbyRow
-            icon={micOn ? Mic : MicOff}
-            label="Microphone"
-            value={deafened ? 'Off — deafened' : micOn ? 'On' : 'Off'}
-            onPress={handleMic}
-          />
-          <LobbyRow
-            icon={deafened ? HeadphoneOff : Headphones}
-            label="Deafen"
-            value={deafened ? 'On' : 'Off'}
-            onPress={handleDeafen}
-          />
-          <LobbyRow icon={MessageCircle} label="Chat" onPress={openChat} />
-          <LobbyRow
-            icon={MonitorUp}
-            label="Screen share"
-            value="Not built yet"
-            onPress={handleScreenShare}
-          />
-          <LobbyRow icon={Film} label="Movie night" value="Not built yet" onPress={handleMovie} />
-          <LobbyRow icon={Gamepad2} label="Game table" value="Not built yet" onPress={handleGames} />
+          <LobbyGroup label="Voice">
+            <LobbyRow
+              icon={micOn ? Mic : MicOff}
+              label="Microphone"
+              state={deafened ? 'Deafened' : micOn ? 'On' : 'Off'}
+              on={micOn && !deafened}
+              onPress={handleMic}
+            />
+            <LobbyRow
+              icon={deafened ? HeadphoneOff : Headphones}
+              label="Deafen"
+              state={deafened ? 'On' : 'Off'}
+              on={deafened}
+              onPress={handleDeafen}
+            />
+          </LobbyGroup>
+
+          <LobbyGroup label="Together">
+            <LobbyRow icon={MessageCircle} label="Chat" onPress={openChat} />
+            <LobbyRow
+              icon={MonitorUp}
+              label="Screen share"
+              state="Soon"
+              onPress={handleScreenShare}
+            />
+            <LobbyRow icon={Film} label="Movie night" state="Soon" onPress={handleMovie} />
+            <LobbyRow icon={Gamepad2} label="Game table" state="Soon" onPress={handleGames} />
+          </LobbyGroup>
 
           <Pressable
             accessibilityRole="button"
@@ -511,19 +565,26 @@ export default function RoomScreen() {
 // -------------------------------------------------------------------- shell
 
 /**
- * Ground, atmosphere and safe area.
+ * Ground and safe area.
  *
- * The Session gets the heat at full strength — this is the one place the
- * gradient is allowed to be the loudest thing before the artwork loads. It sits
- * BEHIND the safe area rather than inside it, so the colour runs under the
- * status bar instead of stopping at a hard line below it.
+ * The v2 ground is a three-stop vertical wash — light at the top, falling to
+ * the darkest value at the bottom — not the corner-entering heat gradient the
+ * abandoned Apex direction used. It sits BEHIND the safe area rather than
+ * inside it, so the colour runs under the status bar instead of stopping at a
+ * hard line below it.
  */
 function Shell({ children }: { children: ReactNode }) {
   const C = useColors();
 
   return (
     <View style={[styles.root, { backgroundColor: C.bg }]}>
-      <HeatBackdrop extent={0.5} direction="vertical" />
+      <LinearGradient
+        colors={[C.bgTop, C.bg, C.bgBot]}
+        locations={GROUND_LOCATIONS}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+        style={[StyleSheet.absoluteFill, PointerEvents.none]}
+      />
       <SafeAreaView edges={['top', 'left', 'right']} style={styles.safe}>
         {/*
           react-native-web has no phone to constrain it, so an unbounded column
@@ -601,10 +662,89 @@ const TopBar = memo(function TopBar({
   );
 });
 
+// ---------------------------------------------------------------- actions
+
+/** The one filled button in a notice. Same device as the aux card's action. */
+const FilledAction = memo(function FilledAction({
+  icon: Icon,
+  label,
+  onPress,
+}: {
+  icon: LucideIcon;
+  label: string;
+  onPress: () => void;
+}) {
+  const C = useColors();
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.filledAction,
+        { backgroundColor: C.pill },
+        pressed ? styles.dim : null,
+      ]}>
+      <Icon size={15} strokeWidth={2.4} color={C.pillInk} />
+      <Text style={[styles.filledActionLabel, { color: C.pillInk }]}>{label}</Text>
+    </Pressable>
+  );
+});
+
+/** The second choice beside it. Never two filled buttons in one notice. */
+const QuietAction = memo(function QuietAction({
+  icon: Icon,
+  label,
+  onPress,
+}: {
+  icon: LucideIcon;
+  label: string;
+  onPress: () => void;
+}) {
+  const C = useColors();
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.quietAction,
+        { backgroundColor: C.bgRecessed, borderColor: pressed ? C.rule3 : C.rule },
+      ]}>
+      <Icon size={15} strokeWidth={2.4} color={C.ink2} />
+      <Text style={[styles.quietActionLabel, { color: C.ink2 }]}>{label}</Text>
+    </Pressable>
+  );
+});
+
+// ---------------------------------------------------------- nothing queued
+
+/**
+ * The Session's empty state. It sits where the music would be talked about, it
+ * says the one thing left to do, and it carries the one button that does it.
+ */
+const QueuePrompt = memo(function QueuePrompt({ onPress }: { onPress: () => void }) {
+  const C = useColors();
+
+  return (
+    <View style={[styles.prompt, { backgroundColor: C.surface }, raised(C)]}>
+      <View style={styles.promptMeta}>
+        <Text style={[styles.promptKicker, { color: C.ink3 }]}>Nothing queued</Text>
+        <Text style={[styles.promptTitle, { color: C.ink }]}>Start the Session</Text>
+      </View>
+
+      <FilledAction icon={Plus} label="Add a track" onPress={onPress} />
+    </View>
+  );
+});
+
 // ----------------------------------------------------------------- roster
 
 type RosterStripProps = {
   people: { userId: string; displayName: string; avatarUrl: string | null }[];
+  isLoading: boolean;
   lockedCount: number;
   listenerCount: number;
   bottomInset: number;
@@ -614,6 +754,7 @@ type RosterStripProps = {
 /** Faces, then the count. Tapping it opens the per-person drift detail. */
 const RosterStrip = memo(function RosterStrip({
   people,
+  isLoading,
   lockedCount,
   listenerCount,
   bottomInset,
@@ -621,6 +762,12 @@ const RosterStrip = memo(function RosterStrip({
 }: RosterStripProps) {
   const C = useColors();
   const behind = Math.max(0, listenerCount - lockedCount);
+
+  const line = isLoading
+    ? 'Counting\nlisteners'
+    : listenerCount === 0
+      ? 'Nobody yet\nTap to check'
+      : `${lockedCount} in sync\n${behind} catching up`;
 
   return (
     <Pressable
@@ -632,15 +779,19 @@ const RosterStrip = memo(function RosterStrip({
         { paddingBottom: bottomInset + Space.lg },
         pressed ? styles.dim : null,
       ]}>
-      {people.slice(0, ROSTER_FACES).map((person, index) => (
-        <View key={person.userId} style={index > 2 ? styles.faceBack : null}>
-          <Avatar name={person.displayName} uri={person.avatarUrl} size={34} />
-        </View>
-      ))}
+      {isLoading
+        ? Array.from({ length: 3 }, (_, index) => (
+            <Skeleton key={index} width={34} height={34} style={styles.faceSkeleton} />
+          ))
+        : people
+            .slice(0, ROSTER_FACES)
+            .map((person, index) => (
+              <View key={person.userId} style={index > 2 ? styles.faceBack : null}>
+                <Avatar name={person.displayName} uri={person.avatarUrl} size={34} />
+              </View>
+            ))}
 
-      <Text style={[styles.rosterLine, { color: C.ink3 }]}>
-        {`${lockedCount} in sync\n${behind} catching up`}
-      </Text>
+      <Text style={[styles.rosterLine, { color: C.ink3 }]}>{line}</Text>
     </Pressable>
   );
 });
@@ -707,16 +858,47 @@ function Sheet({ visible, title, subtitle, onClose, children }: SheetProps) {
   );
 }
 
-/** A raised row inside the lobby sheet: recessed icon well, label, value, chevron. */
+// ------------------------------------------------------------------ lobby
+
+/** A titled run of lobby rows. Voice above, everything social below it. */
+const LobbyGroup = memo(function LobbyGroup({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  const C = useColors();
+
+  return (
+    <View style={styles.lobbyGroup}>
+      <Text style={[styles.lobbyGroupLabel, { color: C.ink3 }]}>{label}</Text>
+      <View style={styles.lobbyGroupRows}>{children}</View>
+    </View>
+  );
+});
+
+/**
+ * A raised row inside the lobby sheet.
+ *
+ * The icon sits in a RECESSED FILL with a hairline, not an inset shadow pair.
+ * The artboard draws the pair, but at 38px only the dark half of it survives on
+ * a dark ground — the light half is 3.2% alpha — and the well reads as a smudge
+ * rather than as a recess. Same rule as the auth fields.
+ */
 const LobbyRow = memo(function LobbyRow({
   icon: Icon,
   label,
-  value,
+  state,
+  on = false,
   onPress,
 }: {
   icon: LucideIcon;
   label: string;
-  value?: string;
+  /** The right-hand chip. Absent means this row navigates instead of toggling. */
+  state?: string;
+  /** Accent the chip: this control is live right now. */
+  on?: boolean;
   onPress: () => void;
 }) {
   const C = useColors();
@@ -724,24 +906,35 @@ const LobbyRow = memo(function LobbyRow({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={value ? `${label}. ${value}` : label}
+      accessibilityLabel={state ? `${label}. ${state}` : label}
+      accessibilityState={state ? { checked: on } : undefined}
       onPress={onPress}
       style={({ pressed }) => [
         styles.lobbyRow,
-        { backgroundColor: C.surface },
+        { backgroundColor: pressed ? C.surface2 : C.surface },
         raised(C),
-        pressed ? styles.dim : null,
       ]}>
-      <View style={[styles.lobbyWell, { backgroundColor: C.bgRecessed }, pressedSoft(C)]}>
-        <Icon size={17} strokeWidth={2} color={C.ink2} />
+      <View style={[styles.lobbyWell, { backgroundColor: C.bgRecessed, borderColor: C.rule }]}>
+        <Icon size={17} strokeWidth={2} color={on ? C.liveText : C.ink2} />
       </View>
 
-      <View style={styles.lobbyMeta}>
-        <Text style={[styles.lobbyLabel, { color: C.ink }]}>{label}</Text>
-        {value ? <Text style={[styles.lobbyValue, { color: C.ink2 }]}>{value}</Text> : null}
-      </View>
+      <Text numberOfLines={1} style={[styles.lobbyLabel, { color: C.ink }]}>
+        {label}
+      </Text>
 
-      <ChevronRight size={17} strokeWidth={2} color={C.ink3} />
+      {state ? (
+        <View
+          style={[
+            styles.lobbyChip,
+            on
+              ? { backgroundColor: C.live, borderColor: C.live }
+              : { backgroundColor: C.chip, borderColor: C.rule },
+          ]}>
+          <Text style={[styles.lobbyChipLabel, { color: on ? C.onLive : C.ink3 }]}>{state}</Text>
+        </View>
+      ) : (
+        <ChevronRight size={17} strokeWidth={2} color={C.ink3} />
+      )}
     </Pressable>
   );
 });
@@ -766,7 +959,13 @@ const NowPlayingStrip = memo(function NowPlayingStrip({
 
   return (
     <View style={[styles.strip, { backgroundColor: C.surface }, raised(C)]}>
-      <View style={[styles.stripTile, { backgroundColor: playing ? C.live : C.bgRecessed }]}>
+      <View
+        style={[
+          styles.stripTile,
+          playing
+            ? { backgroundColor: C.live, borderColor: C.live }
+            : { backgroundColor: C.bgRecessed, borderColor: C.rule },
+        ]}>
         <Text style={[styles.stripInitial, { color: playing ? C.onLive : C.ink3 }]}>
           {initialFor(title)}
         </Text>
@@ -775,7 +974,9 @@ const NowPlayingStrip = memo(function NowPlayingStrip({
         <Text numberOfLines={1} style={[styles.stripTitle, { color: C.ink }]}>
           {title ?? 'Nothing playing'}
         </Text>
-        <Text numberOfLines={1} style={[styles.stripStatus, { color: playing ? C.liveText : C.ink3 }]}>
+        <Text
+          numberOfLines={1}
+          style={[styles.stripStatus, { color: playing ? C.liveText : C.ink3 }]}>
           {playing ? `${formatClock(positionMs)} / ${formatClock(durationMs)}` : 'Add a track'}
         </Text>
       </View>
@@ -795,9 +996,6 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 480,
     alignSelf: 'center',
-  },
-  gutter: {
-    paddingHorizontal: GUTTER,
   },
   body: {
     flex: 1,
@@ -846,6 +1044,69 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
+  // -------------------------------------------------------------- actions
+  filledAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.sm - 2,
+    minHeight: TOUCH_TARGET,
+    paddingHorizontal: Space.lg,
+    borderRadius: Radii.sm,
+  },
+  filledActionLabel: {
+    fontFamily: Fonts.semibold,
+    fontSize: 13,
+    letterSpacing: tracking(13, 0.02),
+  },
+  quietAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.sm - 2,
+    minHeight: TOUCH_TARGET,
+    paddingHorizontal: Space.lg,
+    borderRadius: Radii.sm,
+    borderWidth: Rule.hair,
+  },
+  quietActionLabel: {
+    fontFamily: Fonts.semibold,
+    fontSize: 13,
+    letterSpacing: tracking(13, 0.02),
+  },
+  errorSlot: {
+    paddingHorizontal: GUTTER,
+    paddingTop: Space.xxl,
+  },
+  errorActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.sm + 2,
+  },
+
+  // --------------------------------------------------------- queue prompt
+  prompt: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.md,
+    marginHorizontal: Space.lg + 2,
+    marginBottom: Space.md,
+    padding: Space.md + 1,
+    borderRadius: Radii.lg,
+  },
+  promptMeta: {
+    flex: 1,
+    minWidth: 0,
+  },
+  promptKicker: {
+    ...Type.label(10),
+    letterSpacing: tracking(10, 0.14),
+  },
+  promptTitle: {
+    fontFamily: Fonts.extrabold,
+    fontSize: 14.5,
+    letterSpacing: tracking(14.5, -0.01),
+    marginTop: 2,
+  },
+
   // -------------------------------------------------------------- aux card
   auxSlot: {
     paddingHorizontal: Space.lg + 2,
@@ -863,6 +1124,9 @@ const styles = StyleSheet.create({
   /** The tail of the strip sits back, exactly as the artboard draws it. */
   faceBack: {
     opacity: 0.42,
+  },
+  faceSkeleton: {
+    borderRadius: Radii.xs,
   },
   rosterLine: {
     ...Type.label(10),
@@ -925,40 +1189,63 @@ const styles = StyleSheet.create({
 
   // ---------------------------------------------------------------- lobby
   lobby: {
-    paddingHorizontal: Space.xl,
+    paddingHorizontal: Space.lg + 2,
     paddingBottom: Space.xxl,
-    gap: Space.sm + 2,
+    gap: Space.lg,
+  },
+  lobbyGroup: {
+    gap: Space.sm,
+  },
+  lobbyGroupLabel: {
+    ...Type.label(10),
+    letterSpacing: tracking(10, 0.14),
+    paddingLeft: Space.xs,
+  },
+  lobbyGroupRows: {
+    gap: Space.sm + 1,
   },
   lobbyRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Space.md + 2,
-    minHeight: TOUCH_TARGET + 24,
-    padding: Space.md + 3,
+    minHeight: TOUCH_TARGET + Space.md,
+    padding: Space.md,
     borderRadius: Radii.lg,
   },
   lobbyWell: {
     width: 38,
     height: 38,
-    borderRadius: Radii.sm,
+    flexGrow: 0,
+    flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  lobbyMeta: {
-    flex: 1,
-    minWidth: 0,
+    borderRadius: Radii.sm,
+    borderWidth: Rule.hair,
   },
   lobbyLabel: {
+    flex: 1,
+    minWidth: 0,
     fontFamily: Fonts.extrabold,
     fontSize: 14.5,
     letterSpacing: tracking(14.5, -0.005),
   },
-  lobbyValue: {
-    ...Type.body(12.5),
-    marginTop: 2,
+  lobbyChip: {
+    flexGrow: 0,
+    flexShrink: 0,
+    minWidth: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Space.sm + 2,
+    paddingVertical: Space.xs + 2,
+    borderRadius: Radii.sm,
+    borderWidth: Rule.hair,
+  },
+  lobbyChipLabel: {
+    ...Type.label(9.5),
+    letterSpacing: tracking(9.5, 0.1),
   },
   leave: {
-    marginTop: Space.sm,
+    marginTop: Space.xs,
     minHeight: 52,
     alignItems: 'center',
     justifyContent: 'center',
@@ -971,23 +1258,26 @@ const styles = StyleSheet.create({
   },
 
   // ------------------------------------------------------- now-playing strip
+  /**
+   * No outer margin: this is the queue list's header, and that list already
+   * carries the gutter and the 9px gap between its cards.
+   */
   strip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Space.md,
-    marginHorizontal: Space.lg,
-    marginBottom: Space.md,
-    padding: Space.md,
-    borderRadius: Radii.md + 2,
+    padding: Space.md - 1,
+    borderRadius: Radii.button,
   },
   stripTile: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     flexGrow: 0,
     flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: Radii.sm + 1,
+    borderRadius: 13,
+    borderWidth: Rule.hair,
   },
   stripInitial: {
     ...readout(16),
@@ -997,7 +1287,8 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   stripTitle: {
-    ...Type.heading(14),
+    fontFamily: Fonts.semibold,
+    fontSize: 14,
     letterSpacing: tracking(14, -0.01),
   },
   stripStatus: {

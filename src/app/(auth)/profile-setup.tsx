@@ -39,11 +39,11 @@ import { useLocalProfile } from '@/lib/providers';
 import {
   Fonts,
   Radii,
+  Rule,
   Space,
   TOUCH_TARGET,
   Type,
   dropped,
-  pressed as recessed,
   raisedLarge,
   tracking,
 } from '@/lib/theme';
@@ -185,11 +185,19 @@ export default function ProfileSetupScreen() {
             accessibilityLabel="Show when I'm active"
             onPress={() => local.update({ showActivity: !local.showActivity })}
             style={styles.switchTarget}>
+            {/*
+              A 50×30 track takes a hairline, NOT `pressed()`. The inset pair
+              needs roughly 80px of surface before both halves land: at this
+              size the 3.2%-alpha light half never shows on a dark ground and
+              only the dark half survives, which reads as a smudge on the
+              switch rather than a well. This is the same fix the auth fields
+              already carry — the helper was reaching this file under the alias
+              `recessed`, which is why it outlived the others.
+            */}
             <View
               style={[
                 styles.switchTrack,
-                { backgroundColor: C.bgRecessed },
-                recessed(C),
+                { backgroundColor: C.bgRecessed, borderColor: C.rule },
                 local.showActivity ? styles.switchOn : styles.switchOff,
               ]}>
               <View style={[styles.knob, { backgroundColor: C.pill }, dropped(C, 'sm')]} />
@@ -305,6 +313,7 @@ const styles = StyleSheet.create({
     width: SWITCH_WIDTH,
     height: SWITCH_HEIGHT,
     borderRadius: SWITCH_HEIGHT / 2,
+    borderWidth: Rule.hair,
     flexDirection: 'row',
     alignItems: 'center',
     padding: 3,

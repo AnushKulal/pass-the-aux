@@ -40,6 +40,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ChatNotice } from '@/components/chat/bubble-kit';
 import { presenceFor, stampFor } from '@/components/dm/conversation-row';
 import { Avatar, Skeleton } from '@/components/ui';
 import {
@@ -295,38 +296,6 @@ function PersonRowBase({ person, onMessage, busy = false }: PersonRowProps) {
 
 const PersonRow = memo(PersonRowBase);
 
-/* ------------------------------------------------------------------- notices */
-
-/** Carries the 38px action pill to the 44px floor. */
-const NOTICE_SLOP = { top: 3, bottom: 3, left: 0, right: 0 } as const;
-
-/** One line where a list would be. Never a paragraph. */
-function Notice({ label, action }: { label: string; action?: { label: string; onPress: () => void } }) {
-  const C = useColors();
-
-  return (
-    <View style={[styles.notice, { backgroundColor: C.surface }, raised(C)]}>
-      <Text numberOfLines={2} style={[styles.noticeLabel, { color: C.ink2 }]}>
-        {label}
-      </Text>
-      {action ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={action.label}
-          onPress={action.onPress}
-          // The pill is 38 tall by design; the slop carries it to the 44 floor.
-          hitSlop={NOTICE_SLOP}
-          style={({ pressed }) => [
-            styles.noticeAction,
-            { backgroundColor: pressed ? C.cream : C.pill },
-          ]}>
-          <Text style={[styles.noticeActionLabel, { color: C.pillInk }]}>{action.label}</Text>
-        </Pressable>
-      ) : null}
-    </View>
-  );
-}
-
 /** Rows of the real geometry, so nothing shifts when the data lands. */
 function InboxSkeleton() {
   return (
@@ -424,14 +393,17 @@ export default function MessagesScreen() {
     if (isError) {
       return (
         <View style={styles.group}>
-          <Notice label="Your messages did not load." action={{ label: 'Retry', onPress: refetch }} />
+          <ChatNotice
+            label="Your messages didn't load."
+            action={{ label: 'Retry', onPress: refetch }}
+          />
         </View>
       );
     }
 
     return (
       <View style={styles.group}>
-        <Notice label="No conversations yet." />
+        <ChatNotice label="No conversations yet. Pick someone below." />
       </View>
     );
   }, [isError, isPending, refetch]);
@@ -473,8 +445,8 @@ export default function MessagesScreen() {
 
         {peopleFailed ? (
           <View style={styles.group}>
-            <Notice
-              label="The people list did not load."
+            <ChatNotice
+              label="The people list didn't load."
               action={{ label: 'Retry', onPress: () => void refetchPeople() }}
             />
           </View>
@@ -482,7 +454,10 @@ export default function MessagesScreen() {
 
         {!peoplePending && !peopleFailed && (peopleRows?.length ?? 0) === 0 ? (
           <View style={styles.group}>
-            <Notice label="Join a lounge and this fills itself." />
+            <ChatNotice
+              label="Join a lounge and this fills itself."
+              action={{ label: 'Find a lounge', onPress: () => router.push('/lounges') }}
+            />
           </View>
         ) : null}
 
@@ -498,7 +473,7 @@ export default function MessagesScreen() {
         </View>
       </>
     ),
-    [C.ink3, messagePerson, messagingId, peopleFailed, peoplePending, peopleRows, refetchPeople],
+    [C.ink3, messagePerson, messagingId, peopleFailed, peoplePending, peopleRows, refetchPeople, router],
   );
 
   return (
@@ -652,31 +627,6 @@ const styles = StyleSheet.create({
   badgeLabel: {
     ...readout(10.5),
     lineHeight: 19,
-  },
-
-  notice: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space.md,
-    minHeight: TOUCH_TARGET + Space.xs,
-    padding: 15,
-    borderRadius: Radii.lg,
-  },
-  noticeLabel: {
-    flex: 1,
-    minWidth: 0,
-    ...Type.body(13.5),
-  },
-  noticeAction: {
-    minHeight: 38,
-    justifyContent: 'center',
-    paddingHorizontal: Space.lg,
-    borderRadius: Radii.sm - 1,
-  },
-  noticeActionLabel: {
-    fontFamily: Fonts.semibold,
-    fontSize: 12.5,
-    lineHeight: 16,
   },
 
   skeletonGroup: {

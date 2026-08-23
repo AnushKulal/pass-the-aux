@@ -17,8 +17,7 @@ export function LoungeChat({ loungeId, keyboardOffset = 0, bottomInset }: Lounge
       <ChatList
         loungeId={loungeId}
         roomId={null}
-        emptyTitle="No messages yet"
-        emptyDescription="This is the lounge — say hello, or drop a track everyone should hear."
+        emptyLabel="Say hello, or drop a track everyone should hear."
       />
       <ChatComposer
         loungeId={loungeId}

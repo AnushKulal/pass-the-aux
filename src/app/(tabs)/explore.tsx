@@ -2,20 +2,21 @@
  * Explore — the two ways into a lounge you are not in yet: a code somebody sent
  * you, or the public list.
  *
- * design/v2 "Explore": a recessed code well with the one filled JOIN cell
- * beside it, then PUBLIC LOUNGES as raised rows — a tag tile, the name, the
- * description, and one line of state.
+ * design/v2 "Explore": a code well with the one filled JOIN cell beside it, then
+ * PUBLIC LOUNGES as raised rows — a tag tile, the name, the description, and one
+ * line of state.
  *
- * The row IS the join. Tapping a lounge you are not in writes the membership
- * and walks straight in; tapping one you are already in just opens it. That is
- * the design's single target per row, and it is the same mutation the old
- * per-row button ran.
+ * The row IS the join. Tapping a lounge you are not in writes the membership and
+ * walks straight in; tapping one you are already in just opens it. That is the
+ * design's single target per row, and it is the same mutation the old per-row
+ * button ran.
  *
- * An unmatched code says "No lounge with that code" and nothing else — no
- * colour change on the field, no shake. The sentence is the error.
+ * An unmatched code says "No lounge with that code" and nothing else — no colour
+ * change on the field, no shake. The sentence is the error.
  */
 
 import { router } from 'expo-router';
+import { Compass, SearchX, WifiOff, type LucideIcon } from 'lucide-react-native';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   FlatList,
@@ -34,7 +35,8 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
-import { AuxButton, Screen, Skeleton, useToast } from '@/components/ui';
+import { LoungeCard, LoungeListSkeleton } from '@/components/lounge/lounge-card';
+import { EmptyState, Screen, useToast } from '@/components/ui';
 import {
   loungeErrorMessage,
   useJoinByCode,
@@ -46,11 +48,10 @@ import {
   Duration,
   Fonts,
   Radii,
+  Rule,
   Space,
   Type,
   dropped,
-  pressed as pressedShadow,
-  raised,
   tracking,
 } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
@@ -70,25 +71,9 @@ const LIST_TAIL = 48;
 /** design/v2: the code well and the JOIN cell are both 52 tall. */
 const FIELD = 52;
 const JOIN_CELL = 84;
-const TILE = 54;
-
-const SKELETON_ROWS = [0, 1, 2];
 
 /** Any other wording for an unmatched code is a bug. */
 const NO_MATCH = 'No lounge with that code';
-
-/** The tag on a lounge's tile: initials for a phrase, the first letters if not. */
-function tagFor(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  if (words.length > 1) {
-    return words
-      .slice(0, 4)
-      .map((word) => word[0] ?? '')
-      .join('')
-      .toUpperCase();
-  }
-  return (words[0] ?? '').slice(0, 4).toUpperCase() || '·';
-}
 
 function useModuleEnter() {
   const reduced = useReducedMotion();
@@ -108,96 +93,27 @@ function useModuleEnter() {
   }));
 }
 
-/** A raised card carrying one line and one action. Every non-happy path. */
+/**
+ * The list with nothing in it: a raised card standing where the first row would,
+ * saying what happened and offering the one move that fixes it.
+ *
+ * Sized to the list it stands in for — the shared card's default `row` size is
+ * the same 56px tile the lounge rows below use. Drawn by
+ * `@/components/ui/empty-state`, shared with the Feed and Lounges; this screen
+ * used to carry its own copy.
+ */
 function QuietCard({
+  icon,
+  title,
   line,
   action,
 }: {
-  line: string;
-  action?: { label: string; onPress: () => void };
+  icon: LucideIcon;
+  title: string;
+  line?: string;
+  action: { label: string; onPress: () => void };
 }) {
-  const C = useColors();
-
-  return (
-    <View style={[styles.quiet, { backgroundColor: C.surface }, raised(C)]}>
-      <Text style={[styles.quietLine, { color: C.ink2 }]}>{line}</Text>
-      {action ? (
-        <AuxButton
-          label={action.label}
-          onPress={action.onPress}
-          variant="cream"
-          size="sm"
-          align="center"
-        />
-      ) : null}
-    </View>
-  );
-}
-
-/** One public lounge. The whole row is the target — see the file header. */
-function LoungeRow({
-  item,
-  busy,
-  onPress,
-}: {
-  item: PublicLoungeSummary;
-  busy: boolean;
-  onPress: () => void;
-}) {
-  const C = useColors();
-  const state = busy ? 'Joining' : item.isMember ? 'Joined' : 'Tap to join';
-
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={item.lounge.name}
-      accessibilityHint={item.isMember ? 'Opens this lounge' : 'Joins this lounge'}
-      accessibilityState={{ busy }}
-      disabled={busy}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.row,
-        { backgroundColor: C.surface },
-        raised(C),
-        pressed && styles.pressedRow,
-      ]}>
-      <View style={[styles.tile, { backgroundColor: C.artwork }]}>
-        <Text numberOfLines={1} style={[styles.tag, { color: C.artInk }]}>
-          {tagFor(item.lounge.name)}
-        </Text>
-      </View>
-
-      <View style={styles.rowInfo}>
-        <Text numberOfLines={1} style={[styles.rowName, { color: C.ink }]}>
-          {item.lounge.name}
-        </Text>
-        {item.lounge.description ? (
-          <Text numberOfLines={2} style={[styles.rowDesc, { color: C.ink2 }]}>
-            {item.lounge.description}
-          </Text>
-        ) : null}
-        <Text style={[styles.rowMeta, { color: C.ink3 }]}>{state}</Text>
-      </View>
-    </Pressable>
-  );
-}
-
-function ExploreSkeleton() {
-  const C = useColors();
-
-  return (
-    <View style={styles.list}>
-      {SKELETON_ROWS.map((row) => (
-        <View key={row} style={[styles.row, { backgroundColor: C.surface }, raised(C)]}>
-          <Skeleton width={TILE} height={TILE} />
-          <View style={styles.skeletonInfo}>
-            <Skeleton width="52%" height={13} />
-            <Skeleton width="86%" height={11} />
-          </View>
-        </View>
-      ))}
-    </View>
-  );
+  return <EmptyState icon={icon} title={title} description={line} primary={action} />;
 }
 
 export default function ExploreScreen() {
@@ -230,8 +146,8 @@ export default function ExploreScreen() {
 
   /**
    * Joining writes a real membership row and then walks in, which is what makes
-   * the lounge appear in the Feed's filter and in the Lounges tab — every one
-   * of those reads the same query, so none of them needs telling.
+   * the lounge appear in the Feed's filter and in the Lounges tab — every one of
+   * those reads the same query, so none of them needs telling.
    */
   const join = useCallback(
     (item: PublicLoungeSummary) => {
@@ -248,29 +164,48 @@ export default function ExploreScreen() {
   );
 
   const renderItem = useCallback(
-    ({ item }: ListRenderItemInfo<PublicLoungeSummary>) => (
-      <LoungeRow
-        item={item}
-        busy={joinLounge.isPending && joinLounge.variables === item.lounge.id}
-        onPress={() => join(item)}
-      />
-    ),
+    ({ item, index }: ListRenderItemInfo<PublicLoungeSummary>) => {
+      const busy = joinLounge.isPending && joinLounge.variables === item.lounge.id;
+
+      return (
+        <LoungeCard
+          name={item.lounge.name}
+          description={item.lounge.description}
+          iconUrl={item.lounge.icon_url}
+          meta={busy ? 'Joining' : item.isMember ? 'Joined' : 'Tap to join'}
+          busy={busy}
+          index={index}
+          accessibilityHint={item.isMember ? 'Opens this lounge' : 'Joins this lounge'}
+          onPress={() => join(item)}
+        />
+      );
+    },
     [join, joinLounge.isPending, joinLounge.variables]
   );
 
   const query = debounced.trim();
 
+  const clearSearch = useCallback(() => {
+    setSearch('');
+    setDebounced('');
+  }, []);
+
   const empty = useMemo(
     () =>
       query.length > 0 ? (
-        <QuietCard line={`Nothing matched "${query}".`} />
+        <QuietCard
+          icon={SearchX}
+          title={`Nothing matched "${query}"`}
+          action={{ label: 'Clear search', onPress: clearSearch }}
+        />
       ) : (
         <QuietCard
-          line="No public lounges yet."
-          action={{ label: 'Create one', onPress: () => router.push('/lounge/create') }}
+          icon={Compass}
+          title="No public lounges yet"
+          action={{ label: 'Create a lounge', onPress: () => router.push('/lounge/create') }}
         />
       ),
-    [query]
+    [clearSearch, query]
   );
 
   return (
@@ -301,35 +236,43 @@ export default function ExploreScreen() {
             autoCorrect={false}
             accessibilityLabel="Search public lounges"
             selectionColor={C.live}
-            style={[styles.well, styles.search, { backgroundColor: C.bgRecessed, color: C.ink }, pressedShadow(C)]}
+            style={[
+              styles.well,
+              styles.search,
+              { backgroundColor: C.bgRecessed, borderColor: C.rule, color: C.ink },
+            ]}
           />
         </View>
+
+        {/* The kicker holds its place through every state, so the skeleton is a
+            skeleton of the real layout rather than a different screen. */}
+        <Text style={[styles.sectionKicker, { color: C.ink3 }]}>Public lounges</Text>
 
         {isError ? (
           <View style={styles.list}>
             <QuietCard
-              line={loungeErrorMessage(error, 'Could not reach Explore.')}
+              icon={WifiOff}
+              title="Could not reach Explore"
+              line={loungeErrorMessage(error, 'Check your connection.')}
               action={{ label: 'Try again', onPress: () => void refetch() }}
             />
           </View>
         ) : isPending ? (
-          <ExploreSkeleton />
+          <View style={styles.list}>
+            <LoungeListSkeleton count={3} wide />
+          </View>
         ) : (
-          <>
-            <Text style={[styles.sectionKicker, { color: C.ink3 }]}>Public lounges</Text>
-
-            <FlatList
-              data={data}
-              keyExtractor={keyExtractor}
-              renderItem={renderItem}
-              style={styles.flex}
-              contentContainerStyle={styles.listContent}
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-              keyboardDismissMode="on-drag"
-              ListEmptyComponent={empty}
-            />
-          </>
+          <FlatList
+            data={data}
+            keyExtractor={keyExtractor}
+            renderItem={renderItem}
+            style={styles.flex}
+            contentContainerStyle={styles.listContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            ListEmptyComponent={empty}
+          />
         )}
       </Animated.View>
     </Screen>
@@ -379,6 +322,11 @@ function JoinByCode({ onJoined }: { onJoined: (loungeId: string) => void }) {
   return (
     <View style={styles.codeBlock}>
       <View style={styles.codeRow}>
+        {/*
+          A hairline on a recessed fill, not an inset pair. At 52px only the dark
+          half of that pair survives on a dark ground and the field reads as
+          smudged — the same fix the auth inputs already carry.
+        */}
         <TextInput
           value={code}
           onChangeText={handleChange}
@@ -392,7 +340,11 @@ function JoinByCode({ onJoined }: { onJoined: (loungeId: string) => void }) {
           selectionColor={C.live}
           onSubmitEditing={handleSubmit}
           returnKeyType="go"
-          style={[styles.well, styles.code, { backgroundColor: C.bgRecessed, color: C.ink }, pressedShadow(C)]}
+          style={[
+            styles.well,
+            styles.code,
+            { backgroundColor: C.bgRecessed, borderColor: C.rule, color: C.ink },
+          ]}
         />
 
         <Pressable
@@ -405,7 +357,7 @@ function JoinByCode({ onJoined }: { onJoined: (loungeId: string) => void }) {
             styles.joinCell,
             { backgroundColor: C.pill },
             dropped(C, 'md'),
-            (pressed || join.isPending) && styles.pressedRow,
+            (pressed || join.isPending) && styles.pressed,
           ]}>
           <Text style={[styles.joinLabel, { color: C.pillInk }]}>
             {join.isPending ? '···' : 'Join'}
@@ -430,7 +382,7 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
   },
-  pressedRow: {
+  pressed: {
     opacity: 0.7,
   },
 
@@ -452,10 +404,11 @@ const styles = StyleSheet.create({
 
   /* ------------------------------------------------------- the two wells */
 
-  /** The recessed control: 52 tall, house corner, sunk into the ground. */
+  /** The recessed control: 52 tall, house corner, a hairline instead of a pair. */
   well: {
     height: FIELD,
     borderRadius: Radii.md,
+    borderWidth: Rule.hair,
     paddingHorizontal: Space.lg,
     /*
       A fixed line height inside a fixed-height TextInput mis-centres the caret
@@ -510,66 +463,11 @@ const styles = StyleSheet.create({
   },
   list: {
     paddingHorizontal: ROW_GUTTER,
-    paddingTop: 28,
   },
   listContent: {
     flexGrow: 1,
     paddingHorizontal: ROW_GUTTER,
     paddingBottom: LIST_TAIL,
   },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: ROW_GUTTER,
-    padding: 13,
-    borderRadius: Radii.xl,
-    marginBottom: 10,
-  },
-  tile: {
-    width: TILE,
-    height: TILE,
-    borderRadius: Radii.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: Space.xs,
-  },
-  tag: {
-    fontFamily: Fonts.extrabold,
-    fontSize: 14,
-    lineHeight: 17,
-    letterSpacing: tracking(14, -0.02),
-  },
-  rowInfo: {
-    flex: 1,
-    minWidth: 0,
-  },
-  rowName: {
-    fontFamily: Fonts.semibold,
-    fontSize: 15,
-    lineHeight: 19,
-  },
-  rowDesc: {
-    ...Type.body(12.5),
-    lineHeight: 17,
-    marginTop: 3,
-  },
-  rowMeta: {
-    ...Type.label(11),
-    marginTop: 5,
-  },
-  skeletonInfo: {
-    flex: 1,
-    gap: Space.sm,
-  },
 
-  quiet: {
-    marginTop: Space.sm,
-    padding: Space.xl,
-    borderRadius: Radii.xl,
-    alignItems: 'flex-start',
-    gap: Space.lg,
-  },
-  quietLine: {
-    ...Type.body(14),
-  },
 });

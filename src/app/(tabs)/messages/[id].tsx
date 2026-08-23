@@ -48,6 +48,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ChatNotice, LogStart, styles as kit } from '@/components/chat/bubble-kit';
 import { DmAttachSheet, type AttachOption } from '@/components/dm/attach-sheet';
 import { DmComposer } from '@/components/dm/composer';
 import { MessageBubble } from '@/components/dm/message-bubble';
@@ -72,7 +73,6 @@ import {
   Space,
   TOUCH_TARGET,
   Type,
-  pressed as pressedWell,
   raised,
   tracking,
 } from '@/lib/theme';
@@ -102,6 +102,8 @@ const readout = (size: number): TextStyle => ({
 type Decorated = {
   message: DmMessage;
   showHeader: boolean;
+  /** Last of its run: the one bubble of the run that carries a timestamp. */
+  showStamp: boolean;
   daySeparator: string | null;
 };
 
@@ -144,10 +146,12 @@ function dayLabel(iso: string): string {
  *
  * The list is newest-first because it is rendered `inverted`, so the visually
  * *preceding* message — the one a run or a day boundary is measured against —
- * is the NEXT index, not the previous one.
+ * is the NEXT index, not the previous one. `showStamp` is the mirror: the
+ * visually LAST bubble of a run is the one whose NEWER neighbour starts a
+ * fresh one.
  */
 function decorate(messages: DmMessage[]): Decorated[] {
-  return messages.map((message, index) => {
+  const rows = messages.map((message, index) => {
     const older = messages[index + 1];
 
     const newDay = !older || startOfDay(older.createdAt) !== startOfDay(message.createdAt);
@@ -161,9 +165,16 @@ function decorate(messages: DmMessage[]): Decorated[] {
       message,
       // A day break always starts a fresh run, whoever spoke last.
       showHeader: newDay || newSender || gap,
+      showStamp: false,
       daySeparator: newDay ? dayLabel(message.createdAt) : null,
     };
   });
+
+  for (let index = 0; index < rows.length; index += 1) {
+    rows[index].showStamp = index === 0 || rows[index - 1].showHeader;
+  }
+
+  return rows;
 }
 
 type Presence = {
@@ -370,6 +381,7 @@ export default function DmThreadScreen() {
       <MessageBubble
         message={item.message}
         showHeader={item.showHeader}
+        showStamp={item.showStamp}
         daySeparator={item.daySeparator}
         onOpenProfile={openProfile}
       />
@@ -392,8 +404,11 @@ export default function DmThreadScreen() {
       <SafeAreaView
         edges={['top', 'left', 'right']}
         style={[styles.root, { backgroundColor: C.bg }]}>
-        <View style={styles.noticeDock}>
-          <Notice label="No conversation." action={{ label: 'Go back', onPress: router.back }} />
+        <View style={kit.noticeDock}>
+          <ChatNotice
+            label="That conversation is gone."
+            action={{ label: 'Go back', onPress: router.back }}
+          />
         </View>
       </SafeAreaView>
     );
@@ -464,8 +479,17 @@ export default function DmThreadScreen() {
 
           {searchOpen ? (
             <View style={styles.searchBar}>
+              {/*
+                A 44px field gets `bgRecessed` and a hairline, NOT `pressed()`.
+                On a dark ground the light half of the inset pair is 3.2% alpha,
+                so at this size only the dark half lands and it reads as dirt.
+                This was already fixed once on the auth fields.
+              */}
               <View
-                style={[styles.searchWell, { backgroundColor: C.bgRecessed }, pressedWell(C)]}>
+                style={[
+                  styles.searchWell,
+                  { backgroundColor: C.bgRecessed, borderColor: C.rule },
+                ]}>
                 <TextInput
                   autoFocus
                   value={query}
@@ -506,12 +530,22 @@ export default function DmThreadScreen() {
         {isPending ? (
           <ThreadSkeleton />
         ) : isError && messages.length === 0 ? (
-          <View style={styles.noticeDock}>
-            <Notice label="This thread didn't load." action={{ label: 'Retry', onPress: refetch }} />
+          <View style={kit.noticeDock}>
+            <ChatNotice
+              label="This thread didn't load."
+              action={{ label: 'Retry', onPress: refetch }}
+            />
           </View>
         ) : visible.length === 0 ? (
-          <View style={styles.noticeDock}>
-            <Notice label={trimmedQuery ? 'Nothing found.' : 'Say something.'} />
+          <View style={kit.noticeDock}>
+            {trimmedQuery ? (
+              <ChatNotice
+                label={`Nothing here matches "${query.trim()}".`}
+                action={{ label: 'Clear', onPress: toggleSearch }}
+              />
+            ) : (
+              <ChatNotice label={`Say something to ${name}.`} />
+            )}
           </View>
         ) : (
           <FlatList
@@ -534,11 +568,7 @@ export default function DmThreadScreen() {
                   figure the day separators use, so "the log ends here" and "a
                   new day starts here" read as one system rather than two.
                 */
-                <View style={styles.logStart}>
-                  <View style={[styles.logStartRule, { backgroundColor: C.rule }]} />
-                  <Text style={[styles.logStartLabel, { color: C.ink3 }]}>Start</Text>
-                  <View style={[styles.logStartRule, { backgroundColor: C.rule }]} />
-                </View>
+                <LogStart />
               ) : null
             }
             contentContainerStyle={[styles.listContent, styles.constrain]}
@@ -568,7 +598,7 @@ export default function DmThreadScreen() {
             placeholder="Message"
             sending={send.isPending}
             mentionPeople={mentionPeople}
-            mentionScopeLabel="IN THIS CONVERSATION"
+            mentionScopeLabel="In this conversation"
           />
         </View>
       </Animated.View>
@@ -592,42 +622,6 @@ export default function DmThreadScreen() {
 }
 
 /* ------------------------------------------------------------------- parts */
-
-/** Carries the 38px action pill to the 44px floor. */
-const NOTICE_SLOP = { top: 3, bottom: 3, left: 0, right: 0 } as const;
-
-/** One line where a log would be. Never a paragraph. */
-function Notice({
-  label,
-  action,
-}: {
-  label: string;
-  action?: { label: string; onPress: () => void };
-}) {
-  const C = useColors();
-
-  return (
-    <View style={[styles.notice, { backgroundColor: C.surface }, raised(C)]}>
-      <Text numberOfLines={2} style={[styles.noticeLabel, { color: C.ink2 }]}>
-        {label}
-      </Text>
-      {action ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={action.label}
-          onPress={action.onPress}
-          // The pill is 38 tall by design; the slop carries it to the 44 floor.
-          hitSlop={NOTICE_SLOP}
-          style={({ pressed }) => [
-            styles.noticeAction,
-            { backgroundColor: pressed ? C.cream : C.pill },
-          ]}>
-          <Text style={[styles.noticeActionLabel, { color: C.pillInk }]}>{action.label}</Text>
-        </Pressable>
-      ) : null}
-    </View>
-  );
-}
 
 /**
  * First-load placeholder. Alternating widths and sides read as "messages are
@@ -733,6 +727,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     height: TOUCH_TARGET,
     borderRadius: Radii.md,
+    borderWidth: Rule.hair,
   },
   searchInput: {
     flex: 1,
@@ -749,64 +744,20 @@ const styles = StyleSheet.create({
   },
 
   listContent: {
-    paddingHorizontal: Space.lg,
-    paddingVertical: Space.lg,
+    // The bubble row carries its own 12px gutter (see `bubble-kit`), so the
+    // list adds only the vertical air. Both chat surfaces then measure the same.
+    paddingVertical: Space.md,
   },
   olderLoader: {
     paddingVertical: Space.lg,
     alignItems: 'center',
   },
-  logStart: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space.md,
-    paddingVertical: Space.lg,
-  },
-  logStartRule: {
-    flex: 1,
-    height: Rule.hair,
-  },
-  logStartLabel: {
-    ...Type.label(10.5),
-    letterSpacing: tracking(10.5, 0.12),
-  },
-
-  noticeDock: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: Space.xl,
-  },
-  notice: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space.md,
-    minHeight: TOUCH_TARGET + Space.xs,
-    padding: 15,
-    borderRadius: Radii.lg,
-  },
-  noticeLabel: {
-    flex: 1,
-    minWidth: 0,
-    ...Type.body(13.5),
-  },
-  noticeAction: {
-    minHeight: 38,
-    justifyContent: 'center',
-    paddingHorizontal: Space.lg,
-    borderRadius: Radii.sm - 1,
-  },
-  noticeActionLabel: {
-    fontFamily: Fonts.semibold,
-    fontSize: 12.5,
-    lineHeight: 16,
-  },
-
   skeleton: {
     flex: 1,
     justifyContent: 'flex-end',
-    paddingHorizontal: Space.lg,
+    paddingHorizontal: Space.md,
     paddingBottom: Space.lg,
-    gap: Space.md,
+    gap: 10,
   },
   skeletonRow: {
     flexDirection: 'row',

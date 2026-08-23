@@ -1,18 +1,26 @@
 /**
- * Lounges — the communities I belong to.
+ * Lounges — the communities I belong to. A top-level destination.
  *
- * design/v2 "Lounges": a masthead with one raised + tile, then raised rows —
- * tag tile, name, one line of counts, and a recessed live pill on the right for
- * the lounges with a Session running. The pill is the only accent on the
- * screen, which is what keeps the red meaning "there is something to walk into".
+ * design/v2 "Lounges": a masthead carrying the count and one raised + tile, then
+ * raised rows — tag tile, name, one line of counts, and a recessed live pill on
+ * the right for the lounges with a Session running. The pill is the only accent
+ * on the screen, which is what keeps the red meaning "there is something to walk
+ * into".
+ *
+ * This screen used to be reachable only from a left rail that no longer exists,
+ * so it was built as a secondary list. It is the third cell in the bottom bar
+ * now, which is why the masthead is fixed above the list rather than scrolling
+ * with it, and why the empty state is the whole screen rather than a footnote:
+ * a brand-new account lands here with nothing, and this is where it finds out
+ * what to do about that.
  *
  * Redeeming a code lives on Explore, where the design puts it. It stays
- * reachable from here through the empty state, which is the one moment you have
- * no lounges and somebody has just sent you one.
+ * reachable from the empty state, which is the one moment you have no lounges
+ * and somebody has just sent you one.
  */
 
 import { router } from 'expo-router';
-import { Plus } from 'lucide-react-native';
+import { Plus, Users, WifiOff, type LucideIcon } from 'lucide-react-native';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   FlatList,
@@ -22,7 +30,6 @@ import {
   Text,
   View,
   type ListRenderItemInfo,
-  type TextStyle,
 } from 'react-native';
 import Animated, {
   Easing,
@@ -32,18 +39,16 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
-import { LiveDot } from '@/components/feed/live-dot';
 import { JoinCodeModal } from '@/components/lounge/join-code-modal';
-import { AuxButton, Screen, Skeleton, useToast } from '@/components/ui';
+import { LoungeCard, LoungeListSkeleton } from '@/components/lounge/lounge-card';
+import { EmptyState, Screen, Skeleton, useToast } from '@/components/ui';
 import { loungeErrorMessage, useMyLounges, type LoungeSummary } from '@/features/lounges/queries';
 import {
   Duration,
-  Fonts,
   Radii,
   Space,
   TOUCH_TARGET,
   Type,
-  pressedSoft,
   raised,
   tracking,
 } from '@/lib/theme';
@@ -52,28 +57,8 @@ import { useColors } from '@/lib/theme-context';
 const GUTTER = 24;
 const ROW_GUTTER = 14;
 const LIST_TAIL = 48;
-const TILE = 56;
 
-const SKELETON_ROWS = [0, 1, 2, 3];
-
-/** `Type.readout` hands back a readonly tuple; TextStyle wants a mutable one. */
-const readout = (size: number): TextStyle => ({
-  ...Type.readout(size),
-  fontVariant: ['tabular-nums'],
-});
-
-/** The tag on a lounge's tile: initials for a phrase, the first letters if not. */
-function tagFor(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  if (words.length > 1) {
-    return words
-      .slice(0, 4)
-      .map((word) => word[0] ?? '')
-      .join('')
-      .toUpperCase();
-  }
-  return (words[0] ?? '').slice(0, 4).toUpperCase() || '·';
-}
+/** Matches the row's tile, so the empty card stands where a row would. */
 
 function useModuleEnter() {
   const reduced = useReducedMotion();
@@ -93,104 +78,38 @@ function useModuleEnter() {
   }));
 }
 
-/** A raised card carrying one line and up to two actions. Every non-happy path. */
+/**
+ * The screen with no list on it: a raised card standing where the first row
+ * would, saying what happened and what to do next.
+ */
+/**
+ * This screen is where the two-action case earns its keep: a new account with
+ * no lounges has two genuinely different routes out — make one, or join one
+ * with a code — and neither is a rephrasing of the other.
+ *
+ * Drawn by `@/components/ui/empty-state`, shared with the Feed and Explore.
+ */
 function QuietCard({
+  icon,
+  title,
   line,
   primary,
   secondary,
 }: {
-  line: string;
+  icon: LucideIcon;
+  title: string;
+  line?: string;
   primary: { label: string; onPress: () => void };
   secondary?: { label: string; onPress: () => void };
 }) {
-  const C = useColors();
-
   return (
-    <View style={[styles.quiet, { backgroundColor: C.surface }, raised(C)]}>
-      <Text style={[styles.quietLine, { color: C.ink2 }]}>{line}</Text>
-      <View style={styles.quietActions}>
-        <AuxButton
-          label={primary.label}
-          onPress={primary.onPress}
-          variant="cream"
-          size="sm"
-          align="center"
-        />
-        {secondary ? (
-          <AuxButton
-            label={secondary.label}
-            onPress={secondary.onPress}
-            variant="ghost"
-            size="sm"
-            align="center"
-          />
-        ) : null}
-      </View>
-    </View>
-  );
-}
-
-/** One lounge I belong to. */
-function LoungeRow({ item, onPress }: { item: LoungeSummary; onPress: () => void }) {
-  const C = useColors();
-  const isLive = item.activeSessions > 0;
-  const liveCount = item.listeners > 0 ? item.listeners : item.activeSessions;
-
-  const meta = `${item.memberCount} ${item.memberCount === 1 ? 'member' : 'members'}`;
-
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={
-        isLive ? `${item.lounge.name}, ${liveCount} live, ${meta}` : `${item.lounge.name}, ${meta}`
-      }
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.row,
-        { backgroundColor: C.surface },
-        raised(C),
-        pressed && styles.pressed,
-      ]}>
-      <View style={[styles.tile, { backgroundColor: C.artwork }]}>
-        <Text numberOfLines={1} style={[styles.tag, { color: C.artInk }]}>
-          {tagFor(item.lounge.name)}
-        </Text>
-      </View>
-
-      <View style={styles.rowInfo}>
-        <Text numberOfLines={1} style={[styles.rowName, { color: C.ink }]}>
-          {item.lounge.name}
-        </Text>
-        <Text numberOfLines={1} style={[styles.rowMeta, { color: C.ink2 }]}>
-          {meta}
-        </Text>
-      </View>
-
-      {isLive ? (
-        <View style={[styles.livePill, { backgroundColor: C.bgRecessed }, pressedSoft(C)]}>
-          <LiveDot size={6} />
-          <Text style={[styles.liveCount, { color: C.liveText }]}>{liveCount}</Text>
-        </View>
-      ) : null}
-    </Pressable>
-  );
-}
-
-function LoungesSkeleton() {
-  const C = useColors();
-
-  return (
-    <View style={styles.list}>
-      {SKELETON_ROWS.map((row) => (
-        <View key={row} style={[styles.row, { backgroundColor: C.surface }, raised(C)]}>
-          <Skeleton width={TILE} height={TILE} />
-          <View style={styles.skeletonInfo}>
-            <Skeleton width="56%" height={14} />
-            <Skeleton width="34%" height={11} />
-          </View>
-        </View>
-      ))}
-    </View>
+    <EmptyState
+      icon={icon}
+      title={title}
+      description={line}
+      primary={primary}
+      secondary={secondary}
+    />
   );
 }
 
@@ -216,23 +135,29 @@ export default function LoungesScreen() {
   );
 
   const renderItem = useCallback(
-    ({ item }: ListRenderItemInfo<LoungeSummary>) => (
-      <LoungeRow
-        item={item}
+    ({ item, index }: ListRenderItemInfo<LoungeSummary>) => (
+      <LoungeCard
+        name={item.lounge.name}
+        iconUrl={item.lounge.icon_url}
+        meta={`${item.memberCount} ${item.memberCount === 1 ? 'member' : 'members'}`}
+        isLive={item.activeSessions > 0}
+        listeners={item.listeners}
+        index={index}
+        accessibilityHint="Opens this lounge"
         onPress={() => router.push({ pathname: '/lounge/[id]', params: { id: item.lounge.id } })}
       />
     ),
     []
   );
 
+  /** The masthead's second line is a readout, not a sentence. */
   const summary = useMemo(() => {
     if (isError) return 'Could not reach your lounges';
-    if (isPending) return 'Loading';
     const lounges = data ?? [];
-    if (lounges.length === 0) return 'Nothing here yet';
+    if (lounges.length === 0) return 'No lounges yet';
     const live = lounges.filter((item) => item.activeSessions > 0).length;
     return live > 0 ? `${lounges.length} joined · ${live} live` : `${lounges.length} joined`;
-  }, [data, isError, isPending]);
+  }, [data, isError]);
 
   return (
     <Screen padded={false}>
@@ -240,9 +165,15 @@ export default function LoungesScreen() {
         <View style={styles.masthead}>
           <View style={styles.mastheadText}>
             <Text style={[styles.title, { color: C.ink }]}>Lounges</Text>
-            <Text numberOfLines={1} style={[styles.summary, { color: C.ink2 }]}>
-              {summary}
-            </Text>
+            {/* A skeleton rather than the word "Loading": the line keeps its
+                height, so the masthead does not reflow when the count lands. */}
+            {isPending ? (
+              <Skeleton width={132} height={13} style={styles.summarySkeleton} />
+            ) : (
+              <Text numberOfLines={1} style={[styles.summary, { color: C.ink2 }]}>
+                {summary}
+              </Text>
+            )}
           </View>
 
           <Pressable
@@ -262,12 +193,16 @@ export default function LoungesScreen() {
         {isError ? (
           <View style={styles.list}>
             <QuietCard
-              line={loungeErrorMessage(error, 'Could not load your lounges.')}
+              icon={WifiOff}
+              title="Could not load your lounges"
+              line={loungeErrorMessage(error, 'Check your connection.')}
               primary={{ label: 'Try again', onPress: () => void refetch() }}
             />
           </View>
         ) : isPending ? (
-          <LoungesSkeleton />
+          <View style={styles.list}>
+            <LoungeListSkeleton count={4} />
+          </View>
         ) : (
           <FlatList
             data={data}
@@ -287,8 +222,9 @@ export default function LoungesScreen() {
             }
             ListEmptyComponent={
               <QuietCard
-                line="No lounges yet."
-                primary={{ label: 'Create one', onPress: openCreate }}
+                icon={Users}
+                title="No lounges yet"
+                primary={{ label: 'Create a lounge', onPress: openCreate }}
                 secondary={{ label: 'I have a code', onPress: openJoin }}
               />
             }
@@ -333,6 +269,9 @@ const styles = StyleSheet.create({
     ...Type.body(13.5),
     marginTop: 5,
   },
+  summarySkeleton: {
+    marginTop: 7,
+  },
   iconTile: {
     width: TOUCH_TARGET,
     height: TOUCH_TARGET,
@@ -351,73 +290,5 @@ const styles = StyleSheet.create({
     paddingTop: 24,
     paddingBottom: LIST_TAIL,
   },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: ROW_GUTTER,
-    padding: 13,
-    borderRadius: Radii.xl,
-    marginBottom: 10,
-  },
-  tile: {
-    width: TILE,
-    height: TILE,
-    borderRadius: Radii.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: Space.xs,
-  },
-  tag: {
-    fontFamily: Fonts.extrabold,
-    fontSize: 14,
-    lineHeight: 17,
-    letterSpacing: tracking(14, -0.02),
-  },
-  rowInfo: {
-    flex: 1,
-    minWidth: 0,
-  },
-  rowName: {
-    fontFamily: Fonts.semibold,
-    fontSize: 15.5,
-    lineHeight: 20,
-    letterSpacing: tracking(15.5, -0.015),
-  },
-  rowMeta: {
-    ...Type.body(12.5),
-    lineHeight: 17,
-    marginTop: 3,
-  },
-  livePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    paddingVertical: Space.sm,
-    paddingHorizontal: Space.md,
-    borderRadius: Radii.pill,
-  },
-  liveCount: {
-    ...readout(11),
-    fontFamily: Fonts.semibold,
-  },
-  skeletonInfo: {
-    flex: 1,
-    gap: Space.sm,
-  },
 
-  quiet: {
-    marginTop: Space.sm,
-    padding: Space.xl,
-    borderRadius: Radii.xl,
-    alignItems: 'flex-start',
-    gap: Space.lg,
-  },
-  quietLine: {
-    ...Type.body(14),
-  },
-  quietActions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
 });

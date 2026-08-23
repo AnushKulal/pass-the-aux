@@ -5,14 +5,20 @@
  *
  * Five cells: shuffle, previous, a 74px `pill` play circle, next, repeat. The
  * circle is the one filled control on the screen — it is the play state itself,
- * which is exactly what that colour is reserved for.
+ * which is exactly what that colour is reserved for. Its bloom is the
+ * artboard's own `0 16px 42px var(--glow)`, written inline rather than through
+ * the old `glowShadow()` helper: that helper belongs to the abandoned heat
+ * direction, and its Android branch silently swapped the bloom for a grey
+ * elevation.
  *
  * A passenger still SEES the transport, because hiding it makes the screen look
  * broken rather than borrowed, but the cells are inert and marked disabled to
  * assistive tech. RLS would reject a passenger's UPDATE on `rooms` anyway.
  *
  * `AuxCard` is the row underneath: who has the aux, and the one button that
- * changes that — TAKE THE AUX for a passenger, PASS THE AUX for the host.
+ * changes that — TAKE THE AUX for a passenger, PASS THE AUX for the host. It
+ * has a loading face (skeletons in the real row shape) and an empty one
+ * (nobody on aux yet, and the button that fixes that).
  */
 
 import * as Haptics from 'expo-haptics';
@@ -20,17 +26,8 @@ import { Pause, Play, Repeat, Shuffle, SkipBack, SkipForward } from 'lucide-reac
 import { memo, type ReactNode } from 'react';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { Avatar } from '@/components/ui';
-import {
-  Fonts,
-  Radii,
-  Space,
-  TOUCH_TARGET,
-  Type,
-  glowShadow,
-  raised,
-  tracking,
-} from '@/lib/theme';
+import { Avatar, Skeleton } from '@/components/ui';
+import { Fonts, Radii, Space, TOUCH_TARGET, Type, bloom, raised, tracking } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
 export type TransportControlsProps = {
@@ -101,7 +98,9 @@ export const TransportControls = memo(function TransportControls({
         style={({ pressed }) => [
           styles.play,
           { backgroundColor: C.pill },
-          glowShadow(C.glow, Math.round(PLAY / 2)),
+          // The bloom is what makes the circle sit above the screen; a held or
+          // inert circle drops it and settles back onto the ground.
+          pressed || playBlocked ? null : bloom(C.glow, 'md'),
           pressed ? styles.held : null,
           playBlocked ? styles.inert : null,
         ]}>
@@ -130,6 +129,8 @@ export type AuxCardProps = {
   name: string | null;
   avatarUrl?: string | null;
   isHost: boolean;
+  /** True until the room row has landed — draws the row's own skeleton. */
+  isLoading?: boolean;
   /** Latches after a request so the button cannot be spammed into the chat. */
   requestSent: boolean;
   onRequestAux: () => void;
@@ -144,23 +145,42 @@ export const AuxCard = memo(function AuxCard({
   name,
   avatarUrl,
   isHost,
+  isLoading = false,
   requestSent,
   onRequestAux,
   onPassAux,
 }: AuxCardProps) {
   const C = useColors();
 
-  const who = isHost ? 'You' : (name ?? 'Nobody');
+  if (isLoading) {
+    return (
+      <View
+        accessible
+        accessibilityLabel="Loading who is on aux"
+        style={[styles.aux, { backgroundColor: C.surface }, raised(C)]}>
+        <Skeleton width={38} height={38} />
+        <View style={styles.auxMeta}>
+          <Skeleton width={48} height={9} style={styles.auxSkeletonKicker} />
+          <Skeleton width={96} height={14} />
+        </View>
+        <Skeleton width={92} height={38} style={styles.auxSkeletonAction} />
+      </View>
+    );
+  }
+
+  const nobody = !isHost && name === null;
+  const who = isHost ? 'You' : (name ?? 'Nobody yet');
   const action = isHost ? 'Pass the aux' : requestSent ? 'Requested' : 'Take the aux';
   const blocked = isHost ? !onPassAux : requestSent;
 
   return (
     <View style={[styles.aux, { backgroundColor: C.surface }, raised(C)]}>
-      <Avatar name={who} uri={avatarUrl} size={38} live />
+      {/* Red on this avatar means someone is holding the aux. Nobody, no ring. */}
+      <Avatar name={who} uri={avatarUrl} size={38} live={!nobody} />
 
       <View style={styles.auxMeta}>
         <Text style={[styles.auxKicker, { color: C.ink3 }]}>On aux</Text>
-        <Text numberOfLines={1} style={[styles.auxName, { color: C.ink }]}>
+        <Text numberOfLines={1} style={[styles.auxName, { color: nobody ? C.ink2 : C.ink }]}>
           {who}
         </Text>
       </View>
@@ -173,7 +193,7 @@ export const AuxCard = memo(function AuxCard({
         }
         accessibilityState={{ disabled: blocked }}
         disabled={blocked}
-        hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
+        hitSlop={{ top: 6, bottom: 6, left: 0, right: 0 }}
         onPress={() => {
           press('light');
           if (isHost) onPassAux?.();
@@ -279,6 +299,12 @@ const styles = StyleSheet.create({
     fontSize: 14.5,
     letterSpacing: tracking(14.5, -0.01),
     marginTop: 2,
+  },
+  auxSkeletonKicker: {
+    marginBottom: Space.xs + 1,
+  },
+  auxSkeletonAction: {
+    borderRadius: Radii.sm,
   },
   auxAction: {
     flexGrow: 0,

@@ -128,6 +128,13 @@ function NowPlayingCardBase({ entry, index = 0 }: NowPlayingCardProps) {
   const isLive = entry.roomId !== null;
   const positionMs = livePositionMs(entry, nowMs);
 
+  /*
+    A Session with nothing queued yet is live — you can still walk in — but it
+    has no clock to report. A timecode counting up from 0:00 over silence is
+    the one number on this screen that would be untrue.
+  */
+  const hasTrack = entry.trackTitle !== null;
+
   const line = entry.trackTitle
     ? [entry.trackTitle, entry.artist].filter(Boolean).join(' — ')
     : entry.loungeName;
@@ -228,7 +235,7 @@ function NowPlayingCardBase({ entry, index = 0 }: NowPlayingCardProps) {
           </Text>
         </View>
 
-        {isLive ? (
+        {isLive && hasTrack ? (
           <Text style={[styles.elapsed, { color: C.ink2 }]}>{timecode(positionMs)}</Text>
         ) : null}
       </Pressable>
@@ -253,8 +260,13 @@ const styles = StyleSheet.create({
     borderRadius: Radii.lg,
     marginBottom: 9,
   },
+  /*
+    The design draws 2px here. Every row is a tap target, and two targets 2px
+    apart mis-fire — 8 is the floor, and on a flat row it still reads as a list
+    rather than a stack of cards.
+  */
   flat: {
-    marginBottom: 2,
+    marginBottom: Space.sm,
   },
   pressed: {
     opacity: 0.7,

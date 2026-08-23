@@ -1,22 +1,24 @@
 /**
  * About. Built from the Settings vocabulary — back tile, kicker, raised cards.
  *
- * Facts only: who made it, what it is on, where the source lives.
+ * Facts only: who made it, what it is running, where the source lives.
+ *
+ * FOUR STATES. Nothing here is fetched, so they attach to the two things that
+ * can actually be unknown or go wrong:
+ *   loading   the repository handoff is in flight — the row says so and locks
+ *   error     the browser refused; the row says so and the URL appears so it
+ *             can be copied by hand
+ *   empty     a build fact the binary was not stamped with reads as an em dash
+ *             rather than a made-up version number
+ *   ready     the facts
  */
 
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { ChevronLeft, ExternalLink } from 'lucide-react-native';
-import { useEffect, type ReactNode } from 'react';
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-  type TextStyle,
-} from 'react-native';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View, type TextStyle } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useReducedMotion,
@@ -25,14 +27,15 @@ import Animated, {
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { installedVersionCode } from '@/lib/apk-updates';
 import {
   Duration,
   Fonts,
   Radii,
+  Rule,
   Space,
   TOUCH_TARGET,
   Type,
-  pressedSoft,
   raised,
   tracking,
 } from '@/lib/theme';
@@ -47,24 +50,39 @@ const MARK = 46;
 
 const REPOSITORY = 'https://github.com/AnushKulal/pass-the-aux';
 
-/** Falls back to the manifest value the store build was stamped with. */
-const VERSION = Constants.expoConfig?.version ?? '1.0.0';
-
-/** `Type.readout()` hands back a readonly tuple; `TextStyle` wants a mutable one. */
-const readout = (size: number): TextStyle => ({
-  ...Type.readout(size),
-  fontVariant: ['tabular-nums'],
-});
+/** The em dash stands for "this build was not stamped with one". */
+const UNKNOWN = '—';
 
 export default function AboutScreen() {
   const C = useColors();
   const reduced = useReducedMotion();
+
+  /*
+    The handoff used to swallow its own failure — `.catch(() => undefined)` —
+    which left the row looking untapped on any device with no browser to hand.
+    It now has somewhere to say so, and the URL to fall back on.
+  */
+  const [handoff, setHandoff] = useState<'idle' | 'opening' | 'error'>('idle');
 
   const enter = useSharedValue(0);
   useEffect(() => {
     enter.value = reduced ? 1 : withTiming(1, { duration: Duration.enter });
   }, [reduced, enter]);
   const enterStyle = useAnimatedStyle(() => ({ opacity: enter.value }));
+
+  const openRepository = useCallback(async () => {
+    setHandoff('opening');
+    try {
+      await WebBrowser.openBrowserAsync(REPOSITORY);
+      setHandoff('idle');
+    } catch {
+      setHandoff('error');
+    }
+  }, []);
+
+  /** Both may be absent: a bare `expo start` stamps neither. */
+  const version = Constants.expoConfig?.version ?? UNKNOWN;
+  const build = installedVersionCode();
 
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={[styles.root, { backgroundColor: C.bg }]}>
@@ -92,8 +110,14 @@ export default function AboutScreen() {
           <Kicker>Developer</Kicker>
           <View style={styles.block}>
             <View style={[styles.card, { backgroundColor: C.surface }, raised(C)]}>
-              <View style={[styles.mark, { backgroundColor: C.bgRecessed }, pressedSoft(C)]}>
-                <Text style={[styles.markLabel, { color: C.liveText }]}>AUX</Text>
+              {/*
+                A 46px well: backgroundColor plus a hairline, never an inset
+                pair. Below roughly 60px the light half of that pair is too
+                faint to land and only the dark half shows, which reads as dirt.
+              */}
+              <View style={[styles.mark, { backgroundColor: C.bgRecessed, borderColor: C.rule }]}>
+                {/* Ink, not the accent — a wordmark is not live, playing or selected. */}
+                <Text style={[styles.markLabel, { color: C.ink }]}>AUX</Text>
               </View>
               <View style={styles.cardText}>
                 <Text numberOfLines={1} style={[styles.cardTitle, { color: C.ink }]}>
@@ -108,9 +132,9 @@ export default function AboutScreen() {
 
           <Kicker>Build</Kicker>
           <View style={styles.stats}>
-            <Stat value={VERSION} label="Version" />
+            <Stat value={version} label="Version" />
+            <Stat value={build > 0 ? String(build) : UNKNOWN} label="Build" />
             <Stat value="Expo" label="Runtime" />
-            <Stat value="Supabase" label="Backend" />
           </View>
 
           <Kicker>Source</Kicker>
@@ -118,8 +142,10 @@ export default function AboutScreen() {
             <Pressable
               accessibilityRole="link"
               accessibilityLabel="Open the source repository"
+              accessibilityState={{ disabled: handoff === 'opening', busy: handoff === 'opening' }}
+              disabled={handoff === 'opening'}
               onPress={() => {
-                void WebBrowser.openBrowserAsync(REPOSITORY).catch(() => undefined);
+                void openRepository();
               }}
               style={({ pressed }) => [
                 styles.row,
@@ -129,8 +155,21 @@ export default function AboutScreen() {
               <Text numberOfLines={1} style={[styles.rowTitle, { color: C.ink }]}>
                 Repository
               </Text>
-              <ExternalLink size={17} strokeWidth={2} color={C.ink3} />
+              {handoff === 'opening' ? (
+                <Text style={[styles.rowValue, { color: C.ink2 }]}>Opening…</Text>
+              ) : handoff === 'error' ? (
+                <Text style={[styles.rowValue, { color: C.liveText }]}>Could not open</Text>
+              ) : (
+                <ExternalLink size={17} strokeWidth={2} color={C.ink3} />
+              )}
             </Pressable>
+
+            {/* The fallback the error leaves you with: the address, selectable. */}
+            {handoff === 'error' ? (
+              <Text selectable style={[styles.fallback, { color: C.ink3 }]}>
+                {REPOSITORY}
+              </Text>
+            ) : null}
           </View>
         </ScrollView>
       </Animated.View>
@@ -160,6 +199,12 @@ function Stat({ value, label }: { value: string; label: string }) {
 }
 
 /* ------------------------------------------------------------------ styles */
+
+/** `Type.readout()` hands back a readonly tuple; `TextStyle` wants a mutable one. */
+const readout = (size: number): TextStyle => ({
+  ...Type.readout(size),
+  fontVariant: ['tabular-nums'],
+});
 
 const styles = StyleSheet.create({
   root: {
@@ -219,6 +264,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: Radii.md,
+    borderWidth: Rule.hair,
   },
   markLabel: {
     ...Type.heading(12),
@@ -272,5 +318,13 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.semibold,
     fontSize: 14.5,
     lineHeight: 19,
+  },
+  rowValue: {
+    ...readout(13),
+    fontFamily: Fonts.semibold,
+  },
+  fallback: {
+    ...Type.body(12),
+    paddingHorizontal: 2,
   },
 });

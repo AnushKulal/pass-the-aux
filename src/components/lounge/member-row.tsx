@@ -111,8 +111,10 @@ function MemberRowBase({
           </Text>
 
           {isPremium ? (
-            <View style={[styles.premium, { borderColor: C.live }]}>
-              <Text style={[styles.premiumLabel, { color: C.liveText }]}>PREMIUM</Text>
+            /* Neutral, like YOU below: a plan tier is not live, not playing and
+               not an alarm, so it has no claim on the accent. */
+            <View style={[styles.premium, { borderColor: C.rule2 }]}>
+              <Text style={[styles.premiumLabel, { color: C.ink2 }]}>PREMIUM</Text>
             </View>
           ) : null}
         </View>
@@ -130,14 +132,20 @@ function MemberRowBase({
         </View>
       ) : null}
 
+      {/*
+        Ranks, in ink — the same call the YOU chip above already makes and
+        states. Owner outranks admin, so owner takes the inverted fill and
+        admin the outline: that is emphasis drawn with weight rather than with
+        the accent, which belongs to what is live, not to who is in charge.
+      */}
       {roleLabel ? (
         role === 'owner' ? (
-          <View style={[styles.chip, styles.chipFill, { backgroundColor: C.live }]}>
-            <Text style={[styles.chipLabel, { color: C.onLive }]}>{roleLabel}</Text>
+          <View style={[styles.chip, styles.chipFill, { backgroundColor: C.pill }]}>
+            <Text style={[styles.chipLabel, { color: C.pillInk }]}>{roleLabel}</Text>
           </View>
         ) : (
-          <View style={[styles.chip, styles.chipOutline, { borderColor: C.live }]}>
-            <Text style={[styles.chipLabel, { color: C.liveText }]}>{roleLabel}</Text>
+          <View style={[styles.chip, styles.chipOutline, { borderColor: C.rule2 }]}>
+            <Text style={[styles.chipLabel, { color: C.ink2 }]}>{roleLabel}</Text>
           </View>
         )
       ) : null}

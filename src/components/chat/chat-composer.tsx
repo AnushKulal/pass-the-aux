@@ -1,16 +1,20 @@
 /**
- * The message bar.
+ * The lounge / Session message bar.
  *
- * Two flush cells with no gap and no radius: a recessed field and, hard against
- * it, the SEND block. The 2px rule across the top is what separates the bar
- * from the log — there is no shadow and no blur in this direction.
+ * The DM composer's bar with the two unwired tiles removed: a recessed field
+ * and one raised SEND tile over a hairline. Same 44px geometry, same 14px
+ * corner, same inverted-pill send — the two chat surfaces are one visual
+ * language, so this file and `@/components/dm/composer` must keep matching.
  *
- * SEND is accent only while pressing it would actually send something. Idle it
- * *loses the red* and drops to a bordered surface cell, which is the same
- * signal the sync ladder uses: red means the thing is live, its absence means
- * it is not. It never turns amber.
+ * THE FIELD IS NOT `pressed()`. A 44px well on a dark ground shows only the
+ * dark half of the inset pair and reads as dirt; the recipe is for surfaces of
+ * about 80px and up. It gets `bgRecessed` and a hairline instead.
+ *
+ * SEND is the inverted pill and never the accent: in a log the accent means
+ * "this message is mine", and it may not be spent twice.
  */
 
+import { Send } from 'lucide-react-native';
 import { useCallback, useMemo, useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -27,7 +31,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useSendMessage, type ChatScope } from '@/features/chat/queries';
-import { Rule, Space, Type, tracking } from '@/lib/theme';
+import { Radii, Rule, Space, TOUCH_TARGET, Type, dropped } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
 /** Matches the CHECK constraint on messages.body — reject before the round-trip. */
@@ -35,14 +39,14 @@ const MAX_LENGTH = 2000;
 /** A counter that is always on is noise; it only matters once you are near the wall. */
 const COUNTER_FROM = 1900;
 
-const BODY = Type.body(16);
-const INPUT_PADDING_Y = 13;
-/** The artboard's bar height, and comfortably over the 44px floor. */
-const MIN_INPUT_HEIGHT = BODY.lineHeight + INPUT_PADDING_Y * 2;
+const BODY = Type.body(14.5);
+const INPUT_PADDING_Y = 12;
+/** The design's 44px bar, which is also the touch floor. */
+const MIN_INPUT_HEIGHT = TOUCH_TARGET;
 /** Four lines, then the field scrolls instead of eating the whole screen. */
 const MAX_INPUT_HEIGHT = BODY.lineHeight * 4 + INPUT_PADDING_Y * 2;
-/** The artboard's SEND cell. */
-const SEND_WIDTH = 56;
+
+const TILE = TOUCH_TARGET;
 
 /** `Type.readout` hands back a readonly fontVariant tuple; TextStyle wants a mutable one. */
 const readout = (size: number): TextStyle => ({
@@ -86,6 +90,8 @@ export function ChatComposer({
 
   const onContentSizeChange = useCallback(
     (event: NativeSyntheticEvent<TextInputContentSizeChangeEventData>) => {
+      // contentSize already carries the field's own padding; adding it again
+      // makes the bar jump a line taller than the text in it.
       const next = event.nativeEvent.contentSize.height;
       setHeight(Math.min(Math.max(next, MIN_INPUT_HEIGHT), MAX_INPUT_HEIGHT));
     },
@@ -121,10 +127,14 @@ export function ChatComposer({
           {
             backgroundColor: C.bg,
             borderTopColor: C.rule,
-            paddingBottom: bottomInset ?? insets.bottom,
+            paddingBottom: (bottomInset ?? insets.bottom) + Space.md,
           },
         ]}>
-        <View style={[styles.field, { backgroundColor: C.bgRecessed }]}>
+        <View
+          style={[
+            styles.field,
+            { backgroundColor: C.bgRecessed, borderColor: C.rule, height },
+          ]}>
           <TextInput
             value={value}
             onChangeText={setValue}
@@ -135,16 +145,16 @@ export function ChatComposer({
             maxLength={MAX_LENGTH}
             // A multiline field already treats Return as a newline; sending is
             // the button's job alone, so submitBehavior stays at its default.
-            textAlignVertical="top"
+            textAlignVertical="center"
             selectionColor={C.live}
-            accessibilityLabel="Message"
-            style={[styles.input, { color: C.ink, height }]}
+            accessibilityLabel={placeholder}
+            style={[styles.input, { color: C.ink }]}
           />
 
           {value.length >= COUNTER_FROM ? (
             <Text
               accessibilityLiveRegion="polite"
-              style={[styles.counter, { color: remaining <= 0 ? C.danger : C.ink3 }]}>
+              style={[styles.counter, { color: remaining <= 0 ? C.liveText : C.ink3 }]}>
               {remaining}
             </Text>
           ) : null}
@@ -157,12 +167,12 @@ export function ChatComposer({
           disabled={!canSend}
           onPress={onSend}
           style={({ pressed }) => [
-            styles.send,
-            canSend
-              ? { backgroundColor: pressed ? C.liveText : C.live }
-              : { backgroundColor: C.surface, borderLeftWidth: Rule.hair, borderLeftColor: C.rule },
+            styles.tile,
+            { backgroundColor: pressed ? C.cream : C.pill },
+            dropped(C, 'sm'),
+            !canSend && styles.inert,
           ]}>
-          <Text style={[styles.sendLabel, { color: canSend ? C.onLive : C.ink3 }]}>SEND</Text>
+          <Send size={18} strokeWidth={2.2} color={C.pillInk} />
         </Pressable>
       </View>
     </KeyboardAvoidingView>
@@ -174,35 +184,43 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     // The field grows upward; SEND stays anchored to the bottom edge.
     alignItems: 'flex-end',
-    // 2px, because this is a boundary between two major regions of the screen.
-    borderTopWidth: Rule.major,
+    gap: 11,
+    paddingHorizontal: Space.lg,
+    paddingTop: Space.md,
+    borderTopWidth: Rule.hair,
   },
   field: {
     flex: 1,
-    justifyContent: 'center',
-    paddingHorizontal: Space.md,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: Radii.md,
+    // Small recessed things get a hairline, never the inset pair.
+    borderWidth: Rule.hair,
   },
   input: {
     ...BODY,
+    flex: 1,
+    minWidth: 0,
+    alignSelf: 'stretch',
+    paddingHorizontal: 15,
     paddingVertical: INPUT_PADDING_Y,
-    // The field must never be shorter than the SEND cell beside it.
-    minHeight: MIN_INPUT_HEIGHT,
-    maxHeight: MAX_INPUT_HEIGHT,
   },
   counter: {
     // A remaining-character count measures. Tabular figures.
     ...readout(11),
-    alignSelf: 'flex-end',
-    paddingBottom: Space.sm,
+    alignSelf: 'center',
+    paddingRight: Space.md,
   },
-  send: {
-    width: SEND_WIDTH,
-    minHeight: MIN_INPUT_HEIGHT,
+  tile: {
+    width: TILE,
+    height: TILE,
+    flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: Radii.md,
   },
-  sendLabel: {
-    ...Type.heading(11),
-    letterSpacing: tracking(11, 0.06),
+  inert: {
+    opacity: 0.45,
   },
 });

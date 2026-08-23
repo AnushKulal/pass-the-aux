@@ -7,6 +7,14 @@
  *
  * `Row` has no `detail` prop, deliberately. It used to require one, which is
  * how every setting on this screen ended up with a sentence under it.
+ *
+ * FOUR STATES, scoped to the block that actually has data behind it. Appearance
+ * and Software update answer instantly and are never blanked; ACCOUNTS is the
+ * only block waiting on a network read, so it carries the states:
+ *   loading   two row-shaped skeletons
+ *   error     one row that names the failure and retries on press
+ *   empty     signed in with no profile row — the one action that makes one
+ *   ready     Spotify and YouTube with their real values
  */
 
 import { Redirect, router } from 'expo-router';
@@ -29,7 +37,8 @@ import Animated, {
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useToast } from '@/components/ui';
+import { Skeleton, useToast } from '@/components/ui';
+import { useProfile } from '@/features/profile/queries';
 import {
   checkForNewApk,
   downloadAndInstallApk,
@@ -59,6 +68,8 @@ const TEXT_GUTTER = 24;
 
 const BACK_TILE = 38;
 const BACK_SLOP = { top: 3, bottom: 3, left: 6, right: 6 };
+/** A row is 15 + 18 line + 15. The skeleton has to match it exactly. */
+const ROW_HEIGHT = TOUCH_TARGET + Space.xs;
 
 const SEGMENTS: { key: ThemeChoice; label: string }[] = [
   { key: 'dark', label: 'DARK' },
@@ -76,10 +87,18 @@ export default function SettingsScreen() {
   const C = useColors();
   const reduced = useReducedMotion();
   const toast = useToast();
-  const { session, profile, loading } = useAuth();
+  const { session, profile, loading, refreshProfile } = useAuth();
   // The control surface for the whole theming system. Everything that calls
   // `useColors()` is downstream of this one setter.
   const { choice, setChoice } = useTheme();
+
+  /*
+    The same cache entry AuthProvider already holds — identical key, identical
+    options, so no second request. The context hands over the row and a coarse
+    `loading`; the FAILURE only exists here, and without it the Accounts block
+    would report "Not linked" to someone whose profile simply did not arrive.
+  */
+  const profileQuery = useProfile(session?.user.id);
 
   /**
    * The same update state the sheet reads. This screen is the recovery path:
@@ -120,6 +139,10 @@ export default function SettingsScreen() {
     }
   }, [apk, toast]);
 
+  const retryProfile = useCallback(() => {
+    void refreshProfile();
+  }, [refreshProfile]);
+
   // This screen sits outside both guarded groups, so a deep link can land here
   // signed out.
   if (!loading && !session) return <Redirect href="/(auth)/sign-in" />;
@@ -138,11 +161,18 @@ export default function SettingsScreen() {
           ? 'Up to date'
           : 'Check for updates';
 
+  /*
+    On a failed check the meta line is the only place that can say WHY, so it
+    stops reporting the installed patch and names the fault instead. The button
+    below it is the fix, which is why this stays one clause.
+  */
   const updateMeta = update.isAvailable
     ? `${update.pending.patchCount} ${update.pending.patchCount === 1 ? 'patch' : 'patches'} · ${fixes} ${fixes === 1 ? 'fix' : 'fixes'}`
-    : update.currentPatch > 0
-      ? `Patch ${update.currentPatch}`
-      : 'Untracked build';
+    : update.status === 'error'
+      ? 'Could not reach the update server.'
+      : update.currentPatch > 0
+        ? `Patch ${update.currentPatch}`
+        : 'Untracked build';
 
   const updateAction = update.isAvailable
     ? update.status === 'applying'
@@ -175,6 +205,14 @@ export default function SettingsScreen() {
     : profile.is_premium
       ? 'Premium · linked'
       : 'Free · linked';
+
+  const accounts: 'loading' | 'error' | 'empty' | 'ready' = profile
+    ? 'ready'
+    : loading
+      ? 'loading'
+      : profileQuery.isError
+        ? 'error'
+        : 'empty';
 
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={[styles.root, { backgroundColor: C.bg }]}>
@@ -222,8 +260,7 @@ export default function SettingsScreen() {
                           ? { backgroundColor: C.surface2 }
                           : null,
                     ]}>
-                    <Text
-                      style={[styles.segmentLabel, { color: selected ? C.ink : C.ink2 }]}>
+                    <Text style={[styles.segmentLabel, { color: selected ? C.ink : C.ink2 }]}>
                       {segment.label}
                     </Text>
                   </Pressable>
@@ -247,9 +284,12 @@ export default function SettingsScreen() {
                 {/*
                   Ink, NOT the accent. Red means live / playing / joinable / in
                   sync / on aux / unread in this design, and a pending update is
-                  none of those — `update-banner.tsx` states the same rule and
-                  keeps its own mark on `ink2`. The two surfaces describe one
-                  event and must not disagree about how loud it is.
+                  none of those.
+
+                  All three surfaces that report this event now agree: this dot,
+                  `update-banner.tsx`'s mark, and `update-prompt.tsx`'s kicker
+                  and CTA. The prompt used to answer the same question in the
+                  accent, which made one event three different volumes.
                 */}
                 {update.isAvailable ? (
                   <View style={[styles.updateDot, { backgroundColor: C.ink }]} />
@@ -325,17 +365,30 @@ export default function SettingsScreen() {
           {/* ------------------------------------------------------- accounts */}
           <Kicker>Accounts</Kicker>
           <View style={styles.block}>
-            <Row
-              title="Spotify"
-              value={spotifyValue}
-              chevron
-              onPress={() => router.push('/settings/connections')}
-            />
-            <Row
-              title="YouTube"
-              value="Not linked"
-              onPress={() => toast.show('YouTube sign-in is not built yet.', 'info')}
-            />
+            {accounts === 'ready' ? (
+              <>
+                <Row
+                  title="Spotify"
+                  value={spotifyValue}
+                  chevron
+                  onPress={() => router.push('/settings/connections')}
+                />
+                <Row
+                  title="YouTube"
+                  value="Not linked"
+                  onPress={() => toast.show('YouTube sign-in is not built yet.', 'info')}
+                />
+              </>
+            ) : accounts === 'loading' ? (
+              <View accessibilityRole="progressbar" accessibilityLabel="Loading your accounts">
+                <Skeleton width="100%" height={ROW_HEIGHT} style={styles.skeletonRow} />
+                <Skeleton width="100%" height={ROW_HEIGHT} style={styles.skeletonRowNext} />
+              </View>
+            ) : accounts === 'error' ? (
+              <Row title="Accounts did not load" value="Try again" onPress={retryProfile} />
+            ) : (
+              <Row title="Finish setting up" chevron onPress={() => router.push('/(auth)/claim-username')} />
+            )}
           </View>
 
           {/* -------------------------------------------------------- account */}
@@ -548,7 +601,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Space.md,
-    minHeight: TOUCH_TARGET + Space.xs,
+    minHeight: ROW_HEIGHT,
     padding: 15,
     borderRadius: Radii.lg,
   },
@@ -562,5 +615,13 @@ const styles = StyleSheet.create({
   rowValue: {
     ...readout(13),
     fontFamily: Fonts.semibold,
+  },
+
+  skeletonRow: {
+    borderRadius: Radii.lg,
+  },
+  skeletonRowNext: {
+    borderRadius: Radii.lg,
+    marginTop: 10,
   },
 });

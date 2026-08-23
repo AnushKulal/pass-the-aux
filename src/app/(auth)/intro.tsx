@@ -24,6 +24,7 @@ import Animated, {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
+  bloom,
   dropped,
   Duration,
   Fonts,
@@ -112,7 +113,7 @@ export default function IntroScreen() {
             { backgroundColor: C.artwork },
             // A wide, soft bloom rather than a raised edge — this one object is
             // meant to look lit from within, not sitting on the page.
-            { boxShadow: [{ offsetX: 0, offsetY: 26, blurRadius: 74, color: C.glow }] },
+            bloom(C.glow, 'lg'),
           ]}>
           <Text style={[styles.logoMark, { color: C.artInk }]}>aux</Text>
         </Animated.View>

@@ -1,18 +1,23 @@
 /**
- * A lounge row — Explore and the Lounges tab share it.
+ * One lounge row — Explore and the Lounges tab share it.
  *
- * Patchbay: a ruled band, never a card. A 56px tag well on the left, the name
- * and its description in the middle, and a JOIN / OPEN cell cut off by a
- * hairline on the right. The tag well is the same stand-in the artwork wells
- * use, so a lounge with an icon and one without sit on the same grid.
+ * design/v2 "Lounges" and "Explore" draw the same row twice: a raised card, an
+ * artwork tile carrying the lounge's tag, the name, and one or two lines under
+ * it. The two artboards differ only in what the row can know — Explore has a
+ * description and no roster (RLS hides it), Lounges has counts and a live pill.
  *
- * Red appears once: on the live count, and only when somebody is actually
- * listening. `QUIET` is ink, `JOINED` is ink — neither is a live signal.
+ * The live treatment is the only accent the row is allowed, and it comes in two
+ * registers: a pill when there is a NUMBER to report, a bare dot when a Session
+ * is up but empty. Both mean the same thing — there is something to walk into.
+ *
+ * REPLACES the Patchbay row this file used to hold: a ruled band with a JOIN
+ * cell cut off by a hairline. Nothing imported it any more, and both screens
+ * had grown a private copy of the v2 row instead.
  */
 
 import { Image } from 'expo-image';
 import { memo, useEffect, useRef } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View, type TextStyle } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -22,92 +27,100 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
+import { LiveDot } from '@/components/feed/live-dot';
 import { Skeleton } from '@/components/ui';
-import { Duration, Rule, Space, Stagger, Type } from '@/lib/theme';
+import {
+  Duration,
+  Fonts,
+  Radii,
+  Rule,
+  Space,
+  Stagger,
+  Type,
+  raised,
+  tracking,
+} from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
+
+/** design/v2: a 56px tile inside 13px of padding, so the row clears 44 twice over. */
+const TILE = 56;
+
+/** `Type.readout` hands back a readonly tuple; TextStyle wants a mutable one. */
+const readout = (size: number): TextStyle => ({
+  ...Type.readout(size),
+  fontVariant: ['tabular-nums'],
+});
 
 export type LoungeCardProps = {
   name: string;
-  description?: string;
+  /** Prose under the name. Explore only — the Lounges tab carries counts here. */
+  description?: string | null;
+  /** One line of state: the counts, or what a tap is about to do. */
+  meta?: string;
   iconUrl?: string | null;
-  /** Omitted on Explore: RLS hides the roster of a lounge you have not joined. */
-  memberCount?: number;
-  /** People currently inside this lounge's Sessions. */
-  listeners?: number;
-  /** Drives the live treatment even when a Session is empty. */
-  activeSessions?: number;
-  isPublic?: boolean;
-  /** Shows the "Joined" state — Explore only; the Lounges tab is all joined. */
-  showJoined?: boolean;
-  onPress: () => void;
-  /**
-   * Three-letter stand-in in the well. Derived from the name when absent, the
-   * same way the artwork wells derive their letter from the track title.
-   */
+  /** Stand-in in the tile. Derived from the name when absent. */
   tag?: string;
+  /** A Session is running in this lounge. */
+  isLive?: boolean;
+  /** People inside those Sessions. Above zero, the pill reports the number. */
+  listeners?: number;
+  /** A join is in flight: the row stops taking taps and steps back. */
+  busy?: boolean;
   /** Position in the list, for the 55ms entrance stagger. */
   index?: number;
-  /** When given, the right cell becomes its own target and joins in place. */
-  onJoin?: () => void;
-  joining?: boolean;
+  onPress: () => void;
+  accessibilityHint?: string;
 };
 
-const WELL = 56;
-const CTA = 62;
-const ROW_MIN_HEIGHT = 72;
-
-/** `THE BASEMENT` → `TBA`; `Dub` → `DUB`. Never longer than three characters. */
-function tagFor(name: string, explicit?: string): string {
-  if (explicit && explicit.trim()) return explicit.trim().toUpperCase().slice(0, 3);
+/** `Bass Face` → `BF`; `Dub` → `DUB`. Never longer than four characters. */
+export function tagFor(name: string, explicit?: string): string {
+  if (explicit && explicit.trim()) return explicit.trim().toUpperCase().slice(0, 4);
 
   const words = name.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return '···';
-  if (words.length === 1) return words[0]!.slice(0, 3).toUpperCase();
-
-  return words
-    .slice(0, 3)
-    .map((word) => word[0] ?? '')
-    .join('')
-    .toUpperCase();
-}
-
-function pluralize(count: number, one: string, many: string): string {
-  return `${count} ${count === 1 ? one : many}`;
+  if (words.length > 1) {
+    return words
+      .slice(0, 4)
+      .map((word) => word[0] ?? '')
+      .join('')
+      .toUpperCase();
+  }
+  return (words[0] ?? '').slice(0, 4).toUpperCase() || '·';
 }
 
 function LoungeCardBase({
   name,
   description,
+  meta,
   iconUrl,
-  memberCount,
-  listeners = 0,
-  activeSessions = 0,
-  isPublic = true,
-  showJoined = false,
-  onPress,
   tag,
+  isLive = false,
+  listeners = 0,
+  busy = false,
   index = 0,
-  onJoin,
-  joining = false,
+  onPress,
+  accessibilityHint,
 }: LoungeCardProps) {
   const C = useColors();
   const reduced = useReducedMotion();
 
-  const isLive = activeSessions > 0;
-  // An active Session with nobody in it yet is still worth surfacing — it is an
-  // invitation. Only the wording changes.
-  const liveLabel = listeners > 0 ? `${listeners} LISTENING` : 'LIVE NOW';
+  const count = Math.max(0, listeners);
+  /*
+    The pill carries a number; the dot carries none. An active Session with
+    nobody in it yet is still worth surfacing — it is an invitation — but a pill
+    reading "0" would look like a bug rather than an opening.
+  */
+  const showPill = isLive && count > 0;
+  const showDot = isLive && count === 0;
 
-  const a11yParts = [
+  const label = [
     name,
-    isLive ? liveLabel.toLowerCase() : null,
-    memberCount !== undefined ? pluralize(memberCount, 'member', 'members') : null,
-    showJoined ? 'Joined' : null,
-    isPublic ? null : 'Private',
-  ].filter(Boolean);
+    showPill ? `${count} listening` : showDot ? 'live now' : null,
+    busy ? 'joining' : meta,
+  ]
+    .filter(Boolean)
+    .join(', ');
 
-  const cta = showJoined ? 'OPEN' : 'JOIN';
-
+  // ---- entrance: translateY(8) → 0 + fade, 55ms per row, off under reduce-motion
   const enter = useSharedValue(reduced ? 1 : 0);
   /** Read once at mount, so a refetch reordering the list does not replay it. */
   const delay = useRef(index * Stagger.feed);
@@ -132,22 +145,31 @@ function LoungeCardBase({
     <Animated.View style={entering}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={a11yParts.join(', ')}
-        accessibilityHint="Opens this lounge"
+        accessibilityLabel={label}
+        accessibilityHint={accessibilityHint}
+        accessibilityState={{ busy }}
+        disabled={busy}
         onPress={onPress}
         style={({ pressed }) => [
           styles.row,
-          { borderBottomColor: C.rule, backgroundColor: pressed ? C.surface : 'transparent' },
+          { backgroundColor: C.surface },
+          raised(C),
+          (pressed || busy) && styles.pressed,
         ]}>
-        <View style={[styles.well, { borderRightColor: C.rule, backgroundColor: C.bgRecessed }]}>
-          <Text style={[styles.tag, { color: C.ink3 }]}>{tagFor(name, tag)}</Text>
+        <View style={[styles.tile, { backgroundColor: C.artwork }]}>
+          <Text numberOfLines={1} style={[styles.tag, { color: C.artInk }]}>
+            {tagFor(name, tag)}
+          </Text>
 
+          {/* Over the tag, so the letters double as the error fallback. */}
           {iconUrl ? (
             <Image
               source={{ uri: iconUrl }}
               style={StyleSheet.absoluteFill}
               contentFit="cover"
               cachePolicy="memory-disk"
+              // FlatList recycles rows; without this the previous lounge's icon
+              // stays on screen until the new one has decoded.
               recyclingKey={name}
               transition={Duration.press}
               accessible={false}
@@ -155,10 +177,13 @@ function LoungeCardBase({
           ) : null}
         </View>
 
-        <View style={styles.body}>
-          <Text numberOfLines={1} style={[styles.name, { color: C.ink }]}>
-            {name}
-          </Text>
+        <View style={styles.info}>
+          <View style={styles.nameRow}>
+            <Text numberOfLines={1} style={[styles.name, { color: C.ink }]}>
+              {name}
+            </Text>
+            {showDot ? <LiveDot size={6} /> : null}
+          </View>
 
           {description ? (
             <Text numberOfLines={2} style={[styles.description, { color: C.ink2 }]}>
@@ -166,54 +191,32 @@ function LoungeCardBase({
             </Text>
           ) : null}
 
-          <View style={styles.meta}>
-            {memberCount !== undefined ? (
-              <Text style={[styles.metaLabel, { color: C.ink3 }]}>
-                {pluralize(memberCount, 'MEMBER', 'MEMBERS')}
-              </Text>
-            ) : null}
-
-            <Text style={[styles.metaLabel, { color: C.ink3 }]}>
-              {isPublic ? 'PUBLIC' : 'PRIVATE'}
+          {meta ? (
+            <Text numberOfLines={1} style={[styles.meta, { color: C.ink2 }]}>
+              {meta}
             </Text>
-
-            {isLive ? (
-              <Text style={[styles.live, { color: C.liveText }]}>{liveLabel}</Text>
-            ) : (
-              <Text style={[styles.metaLabel, { color: C.ink3 }]}>QUIET</Text>
-            )}
-
-            {showJoined ? (
-              <Text style={[styles.metaLabel, { color: C.ink3 }]}>JOINED</Text>
-            ) : null}
-          </View>
+          ) : null}
         </View>
 
-        {onJoin ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={showJoined ? `Open ${name}` : `Join ${name}`}
-            disabled={joining}
-            onPress={onJoin}
-            style={({ pressed }) => [
-              styles.cta,
-              { borderLeftColor: C.rule, backgroundColor: pressed ? C.liveWash : 'transparent' },
-              joining && styles.ctaBusy,
-            ]}>
-            <Text style={[styles.ctaLabel, { color: C.liveText }]}>{joining ? '···' : cta}</Text>
-          </Pressable>
-        ) : (
-          <View style={[styles.cta, { borderLeftColor: C.rule }]}>
-            <Text style={[styles.ctaLabel, { color: C.liveText }]}>{cta}</Text>
+        {/*
+          The design draws this pill with an inset pair. At ~29px tall only the
+          dark half of that pair survives on a dark ground, so it reads as dirt
+          rather than depth — a recessed fill and a hairline say the same thing
+          and hold up at this size.
+        */}
+        {showPill ? (
+          <View style={[styles.livePill, { backgroundColor: C.bgRecessed, borderColor: C.rule }]}>
+            <LiveDot size={6} />
+            <Text style={[styles.liveCount, { color: C.liveText }]}>{count}</Text>
           </View>
-        )}
+        ) : null}
       </Pressable>
     </Animated.View>
   );
 }
 
 /**
- * Memoized: these render inside FlatLists that re-render on every realtime
+ * Memoised: these render inside FlatLists that re-render on every realtime
  * lounge update, and the whole row is pure props.
  */
 export const LoungeCard = memo(LoungeCardBase);
@@ -222,27 +225,27 @@ export const LoungeCard = memo(LoungeCardBase);
  * The row's loading twin. Lives here so its geometry cannot drift from the real
  * row's — a skeleton that resizes on load is worse than no skeleton.
  */
-export function LoungeCardSkeleton() {
+export function LoungeCardSkeleton({ wide = false }: { wide?: boolean }) {
   const C = useColors();
 
   return (
-    <View style={[styles.row, { borderBottomColor: C.rule }]}>
-      <View style={[styles.well, { borderRightColor: C.rule, backgroundColor: C.bgRecessed }]} />
-      <View style={styles.body}>
-        <Skeleton width="52%" height={16} radius={0} />
-        <Skeleton width="86%" height={12} radius={0} style={styles.skeletonGap} />
-        <Skeleton width={110} height={10} radius={0} style={styles.skeletonGap} />
+    <View style={[styles.row, { backgroundColor: C.surface }, raised(C)]}>
+      <Skeleton width={TILE} height={TILE} />
+      <View style={styles.skeletonInfo}>
+        <Skeleton width="54%" height={14} />
+        {wide ? <Skeleton width="86%" height={11} /> : null}
+        <Skeleton width="32%" height={11} />
       </View>
-      <View style={[styles.cta, { borderLeftColor: C.rule }]} />
     </View>
   );
 }
 
-export function LoungeListSkeleton({ count = 4 }: { count?: number }) {
+/** `wide` adds the description line Explore's rows carry and Lounges' do not. */
+export function LoungeListSkeleton({ count = 4, wide = false }: { count?: number; wide?: boolean }) {
   return (
     <View>
       {Array.from({ length: count }, (_, index) => (
-        <LoungeCardSkeleton key={index} />
+        <LoungeCardSkeleton key={index} wide={wide} />
       ))}
     </View>
   );
@@ -251,72 +254,75 @@ export function LoungeListSkeleton({ count = 4 }: { count?: number }) {
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
-    minHeight: ROW_MIN_HEIGHT,
-    borderBottomWidth: Rule.hair,
+    alignItems: 'center',
+    gap: 14,
+    padding: 13,
+    borderRadius: Radii.xl,
+    marginBottom: 10,
   },
-  well: {
-    width: WELL,
-    borderRightWidth: Rule.hair,
+  pressed: {
+    opacity: 0.7,
+  },
+
+  tile: {
+    width: TILE,
+    height: TILE,
+    borderRadius: Radii.lg,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: Space.xs,
     overflow: 'hidden',
   },
   tag: {
-    ...Type.heading(12),
-    letterSpacing: 12 * 0.06,
+    fontFamily: Fonts.extrabold,
+    fontSize: 14,
+    lineHeight: 17,
+    letterSpacing: tracking(14, -0.02),
   },
 
-  body: {
+  info: {
     flex: 1,
     minWidth: 0,
-    paddingVertical: 11,
-    paddingHorizontal: 10,
-    justifyContent: 'center',
   },
-  name: {
-    ...Type.heading(14),
-    letterSpacing: 14 * 0.01,
-  },
-  /*
-    14px, not the prototype's 12: the handoff's own type scale puts Body at
-    14–16px, and this is the one line of real prose on the row.
-  */
-  description: {
-    ...Type.body(14),
-    lineHeight: 20,
-    marginTop: 2,
-  },
-  meta: {
+  nameRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     alignItems: 'center',
     gap: Space.sm,
-    marginTop: 7,
   },
-  metaLabel: {
-    ...Type.label(10),
-    letterSpacing: 10 * 0.09,
+  name: {
+    flexShrink: 1,
+    fontFamily: Fonts.semibold,
+    fontSize: 15.5,
+    lineHeight: 20,
+    letterSpacing: tracking(15.5, -0.015),
   },
-  live: {
-    ...Type.label(10),
-    letterSpacing: 10 * 0.09,
+  description: {
+    ...Type.body(12.5),
+    lineHeight: 17,
+    marginTop: 3,
   },
-
-  cta: {
-    width: CTA,
-    borderLeftWidth: Rule.hair,
-    justifyContent: 'center',
-    paddingHorizontal: 10,
-  },
-  ctaBusy: {
-    opacity: 0.55,
-  },
-  ctaLabel: {
-    ...Type.heading(11),
-    letterSpacing: 11 * 0.08,
+  meta: {
+    ...Type.body(12.5),
+    lineHeight: 17,
+    marginTop: 3,
   },
 
-  skeletonGap: {
-    marginTop: Space.sm,
+  livePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingVertical: Space.sm,
+    paddingHorizontal: Space.md,
+    borderRadius: Radii.pill,
+    borderWidth: Rule.hair,
+  },
+  liveCount: {
+    ...readout(11),
+    fontFamily: Fonts.semibold,
+  },
+
+  skeletonInfo: {
+    flex: 1,
+    gap: Space.sm,
   },
 });

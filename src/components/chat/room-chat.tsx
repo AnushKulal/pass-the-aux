@@ -24,8 +24,7 @@ export function RoomChat({ roomId, loungeId, keyboardOffset = 0, bottomInset = 0
       <ChatList
         loungeId={loungeId}
         roomId={roomId}
-        emptyTitle="Quiet in here"
-        emptyDescription="React to what's playing — everyone in the Session sees it."
+        emptyLabel="React to what's playing — everyone in the Session sees it."
       />
       <ChatComposer
         loungeId={loungeId}

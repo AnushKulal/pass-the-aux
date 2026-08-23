@@ -79,7 +79,10 @@ export function UpdateBanner() {
           rules and rectangles, and a circle would be the only round thing on
           the screen.
         */}
-        <View style={[styles.mark, { backgroundColor: C.ink2 }]} />
+        {/* `ink`, not `ink2`: this is the mark, not the sentence beside it, and
+            it is the same token the Settings row's dot uses. Those two comments
+            claimed to agree and did not — one was on `ink`, one on `ink2`. */}
+        <View style={[styles.mark, { backgroundColor: C.ink }]} />
         <Text numberOfLines={1} style={[styles.label, { color: C.ink2 }]}>
           {detail}
         </Text>

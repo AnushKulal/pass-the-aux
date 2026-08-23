@@ -50,6 +50,15 @@ const ADVANCE_COOLDOWN_MS = 4_000;
 /** Minimum gap between `is_synced` writes, so a flapping connection is not a write storm. */
 const SYNC_FLAG_INTERVAL_MS = 15_000;
 
+/**
+ * Sentinel for "the clock has never been synced".
+ *
+ * A room id is a uuid and the no-room case is the empty string, so no real key
+ * can collide with this. It has to be distinct from both: `null` would read as
+ * ready the moment the screen mounts with no room.
+ */
+const CLOCK_NEVER_SYNCED = 'never-synced';
+
 export type RoomSyncState = {
   room: RoomRow | null;
   track: ResolvedTrack | null;
@@ -67,7 +76,19 @@ export function useRoomSync(roomId: string | null): RoomSyncState {
   const queryClient = useQueryClient();
   const userId = useCurrentUserId();
 
-  const [clockReady, setClockReady] = useState(false);
+  /**
+   * WHICH room the clock has been synced for, not whether it has.
+   *
+   * Storing the key rather than a boolean is what lets `clockReady` be derived
+   * below. A plain flag has to be reset to `false` at the top of the effect
+   * when the room changes, and a synchronous setState in an effect body
+   * cascades renders. This is the same idiom `useLoungePresence` uses for its
+   * readiness grace period, and it carries the same second benefit: there is no
+   * render in which the flag still reads `true` for the room we just left.
+   */
+  const [clockFor, setClockFor] = useState<string>(CLOCK_NEVER_SYNCED);
+  const clockKey = roomId ?? '';
+  const clockReady = clockFor === clockKey;
 
   const roomQuery = useRoom(roomId);
   const room = roomQuery.data ?? null;
@@ -96,17 +117,18 @@ export function useRoomSync(roomId: string | null): RoomSyncState {
 
   useEffect(() => {
     let cancelled = false;
-    setClockReady(false);
 
     // Measuring runs in parallel with the row fetch; only *applying* waits.
+    // The only setState is in the callback — nothing is written synchronously
+    // here, because `clockReady` reads false for this room until it lands.
     void syncClock().finally(() => {
-      if (!cancelled) setClockReady(true);
+      if (!cancelled) setClockFor(clockKey);
     });
 
     return () => {
       cancelled = true;
     };
-  }, [roomId]);
+  }, [clockKey]);
 
   // ------------------------------------------------- 2. attach + store hooks
 

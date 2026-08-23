@@ -15,7 +15,7 @@
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { Mail, Play } from 'lucide-react-native';
+import { Mail, Play, Radio, Users, WifiOff, type LucideIcon } from 'lucide-react-native';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   FlatList,
@@ -43,7 +43,7 @@ import {
   timecode,
   useFeedClock,
 } from '@/components/feed/now-playing-card';
-import { AuxButton, Screen, Skeleton } from '@/components/ui';
+import { EmptyState, Screen, Skeleton } from '@/components/ui';
 import { useTotalUnread } from '@/features/dm/queries';
 import { livePositionMs } from '@/features/presence/presence-client';
 import {
@@ -69,7 +69,6 @@ import {
   TOUCH_TARGET,
   Type,
   dropped,
-  glowShadow,
   raised,
   raisedLarge,
   tracking,
@@ -362,7 +361,7 @@ function HeroCard({
   return (
     <View style={[styles.hero, { backgroundColor: C.surface }, raisedLarge(C)]}>
       <View style={styles.heroTop}>
-        <View style={[styles.art, { backgroundColor: C.artwork }, glowShadow(C.glow, 30)]}>
+        <View style={[styles.art, { backgroundColor: C.artwork }, dropped(C, 'md')]}>
           <Text style={[styles.artGlyph, { color: C.artInk }]}>{glyphFor(hero.title)}</Text>
 
           {/* Over the glyph, so the letter doubles as the error fallback. */}
@@ -438,40 +437,89 @@ function useModuleEnter() {
   }));
 }
 
-/** A raised card carrying one line and one action. Every non-happy path. */
+/**
+ * The card that stands in the hero's place when there is no hero.
+ *
+ * A new account sees this before it sees anything else, so it is built to the
+ * hero's own geometry — `size="hero"` is the shared card's 78px tile and 21px
+ * title — rather than shrunk to a footnote. One line of what happened, one
+ * thing to do about it.
+ *
+ * The drawing lives in `@/components/ui/empty-state`. This screen, Explore and
+ * Lounges each used to carry their own copy of it, which is how the icon ended
+ * up 30px here and 24px there.
+ */
 function QuietCard({
+  icon,
+  title,
   line,
   action,
 }: {
-  line: string;
+  icon: LucideIcon;
+  title: string;
+  line?: string;
   action: { label: string; onPress: () => void };
 }) {
+  return (
+    <EmptyState
+      icon={icon}
+      title={title}
+      description={line}
+      size="hero"
+      primary={action}
+      style={styles.quiet}
+    />
+  );
+}
+
+/**
+ * The hero card's own loading twin — artwork well, two lines, the waveform
+ * band, the readout, both action cells. The hero is the tallest thing on the
+ * screen, so leaving it out of the skeleton is what makes the Feed jump when
+ * the data lands.
+ */
+function HeroSkeleton() {
   const C = useColors();
 
   return (
-    <View style={[styles.quiet, { backgroundColor: C.surface }, raised(C)]}>
-      <Text style={[styles.quietLine, { color: C.ink2 }]}>{line}</Text>
-      <AuxButton
-        label={action.label}
-        onPress={action.onPress}
-        variant="cream"
-        size="sm"
-        align="center"
-      />
+    <View style={[styles.hero, { backgroundColor: C.surface }, raisedLarge(C)]}>
+      <View style={styles.heroTop}>
+        <Skeleton width={ART} height={ART} />
+        <View style={styles.skeletonHeroInfo}>
+          <Skeleton width="46%" height={10} />
+          <Skeleton width="82%" height={20} />
+          <Skeleton width="60%" height={12} />
+        </View>
+      </View>
+
+      <Skeleton width="100%" height={30} style={styles.skeletonWave} />
+
+      <View style={styles.skeletonReadout}>
+        <Skeleton width={34} height={11} />
+        <Skeleton width={62} height={11} />
+        <Skeleton width={34} height={11} />
+      </View>
+
+      <View style={styles.actions}>
+        <Skeleton width="100%" height={50} style={styles.flex} />
+        <Skeleton width={118} height={50} />
+      </View>
     </View>
   );
 }
 
-/** Three rows of the real geometry, so nothing shifts when the data lands. */
+/** The whole screen at the geometry it will have once it arrives. */
 function FeedSkeleton() {
   const C = useColors();
 
   return (
-    <View style={styles.rows}>
+    <View>
+      <HeroSkeleton />
+
+      <Text style={[styles.sectionKicker, { color: C.ink3 }]}>Listening now</Text>
+
       {SKELETON_ROWS.map((row) => (
-        <View
-          key={row}
-          style={[styles.skeletonRow, { backgroundColor: C.surface }, raised(C)]}>
+        <View key={row} style={[styles.skeletonRow, { backgroundColor: C.surface }, raised(C)]}>
           <Skeleton width={TILE} height={TILE} />
           <View style={styles.skeletonInfo}>
             <Skeleton width="58%" height={13} />
@@ -671,28 +719,55 @@ export default function FeedScreen() {
     []
   );
 
+  /** The masthead's second line is a readout, not a sentence. */
   const summary = useMemo(() => {
     if (lounges.isError) return 'Could not reach your lounges';
-    if (showSkeleton) return 'Tuning in';
-    if (loungeList.length === 0) return 'Join a lounge to fill this up';
-    if (entries.length === 0) return 'Quiet right now';
+    if (loungeList.length === 0) return 'No lounges yet';
+    if (entries.length === 0) return 'Nobody on right now';
     const live = entries.filter((entry) => entry.roomId !== null).length;
     return `${entries.length} online · ${live} on aux`;
-  }, [entries, lounges.isError, loungeList.length, showSkeleton]);
+  }, [entries, lounges.isError, loungeList.length]);
+
+  /**
+   * The live mark is the accent, so it appears only when something is actually
+   * live. A red dot over an empty Feed is decoration, and it is also a lie.
+   */
+  const anyLive = hero !== null || entries.some((entry) => entry.roomId !== null);
 
   const header = useMemo(
     () => (
       <View>
         <View style={styles.masthead}>
           <View style={styles.mastheadText}>
-            <View style={styles.liveRow}>
-              <LiveDot size={7} />
-              <Text style={[styles.liveLabel, { color: C.liveText }]}>Live now</Text>
-            </View>
-            <Text style={[styles.title, { color: C.ink }]}>The Feed</Text>
-            <Text numberOfLines={1} style={[styles.summary, { color: C.ink2 }]}>
-              {summary}
+            {/* Reserved while loading, so the mark arriving does not push the
+                hero down the screen. */}
+            {showSkeleton ? (
+              <Skeleton width={78} height={14} />
+            ) : anyLive ? (
+              <View style={styles.liveRow}>
+                <LiveDot size={7} />
+                <Text style={[styles.liveLabel, { color: C.liveText }]}>Live now</Text>
+              </View>
+            ) : null}
+
+            <Text
+              style={[
+                styles.title,
+                (showSkeleton || anyLive) && styles.titleStacked,
+                { color: C.ink },
+              ]}>
+              The Feed
             </Text>
+
+            {/* A skeleton rather than the words "Tuning in": the line keeps its
+                height, so the masthead does not reflow when the count lands. */}
+            {showSkeleton ? (
+              <Skeleton width={148} height={13} style={styles.summarySkeleton} />
+            ) : (
+              <Text numberOfLines={1} style={[styles.summary, { color: C.ink2 }]}>
+                {summary}
+              </Text>
+            )}
           </View>
 
           <Pressable
@@ -725,13 +800,14 @@ export default function FeedScreen() {
           />
         ) : null}
 
-        {showSkeleton || rows.length > 0 ? (
+        {rows.length > 0 ? (
           <Text style={[styles.sectionKicker, { color: C.ink3 }]}>Listening now</Text>
         ) : null}
       </View>
     ),
     [
       C,
+      anyLive,
       hero,
       listenersByRoom,
       openLounge,
@@ -745,8 +821,8 @@ export default function FeedScreen() {
   );
 
   /**
-   * One card closes the list, and it only changes its words: there is no
-   * separate "nothing here" screen to design.
+   * One card closes the list and stands where the hero would: there is no
+   * separate "nothing here" screen to design, only a different reason.
    */
   const footer = useMemo(() => {
     if (showSkeleton) return null;
@@ -754,7 +830,9 @@ export default function FeedScreen() {
     if (lounges.isError) {
       return (
         <QuietCard
-          line="Could not load your lounges."
+          icon={WifiOff}
+          title="Could not load your lounges"
+          line="Check your connection."
           action={{ label: 'Try again', onPress: () => void onRefresh() }}
         />
       );
@@ -763,7 +841,9 @@ export default function FeedScreen() {
     if (loungeList.length === 0) {
       return (
         <QuietCard
-          line="You are not in a lounge yet."
+          icon={Users}
+          title="No lounges yet"
+          line="Join one to see who is listening."
           action={{ label: 'Find a lounge', onPress: () => router.push('/lounges') }}
         />
       );
@@ -773,11 +853,21 @@ export default function FeedScreen() {
 
     return (
       <QuietCard
-        line="Nobody is on right now."
+        icon={Radio}
+        title="Nobody is on right now"
         action={{ label: 'Start a session', onPress: startSession }}
       />
     );
-  }, [hero, lounges.isError, loungeList.length, onRefresh, router, rows.length, showSkeleton, startSession]);
+  }, [
+    hero,
+    lounges.isError,
+    loungeList.length,
+    onRefresh,
+    router,
+    rows.length,
+    showSkeleton,
+    startSession,
+  ]);
 
   return (
     <Screen padded={false}>
@@ -845,11 +935,17 @@ const styles = StyleSheet.create({
   title: {
     ...Type.display(30),
     letterSpacing: tracking(30, -0.03),
+  },
+  /** The 9px only exists to clear the live mark; without it the title leads. */
+  titleStacked: {
     marginTop: 9,
   },
   summary: {
     ...Type.body(13.5),
     marginTop: 5,
+  },
+  summarySkeleton: {
+    marginTop: 7,
   },
   iconTile: {
     width: TOUCH_TARGET,
@@ -1001,9 +1097,6 @@ const styles = StyleSheet.create({
     paddingTop: 26,
     paddingBottom: 10,
   },
-  rows: {
-    paddingTop: 26,
-  },
   skeletonRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1016,16 +1109,25 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: Space.sm,
   },
+  skeletonHeroInfo: {
+    flex: 1,
+    gap: Space.sm,
+  },
+  skeletonWave: {
+    marginTop: Space.lg,
+  },
+  skeletonReadout: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 9,
+  },
 
+  /* ------------------------------------------- loading, empty and error */
+
+  /* Placement only. The card itself is drawn by `EmptyState`. */
   quiet: {
     marginTop: 22,
     marginHorizontal: CARD_GUTTER - ROW_GUTTER,
-    padding: Space.xl,
-    borderRadius: Radii.xl,
-    alignItems: 'flex-start',
-    gap: Space.lg,
-  },
-  quietLine: {
-    ...Type.body(14),
   },
 });

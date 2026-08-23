@@ -132,10 +132,6 @@ export const DarkPalette = {
   /** The ground is a three-stop vertical wash, not a flat fill. */
   bgTop: '#272c34',
   bgBot: '#191c21',
-  grad0: '#272c34',
-  grad1: '#1e2128',
-  grad2: '#191c21',
-  grad3: '#191c21',
 
   /**
    * Deprecated with the Apex direction, which had a second amber accent. Held
@@ -220,10 +216,6 @@ export const LightPalette: Palette = {
 
   bgTop: '#ffffff',
   bgBot: '#e9ecf1',
-  grad0: '#ffffff',
-  grad1: '#f3f5f8',
-  grad2: '#e9ecf1',
-  grad3: '#e9ecf1',
 
   ember: '#c41f08',
   emberText: '#ae1800',
@@ -448,64 +440,6 @@ export const noShadow = Platform.select({
   default: { shadowOpacity: 0 },
 }) as object;
 
-/* ------------------------------------------------------------- the gradient */
-
-/**
- * The signature heat, ready for `<LinearGradient colors={...} />`.
- *
- * Four stops rather than two: a straight black-to-amber ramp goes muddy through
- * the browns in the middle. The deep crimson at `grad1` holds the shadow end
- * dark for longer, so the accent arrives late and reads as ignition.
- *
- * Pass the palette from `useColors()` so it follows the active theme.
- */
-export function gradientStops(c: Palette): readonly [string, string, string, string] {
-  return [c.grad0, c.grad1, c.grad2, c.grad3];
-}
-
-/**
- * Where the heat comes from.
- *
- * `corner` is the default and matches the direction's reference: light entering
- * from one corner and falling away across the screen, like a light source just
- * off-frame. `vertical` is for wide surfaces where a diagonal would band.
- */
-export const GradientDirection = {
-  corner: { start: { x: 0.1, y: 0 }, end: { x: 0.9, y: 1 } },
-  vertical: { start: { x: 0.5, y: 0 }, end: { x: 0.5, y: 1 } },
-  horizontal: { start: { x: 0, y: 0.5 }, end: { x: 1, y: 0.5 } },
-} as const;
-
-/**
- * How far up the screen the gradient is allowed to reach.
- *
- * The reference keeps roughly the top third lit and lets the rest fall to
- * ground, which is what stops the effect becoming a wallpaper. Content sits on
- * the dark part; the heat is behind the header.
- */
-export const GradientLocations = [0, 0.28, 0.62, 1] as const;
-
-/**
- * The ambient bloom under artwork and accent surfaces.
- *
- * A COLOURED shadow, not a grey one — it reads as light coming off the thing
- * rather than the thing casting onto a surface below it. Android only honours
- * `elevation`, which cannot be tinted, so it gets a slightly stronger elevation
- * as the nearest equivalent.
- */
-export function glowShadow(color: string, radius = 24): object {
-  return Platform.select({
-    web: { boxShadow: `0 8px ${radius}px ${color}` },
-    android: { elevation: 8 },
-    default: {
-      shadowColor: color,
-      shadowOpacity: 1,
-      shadowRadius: radius,
-      shadowOffset: { width: 0, height: 8 },
-    },
-  }) as object;
-}
-
 /* ------------------------------------------------------------ soft UI depth */
 
 /**
@@ -585,5 +519,29 @@ export function dropped(c: Palette, size: 'sm' | 'md' | 'lg' = 'md'): object {
     boxShadow: [
       { offsetX: 0, offsetY: spec[0], blurRadius: spec[1], color: c.shadowDrop },
     ],
+  };
+}
+
+/**
+ * The ambient bloom under artwork, the play circle and the intro mark.
+ *
+ * A COLOURED shadow, not a grey one: it reads as light coming off the thing
+ * rather than the thing casting onto a surface below it. That is the whole
+ * difference from `dropped`, which is why the colour is a parameter here and a
+ * palette lookup there — pass `C.glow` unless you have a specific reason.
+ *
+ * This replaces the old `glowShadow()`, which belonged to the abandoned heat
+ * direction and, worse, silently swapped the tint for an untinted
+ * `elevation: 8` on Android. The `boxShadow` array is honoured on every target
+ * this app ships to, so the bloom is now the same light everywhere.
+ *
+ * Sizes are the artboard's own: `md` is the play circle and the lounge hero
+ * tile, `lg` is the Session artwork and the intro mark, `sm` is for anything
+ * small enough that the large blur would read as fog.
+ */
+export function bloom(color: string, size: 'sm' | 'md' | 'lg' = 'md'): object {
+  const spec = { sm: [8, 24], md: [16, 42], lg: [26, 70] }[size];
+  return {
+    boxShadow: [{ offsetX: 0, offsetY: spec[0], blurRadius: spec[1], color }],
   };
 }

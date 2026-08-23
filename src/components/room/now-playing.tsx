@@ -6,19 +6,27 @@
  * Three things are load-bearing:
  *
  *  - The `media` slot is rendered unconditionally, in a FIXED tree position, in
- *    every branch of this component. It holds the YouTube player host, and
- *    unmounting that mid-song stops the audio for this listener. When YouTube
- *    is the active provider the slot becomes the art tile itself; otherwise it
- *    parks at 1×1 and keeps playing.
+ *    every branch of this component — including the loading and error branches,
+ *    which change only what is drawn AROUND it. It holds the YouTube player
+ *    host, and unmounting that mid-song stops the audio for this listener. When
+ *    YouTube is the active provider the slot becomes the art tile itself;
+ *    otherwise it parks at 1×1 and keeps playing.
  *  - The playhead is driven by a local 250ms ticker over
  *    `expectedPositionMs(timeline)`, never by asking the adapter. On Spotify,
  *    `getPosition()` is a rate-limited HTTP call.
  *  - The sync readout loses the red as drift grows; it never turns amber,
  *    because there is no amber.
+ *
+ * Four states, all drawn here rather than swapped in by the screen:
+ *
+ *   loading    a recessed art well and skeleton bars in the real layout
+ *   empty      loaded, nothing on the deck — the well says so in one line
+ *   error      what failed, and the button that fixes it
+ *   populated  the artboard
  */
 
 import { Image } from 'expo-image';
-import { MoreHorizontal, RotateCw } from 'lucide-react-native';
+import { Disc3, MoreHorizontal, RotateCw } from 'lucide-react-native';
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Pressable,
@@ -30,15 +38,19 @@ import {
   type LayoutChangeEvent,
 } from 'react-native';
 
-import { BLURHASH_SURFACE } from '@/components/ui';
+import { BLURHASH_SURFACE, Skeleton } from '@/components/ui';
 import {
   Duration,
   Fonts,
   GRID,
   PointerEvents,
+  Radii,
   Space,
   TOUCH_TARGET,
   Type,
+  bloom,
+  pressed as pressedDepth,
+  raised,
   tracking,
 } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
@@ -64,6 +76,9 @@ const WAVE = [
   28, 48, 34, 64, 40, 76, 52, 30, 58, 92, 44, 36, 68, 54, 32, 56, 100, 38, 66, 48, 26, 44, 72, 54,
   82, 34, 60, 46, 78, 30, 52, 68,
 ] as const;
+
+/** Flat, quiet, and obviously not a waveform: the loading shape of one. */
+const WAVE_RESTING = 22;
 
 export type NowPlayingProps = {
   /** The YouTube player host. Always mounted, never conditionally rendered. */
@@ -145,10 +160,9 @@ export function NowPlaying({
     [onSeek, durationMs, positionMs]
   );
 
-  const initial = initialFor(track?.title);
+  const waiting = isLoading && !track;
   const played = Math.round(progress * WAVE.length);
-
-  const subtitle = track ? (track.album ? `${track.artist} · ${track.album}` : track.artist) : '—';
+  const subtitle = track ? (track.album ? `${track.artist} · ${track.album}` : track.artist) : null;
 
   return (
     <View>
@@ -167,7 +181,11 @@ export function NowPlaying({
         </View>
 
         {showMedia ? null : (
-          <ArtTile initial={initial} artworkUrl={track?.artwork_url ?? null} title={track?.title ?? null} />
+          <ArtSlot
+            waiting={waiting}
+            title={track?.title ?? null}
+            artworkUrl={track?.artwork_url ?? null}
+          />
         )}
       </View>
 
@@ -175,12 +193,21 @@ export function NowPlaying({
         <GlyphButton icon={RotateCw} label="Re-anchor to the Session clock" onPress={onResync} />
 
         <View style={styles.headMeta}>
-          <Text numberOfLines={1} style={[styles.title, { color: C.ink }]}>
-            {track?.title ?? 'Nothing playing'}
-          </Text>
-          <Text numberOfLines={1} style={[styles.artist, { color: C.ink2 }]}>
-            {subtitle}
-          </Text>
+          {waiting ? (
+            <View style={styles.headSkeleton}>
+              <Skeleton width={168} height={22} />
+              <Skeleton width={104} height={13} />
+            </View>
+          ) : (
+            <>
+              <Text numberOfLines={1} style={[styles.title, { color: C.ink }]}>
+                {track?.title ?? 'Nothing playing'}
+              </Text>
+              <Text numberOfLines={1} style={[styles.artist, { color: C.ink2 }]}>
+                {subtitle ?? 'Queue a track to start the Session'}
+              </Text>
+            </>
+          )}
         </View>
 
         <GlyphButton icon={MoreHorizontal} label="Session controls" onPress={onMore} />
@@ -188,7 +215,7 @@ export function NowPlaying({
 
       <View style={styles.progress}>
         <Pressable
-          disabled={!onSeek}
+          disabled={!onSeek || waiting}
           onLayout={handleLayout}
           onPress={handleScrub}
           accessible
@@ -210,46 +237,66 @@ export function NowPlaying({
               key={index}
               style={[
                 styles.bar,
-                { height: `${height}%`, backgroundColor: index < played ? C.ink : C.ink3 },
+                waiting
+                  ? { height: `${WAVE_RESTING}%`, backgroundColor: C.rule2 }
+                  : { height: `${height}%`, backgroundColor: index < played ? C.ink : C.ink3 },
               ]}
             />
           ))}
         </Pressable>
 
         <View style={styles.times}>
-          <Text style={[styles.time, { color: C.ink2 }]}>{formatClock(positionMs)}</Text>
-          <Text style={[styles.sync, { color: rungTint }]}>
-            {isLoading && !track ? '—' : `${RUNG_LABEL[rung]} · ${formatDrift(driftMs)}`}
+          <Text style={[styles.time, { color: C.ink2 }]}>
+            {waiting ? '—' : formatClock(positionMs)}
           </Text>
-          <Text style={[styles.time, { color: C.ink2 }]}>{formatClock(durationMs)}</Text>
+          <Text style={[styles.sync, { color: waiting ? C.ink3 : rungTint }]}>
+            {waiting ? 'Finding the beat' : `${RUNG_LABEL[rung]} · ${formatDrift(driftMs)}`}
+          </Text>
+          <Text style={[styles.time, { color: C.ink2 }]}>
+            {waiting ? '—' : formatClock(durationMs)}
+          </Text>
         </View>
       </View>
 
-      {errorMessage ? (
-        <Text accessibilityLiveRegion="polite" style={[styles.error, { color: C.liveText }]}>
-          {errorMessage}
-        </Text>
-      ) : null}
+      {errorMessage ? <PlaybackError message={errorMessage} onRetry={onResync} /> : null}
     </View>
   );
 }
 
-// ---------------------------------------------------------------- art tile
+// ---------------------------------------------------------------- art slot
+
+type ArtSlotProps = {
+  waiting: boolean;
+  title: string | null;
+  artworkUrl: string | null;
+};
 
 /**
- * A letter on a bright tile, with real artwork dropping straight over it.
- * `artwork` INVERTS between themes, so anything drawn on it must use `artInk`.
+ * Three faces of one 252px square.
+ *
+ * A LOADED track is a bright tile — `artwork` inverts between themes, so the
+ * letter on it must use `artInk` or it disappears. Nothing loaded is a recessed
+ * well instead: the same square, sunk rather than lit, which reads as an empty
+ * slot without needing a word. At 252px the deep recess is well clear of the
+ * size where an inset pair reads as dirt.
  */
-const ArtTile = memo(function ArtTile({
-  initial,
-  artworkUrl,
-  title,
-}: {
-  initial: string;
-  artworkUrl: string | null;
-  title: string | null;
-}) {
+const ArtSlot = memo(function ArtSlot({ waiting, title, artworkUrl }: ArtSlotProps) {
   const C = useColors();
+
+  if (waiting || title === null) {
+    return (
+      <View
+        accessible
+        accessibilityLabel={waiting ? 'Loading the Session' : 'Nothing playing'}
+        style={[styles.art, { backgroundColor: C.bgRecessed }, pressedDepth(C)]}>
+        {waiting ? (
+          <Skeleton width={96} height={96} style={styles.artSkeleton} />
+        ) : (
+          <Disc3 size={44} strokeWidth={1.6} color={C.ink3} />
+        )}
+      </View>
+    );
+  }
 
   return (
     <View
@@ -257,7 +304,7 @@ const ArtTile = memo(function ArtTile({
         styles.art,
         { backgroundColor: C.artwork },
         // A wide, soft bloom: the art is meant to look lit, not pasted on.
-        { boxShadow: [{ offsetX: 0, offsetY: 26, blurRadius: 70, color: C.glow }] },
+        bloom(C.glow, 'lg'),
       ]}>
       {artworkUrl ? (
         <Image
@@ -268,11 +315,54 @@ const ArtTile = memo(function ArtTile({
           placeholder={{ blurhash: BLURHASH_SURFACE }}
           transition={Duration.press}
           accessibilityIgnoresInvertColors
-          accessibilityLabel={title ? `Artwork for ${title}` : undefined}
+          accessibilityLabel={`Artwork for ${title}`}
         />
       ) : (
-        <Text style={[styles.artInitial, { color: C.artInk }]}>{initial}</Text>
+        <Text style={[styles.artInitial, { color: C.artInk }]}>{initialFor(title)}</Text>
       )}
+    </View>
+  );
+});
+
+// -------------------------------------------------------------- error card
+
+/**
+ * What broke, and the one control that fixes it.
+ *
+ * Almost every playback failure on this screen is a clock or a device problem,
+ * and re-anchoring is the answer to both — so the card carries that action
+ * rather than a bare apology. A `live` outline is the destructive/alarm device
+ * in this palette; there is no second hue.
+ */
+const PlaybackError = memo(function PlaybackError({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  const C = useColors();
+
+  return (
+    <View
+      accessibilityLiveRegion="polite"
+      style={[styles.errorCard, { backgroundColor: C.surface }, raised(C)]}>
+      <View style={styles.errorMeta}>
+        <Text style={[styles.errorKicker, { color: C.liveText }]}>Playback stopped</Text>
+        <Text style={[styles.errorBody, { color: C.ink2 }]}>{message}</Text>
+      </View>
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Re-anchor and try again"
+        onPress={onRetry}
+        style={({ pressed }) => [
+          styles.errorAction,
+          { backgroundColor: C.pill },
+          pressed ? styles.dim : null,
+        ]}>
+        <Text style={[styles.errorActionLabel, { color: C.pillInk }]}>Retry</Text>
+      </Pressable>
     </View>
   );
 });
@@ -369,6 +459,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
   },
+  artSkeleton: {
+    borderRadius: Radii.xl,
+  },
   artInitial: {
     fontFamily: Fonts.extrabold,
     fontSize: 96,
@@ -387,6 +480,11 @@ const styles = StyleSheet.create({
     minWidth: 0,
     alignItems: 'center',
     paddingHorizontal: Space.md,
+  },
+  headSkeleton: {
+    alignItems: 'center',
+    gap: Space.sm,
+    paddingVertical: Space.xs,
   },
   title: {
     ...Type.display(27),
@@ -444,11 +542,41 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
     flexShrink: 1,
   },
-  error: {
+
+  // ------------------------------------------------------------ error card
+  errorCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.md,
+    marginTop: Space.lg,
+    marginHorizontal: Space.lg + 2,
+    padding: Space.md + 1,
+    borderRadius: Radii.lg,
+  },
+  errorMeta: {
+    flex: 1,
+    minWidth: 0,
+  },
+  errorKicker: {
+    ...Type.label(10),
+    letterSpacing: tracking(10, 0.14),
+  },
+  errorBody: {
     ...Type.body(13),
-    marginTop: Space.md,
-    paddingHorizontal: Space.xxl + 4,
-    textAlign: 'center',
+    marginTop: 2,
+  },
+  errorAction: {
+    flexGrow: 0,
+    flexShrink: 0,
+    minHeight: TOUCH_TARGET - 8,
+    justifyContent: 'center',
+    paddingHorizontal: Space.lg,
+    borderRadius: Radii.sm,
+  },
+  errorActionLabel: {
+    fontFamily: Fonts.semibold,
+    fontSize: 12,
+    letterSpacing: tracking(12, 0.02),
   },
 
   // --------------------------------------------------------- modular grid
