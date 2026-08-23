@@ -79,10 +79,24 @@ function toStrings(value: unknown): string[] {
  * need costs a tap and missing one they do need costs the fix.
  */
 export function installedVersionCode(): number {
-  const raw = Application.nativeBuildVersion;
-  if (!raw) return 0;
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) ? parsed : 0;
+  try {
+    const raw = Application.nativeBuildVersion;
+    if (!raw) return 0;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) ? parsed : 0;
+  } catch {
+    /*
+      Reached when the JavaScript knows about expo-application but the running
+      binary does not — an over-the-air update carrying this file to a build
+      made before the module was added. Expo's native proxies throw on access
+      rather than on import, so this is where that mismatch surfaces.
+
+      It must not throw: this is called during Settings' render, and a throw
+      there takes the whole screen down. Zero reads as "unknown", the row says
+      "Build number unavailable", and everything else still works.
+    */
+    return 0;
+  }
 }
 
 function parseBuildInfo(value: unknown): BuildInfo | null {
