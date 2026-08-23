@@ -99,6 +99,25 @@ export const DarkPalette = {
   grad1: '#3d0a08',
   grad2: '#b4200e',
   grad3: '#ff8a3d',
+
+  /**
+   * The inverted card.
+   *
+   * A warm off-white panel dropped into the dark — the device the references
+   * use to make ONE card on a screen unmissable without spending the accent on
+   * it. Reserve it for a single element per screen; two competing cream cards
+   * cancel each other out.
+   */
+  cream: '#f2efe9',
+  /** Text on cream. Not pure black — that reads as a rendering error on warm white. */
+  onCream: '#17161c',
+  /** Secondary text on cream. */
+  onCream2: '#5d5a63',
+
+  /** The dock capsule and other floating chrome, over content. */
+  dock: 'rgba(28,26,36,.82)',
+  /** An unselected pill chip. */
+  chip: 'rgba(251,250,252,.08)',
 } as const;
 
 /**
@@ -168,6 +187,18 @@ export const LightPalette: Palette = {
   grad1: '#ffe0cc',
   grad2: '#ff8a5c',
   grad3: '#ec3013',
+
+  /**
+   * On light, the inverted card inverts again — it goes DARK. The device is
+   * "one card that breaks the ground", not "one card that is cream", so on a
+   * light ground the same job needs the opposite value.
+   */
+  cream: '#17161c',
+  onCream: '#f6f4f1',
+  onCream2: '#b3aeb8',
+
+  dock: 'rgba(255,255,255,.86)',
+  chip: 'rgba(20,18,26,.06)',
 };
 
 export const Palettes = { dark: DarkPalette, light: LightPalette } as const;
@@ -258,7 +289,7 @@ export const Space = {
  * in one edit when Patchbay (radius 0) became Apex. Reach for `Radii` below
  * when a specific step is wanted.
  */
-export const Radius = 16;
+export const Radius = 24;
 
 /**
  * The radius scale.
@@ -268,16 +299,41 @@ export const Radius = 16;
  * suddenly look like a rounded rectangle.
  */
 export const Radii = {
-  /** Chips, small tags, inline badges. */
-  sm: 10,
-  /** The default: cards, inputs, list rows. */
-  md: 16,
-  /** Larger cards, artwork wells. */
-  lg: 22,
-  /** Sheets, hero surfaces, the Session artwork. */
-  xl: 28,
-  /** Buttons, avatars where round is wanted, the live dot. */
+  /** Inline badges, small tags. */
+  sm: 12,
+  /** Compact rows, inputs. */
+  md: 18,
+  /** The default: cards, list rows, artwork tiles. */
+  lg: 24,
+  /** Hero cards, the Session artwork, sheets. */
+  xl: 32,
+  /** Buttons, chips, the nav dock, circular icon buttons. */
   pill: 999,
+} as const;
+
+/**
+ * The floating navigation dock.
+ *
+ * Not a full-width bar. It hovers above the content with the ground visible on
+ * either side and beneath it, which is what makes it read as a control that
+ * belongs to the app rather than a border on the screen.
+ */
+export const Dock = {
+  /** Diameter of each circular cell. */
+  cell: 52,
+  /** Gap between cells inside the dock. */
+  gap: 6,
+  /** Inner padding of the dock capsule. */
+  padding: 8,
+  /** How far the dock floats above the safe-area bottom. */
+  lift: 14,
+} as const;
+
+/** Horizontal pill filters — the `All / Cardio / Muscle` row in the reference. */
+export const Chip = {
+  height: 40,
+  paddingX: 18,
+  gap: 8,
 } as const;
 
 /** 1px hairline within a group, 2px between major sections. */

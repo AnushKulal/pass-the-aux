@@ -17,10 +17,11 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { LoungeRail } from '@/components/shell/lounge-rail';
+import { NavDock } from '@/components/shell/nav-dock';
 import { UpdateBanner } from '@/components/shell/update-banner';
 import { useAuth } from '@/lib/auth';
 import { useLocalProfile } from '@/lib/providers';
-import { Rule, Space, Type } from '@/lib/theme';
+import { Dock, Rule, Space, Type } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
 /** Content height of the bar, above the device's bottom safe-area inset. */
@@ -100,7 +101,14 @@ function PatchbayTabBar({ state, navigation }: BottomTabBarProps) {
   );
 }
 
-const renderTabBar = (props: BottomTabBarProps) => <PatchbayTabBar {...props} />;
+const renderTabBar = (props: BottomTabBarProps) => <NavDock {...props} />;
+
+/**
+ * Clearance under every screen so content can scroll clear of the floating
+ * dock instead of ending behind it. The dock takes no layout space of its own —
+ * that is what makes it float — so the space has to be given back here.
+ */
+const DOCK_CLEARANCE = Dock.cell + Dock.padding * 2 + Dock.lift;
 
 export default function TabsLayout() {
   const C = useColors();
@@ -145,7 +153,7 @@ export default function TabsLayout() {
           screenOptions={{
             // Each tab screen renders its own header.
             headerShown: false,
-            sceneStyle: { backgroundColor: C.bg },
+            sceneStyle: { backgroundColor: C.bg, paddingBottom: DOCK_CLEARANCE },
             /*
               Every screen in this group animates the same way, and that
               includes the ones with no tab cell — lounge/[id], settings/*,
