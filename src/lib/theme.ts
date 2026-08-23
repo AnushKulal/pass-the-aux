@@ -364,7 +364,7 @@ export const Radii = {
  * design's real numbers.
  */
 export const Dock = {
-  /** @deprecated floating-capsule metrics — removed once NavDock is rebuilt. */
+  /** Tile size in the bar, and the metrics the old floating dock used. */
   cell: 34,
   gap: 6,
   padding: 0,

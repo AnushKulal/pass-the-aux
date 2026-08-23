@@ -133,7 +133,7 @@ export const Chip = memo(function Chip({
     The held flag is React state driving the shared value from an effect, rather
     than a write straight out of the press handler: the React Compiler treats a
     shared value as immutable outside an effect, and one extra render per press
-    is not a cost worth arguing with it over. (`NavDock` still does the direct
+    is not a cost worth arguing with it over. (the old dock did the direct
     write, and still trips the rule.)
   */
   const [held, setHeld] = useState(false);

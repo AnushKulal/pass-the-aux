@@ -175,7 +175,7 @@ export function CircleIconButton({
 
     (The direct write this replaced lints clean only by accident: the old
     worklet closed over `reduced`, which made the compiler bail on the whole
-    component and take `react-hooks/immutability` down with it. `NavDock` does
+    component and take `react-hooks/immutability` down with it. The old dock did
     the same write with a worklet that captures nothing, and still errors.)
   */
   const [held, setHeld] = useState(false);
