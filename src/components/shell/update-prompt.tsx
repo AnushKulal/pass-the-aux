@@ -1,39 +1,25 @@
 /**
- * The over-the-air update prompt.
+ * The over-the-air update sheet.
  *
- * expo-updates fetches a new JavaScript bundle in the background; applying it
- * restarts the app. Restarting without asking would throw someone out of a
- * Session mid-track, so the reload is always the user's choice.
+ * Rises from the bottom edge when an update has been fetched and is waiting.
+ * Applying it restarts the app, which would throw someone out of a Session
+ * mid-track, so the reload is always the user's choice.
  *
  * Three ways out, deliberately:
  *   Update now  — apply and restart
- *   Not now     — dismissed for this launch; offered again next cold start
+ *   Not now     — hides the sheet, and NOTHING else
  *   X           — same as Not now, for anyone who reads a dismiss glyph first
  *
- * Nothing here is destructive, so none of the three needs a confirmation.
+ * "Not now" no longer loses the update: the state lives in `@/lib/updates`, so
+ * Settings → Software update still offers it. That was the whole reason this
+ * component stopped owning its own state.
  *
- * WHERE THE NOTES COME FROM, AND WHY IT HAS TO WORK THIS WAY:
- * this component runs on the OLD bundle, so it cannot import the new version's
- * changelog — that code is not on the device yet. What it CAN read is the
- * incoming update's manifest, which carries that update's entire app config. So
- * the changelog lives in `expo.extra.changelog` in app.json: it ships inside the
- * update it describes, and is readable before that update is applied.
- *
- * WHY IT IS CUMULATIVE:
- * updates are not applied one at a time. Someone who has not opened the app in
- * a month jumps straight from patch 2 to patch 7, and listing only patch 7 hides
- * five patches' worth of fixes they are also getting. So the prompt compares the
- * incoming changelog against the patch THIS bundle is on and shows everything in
- * between — which is why every entry carries its own `patch` number.
- *
- * To publish a patch: add an entry to the top of `changelog` and set `patch` to
- * the same number. Those two must agree or the newest entry will not be shown.
+ * All this renders is the sheet. Which notes to show — and how far behind the
+ * user is — is decided in `@/lib/release-notes`.
  */
 
-import Constants from 'expo-constants';
-import * as Updates from 'expo-updates';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useReducedMotion,
@@ -43,17 +29,9 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X } from 'lucide-react-native';
 
-import {
-  at,
-  NOTHING_PENDING,
-  readPendingNotes,
-  type Pending,
-} from '@/lib/release-notes';
 import { Duration, PointerEvents, Rule, Space, TOUCH_TARGET, Type, ZIndex } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
-
-/** How long after launch to look, so the check never competes with first paint. */
-const FIRST_CHECK_DELAY_MS = 4_000;
+import { useUpdates } from '@/lib/updates';
 
 /**
  * How far below its resting place the sheet starts.
@@ -65,112 +43,53 @@ const FIRST_CHECK_DELAY_MS = 4_000;
  */
 const SHEET_TRAVEL = 480;
 
-type Phase = 'idle' | 'available' | 'applying';
-
-/**
- * Which patch this running bundle is on.
- *
- * `Constants.expoConfig` is the config of the bundle actually executing, which
- * is what we need — `Updates.manifest` is empty in development and reports the
- * embedded manifest on a freshly installed build.
- *
- * Zero when absent, which is the useful default: a bundle predating the
- * changelog is treated as older than every entry, so its user sees the full
- * history rather than nothing.
- */
-function readCurrentPatch(): number {
-  const patch = at(Constants.expoConfig?.extra, 'patch');
-  return typeof patch === 'number' && Number.isFinite(patch) ? patch : 0;
-}
-
 export function UpdatePrompt() {
   const C = useColors();
   const insets = useSafeAreaInsets();
   const reduced = useReducedMotion();
 
-  const [phase, setPhase] = useState<Phase>('idle');
-  const [pending, setPending] = useState<Pending>(NOTHING_PENDING);
-  const dismissed = useRef(false);
+  const { promptVisible, pending, status, apply, dismissPrompt } = useUpdates();
+
+  /**
+   * Kept separate from `promptVisible` so the card survives its own exit —
+   * unmounting the instant the flag flips would cut the slide-down off at the
+   * first frame.
+   */
+  const [mounted, setMounted] = useState(false);
 
   const y = useSharedValue(SHEET_TRAVEL);
   const opacity = useSharedValue(0);
 
-  const show = useCallback(() => {
-    setPhase('available');
-    // Sheet duration, not the shorter entrance one — this travels the full
-    // height of the card rather than nudging a module into place.
-    const ms = reduced ? 0 : Duration.sheet;
-    y.value = withTiming(0, { duration: ms });
-    opacity.value = withTiming(1, { duration: ms });
-  }, [opacity, reduced, y]);
+  useEffect(() => {
+    if (promptVisible) {
+      setMounted(true);
+      // Sheet duration, not the shorter entrance one — this travels a full card
+      // height rather than nudging a module into place.
+      const ms = reduced ? 0 : Duration.sheet;
+      y.value = withTiming(0, { duration: ms });
+      opacity.value = withTiming(1, { duration: ms });
+      return;
+    }
 
-  const hide = useCallback(() => {
-    dismissed.current = true;
-    const ms = reduced ? 0 : Duration.press;
+    if (!mounted) return;
+
     // Back down the way it came, so dismissing is the entrance reversed.
+    const ms = reduced ? 0 : Duration.press;
     y.value = withTiming(SHEET_TRAVEL, { duration: ms });
     opacity.value = withTiming(0, { duration: ms });
-    setTimeout(() => setPhase('idle'), ms);
-  }, [opacity, reduced, y]);
 
-  const check = useCallback(async () => {
-    // Updates never apply in development — the bundle comes from Metro, and
-    // expo-updates is inert. Checking would only produce noise in the log.
-    if (__DEV__ || dismissed.current) return;
-
-    try {
-      const result = await Updates.checkForUpdateAsync();
-      if (!result.isAvailable) return;
-
-      // Read the notes off the manifest BEFORE fetching: this is the only
-      // description of the new version available to the old bundle.
-      setPending(readPendingNotes(result.manifest, readCurrentPatch()));
-
-      // Fetch BEFORE offering. "Update now" should restart immediately rather
-      // than sit on a spinner over an unknown download on a phone network.
-      await Updates.fetchUpdateAsync();
-      show();
-    } catch {
-      // Offline, or the update server is unreachable. Silent by design: an
-      // update the user never asked for is not worth an error message.
-    }
-  }, [show]);
-
-  useEffect(() => {
-    const first = setTimeout(() => void check(), FIRST_CHECK_DELAY_MS);
-
-    // Also look when the app comes back to the foreground, so a long-running
-    // install picks up an update without ever being force-quit.
-    const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') void check();
-    });
-
-    return () => {
-      clearTimeout(first);
-      sub.remove();
-    };
-  }, [check]);
-
-  const apply = useCallback(async () => {
-    setPhase('applying');
-    try {
-      await Updates.reloadAsync();
-    } catch {
-      // If the reload is refused there is nothing useful left to try; put the
-      // prompt back so the user can dismiss it rather than stare at a dead
-      // button.
-      setPhase('available');
-    }
-  }, []);
+    const timer = setTimeout(() => setMounted(false), ms);
+    return () => clearTimeout(timer);
+  }, [promptVisible, mounted, reduced, y, opacity]);
 
   const animated = useAnimatedStyle(() => ({
     opacity: opacity.value,
     transform: [{ translateY: y.value }],
   }));
 
-  if (phase === 'idle') return null;
+  if (!mounted) return null;
 
-  const applying = phase === 'applying';
+  const applying = status === 'applying';
 
   return (
     <View
@@ -184,7 +103,7 @@ export function UpdatePrompt() {
           </View>
 
           <Pressable
-            onPress={hide}
+            onPress={dismissPrompt}
             disabled={applying}
             accessibilityRole="button"
             accessibilityLabel="Dismiss"
@@ -195,14 +114,16 @@ export function UpdatePrompt() {
         </View>
 
         {/*
-          What actually changed. Omitted entirely rather than shown empty when
-          the incoming manifest predates the changelog — an empty heading is
-          worse than no heading.
+          What actually changed, across every patch this user skipped. Omitted
+          entirely rather than shown empty when the incoming manifest predates
+          the changelog — an empty heading is worse than no heading.
         */}
         {pending.notes.length > 0 ? (
           <View style={[styles.notes, { borderTopColor: C.rule }]}>
             <Text style={[styles.notesKicker, { color: C.ink3 }]}>
-              {pending.patchCount > 1 ? `IN THE LAST ${pending.patchCount} PATCHES` : 'IN THIS PATCH'}
+              {pending.patchCount > 1
+                ? `IN THE LAST ${pending.patchCount} PATCHES`
+                : 'IN THIS PATCH'}
             </Text>
 
             {pending.notes.map((note) => (
@@ -222,13 +143,13 @@ export function UpdatePrompt() {
         ) : null}
 
         <Text style={[styles.body, { color: C.ink2 }]}>
-          It installs instantly. The app restarts, so finish what you are listening to first if you
-          would rather wait.
+          It installs instantly. The app restarts, so finish what you are listening to first — you
+          can always apply it later from Settings.
         </Text>
 
         <View style={[styles.actions, { borderTopColor: C.rule }]}>
           <Pressable
-            onPress={hide}
+            onPress={dismissPrompt}
             disabled={applying}
             accessibilityRole="button"
             style={[styles.action, { borderRightWidth: Rule.hair, borderRightColor: C.rule }]}>
@@ -236,7 +157,7 @@ export function UpdatePrompt() {
           </Pressable>
 
           <Pressable
-            onPress={apply}
+            onPress={() => void apply()}
             disabled={applying}
             accessibilityRole="button"
             style={[styles.action, { backgroundColor: C.live }]}>

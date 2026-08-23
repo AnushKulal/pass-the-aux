@@ -17,6 +17,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { LoungeRail } from '@/components/shell/lounge-rail';
+import { UpdateBanner } from '@/components/shell/update-banner';
 import { useAuth } from '@/lib/auth';
 import { useLocalProfile } from '@/lib/providers';
 import { Rule, Space, Type } from '@/lib/theme';
@@ -133,6 +134,12 @@ export default function TabsLayout() {
     <View style={[styles.shell, { backgroundColor: C.bg }]}>
       <LoungeRail />
       <View style={styles.column}>
+        {/*
+          Above the navigator, inside the column, so it sits beside the rail
+          rather than across it — and so it survives every navigation instead of
+          re-entering on each screen.
+        */}
+        <UpdateBanner />
         <Tabs
           tabBar={renderTabBar}
           screenOptions={{

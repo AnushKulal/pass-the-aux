@@ -2,7 +2,7 @@ import { Redirect, router } from 'expo-router';
 import { ArrowLeft, ChevronRight, Mic, Monitor, Moon, Sun } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
 import type { ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown, useReducedMotion } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -11,6 +11,7 @@ import { useAuth } from '@/lib/auth';
 import { Duration, Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
 import type { ThemeChoice } from '@/lib/theme';
 import { useColors, useTheme } from '@/lib/theme-context';
+import { useUpdates } from '@/lib/updates';
 
 /** Settings rows are full-bleed; only their contents are inset. */
 const GUTTER = 12;
@@ -31,9 +32,45 @@ export default function SettingsScreen() {
   // `useColors()` is downstream of this one setter.
   const { choice, setChoice } = useTheme();
 
+  /**
+   * The same update state the sheet reads. This screen is the recovery path:
+   * dismissing the sheet hides it without discarding the update, so an "Update
+   * now" waved away at a bad moment is still here afterwards.
+   */
+  const update = useUpdates();
+
   // This screen sits outside both guarded groups, so a deep link can land here
   // signed out.
   if (!loading && !session) return <Redirect href="/(auth)/sign-in" />;
+
+  /* ---------------------------------------------------------- update copy */
+
+  const fixesPending = update.pending.notes.length + update.pending.hidden;
+
+  const updateTitle = update.isAvailable
+    ? update.status === 'applying'
+      ? 'Restarting…'
+      : 'Update ready to install'
+    : update.status === 'checking'
+      ? 'Checking…'
+      : update.status === 'error'
+        ? 'Could not reach the update server'
+        : update.confirmedCurrent
+          ? 'You are up to date'
+          : 'Check for updates';
+
+  /**
+   * Patch 0 means a build made before patches were numbered, so there is no
+   * honest version to report — saying "on patch 0" would invent one.
+   */
+  const onPatch =
+    update.currentPatch > 0
+      ? `On patch ${update.currentPatch}`
+      : 'Version not tracked on this build';
+
+  const updateDetail = update.isAvailable
+    ? `${update.pending.patchCount} ${update.pending.patchCount === 1 ? 'patch' : 'patches'} waiting · ${fixesPending} ${fixesPending === 1 ? 'fix' : 'fixes'}`
+    : onPatch;
 
   const spotifyDetail = !profile?.spotify_linked
     ? 'Not linked — playing via YouTube'
@@ -66,6 +103,60 @@ export default function SettingsScreen() {
           <Text style={[styles.screenTitle, { color: C.ink, borderBottomColor: C.rule }]}>
             Settings
           </Text>
+
+          {/* ------------------------------------------------- software update */}
+          <Kicker>SOFTWARE UPDATE</Kicker>
+          <Row
+            leading={
+              <Tile>{update.currentPatch > 0 ? `P${update.currentPatch}` : '—'}</Tile>
+            }
+            title={updateTitle}
+            detail={updateDetail}
+            capped
+            closing={!update.isAvailable}
+            trailing={
+              update.isAvailable ? (
+                <AccentChip>{update.status === 'applying' ? 'WAIT' : 'UPDATE NOW'}</AccentChip>
+              ) : update.status === 'checking' ? (
+                <ActivityIndicator size="small" color={C.ink2} />
+              ) : (
+                <Text style={[styles.checkLabel, { color: C.ink2 }]}>CHECK</Text>
+              )
+            }
+            onPress={
+              update.isAvailable ? () => void update.apply() : () => void update.check(true)
+            }
+          />
+
+          {/*
+            The same notes the sheet shows, for the user who dismissed it and
+            came here to find out what they turned down.
+          */}
+          {update.isAvailable && update.pending.notes.length > 0 ? (
+            <View style={[styles.updateNotes, { borderBottomColor: C.rule }]}>
+              <Text style={[styles.updateNotesKicker, { color: C.ink3 }]}>
+                {update.pending.patchCount > 1
+                  ? `IN THE LAST ${update.pending.patchCount} PATCHES`
+                  : 'IN THIS PATCH'}
+              </Text>
+              {update.pending.notes.map((note) => (
+                <View key={note} style={styles.updateNote}>
+                  <View style={[styles.updateNoteMark, { backgroundColor: C.ink3 }]} />
+                  <Text style={[styles.updateNoteText, { color: C.ink2 }]}>{note}</Text>
+                </View>
+              ))}
+              {update.pending.hidden > 0 ? (
+                <Text style={[styles.updateMore, { color: C.ink3 }]}>
+                  {`+${update.pending.hidden} more ${update.pending.hidden === 1 ? 'fix' : 'fixes'}`}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
+
+          <Caption>
+            Updates arrive over the air and install in seconds. Turning one down never loses it —
+            it waits here until you are ready.
+          </Caption>
 
           {/* ------------------------------------------------------ appearance */}
           <Kicker>APPEARANCE</Kicker>
@@ -280,6 +371,43 @@ const styles = StyleSheet.create({
     maxWidth: 720,
     alignSelf: 'center',
     paddingBottom: Space.xxxl,
+  },
+  checkLabel: {
+    ...Type.label(10),
+    letterSpacing: tracking(10, 0.1),
+  },
+  updateNotes: {
+    // Hangs off the row above it, so it reads as that row's detail rather than
+    // a section of its own.
+    paddingHorizontal: GUTTER,
+    paddingTop: Space.md,
+    paddingBottom: Space.md,
+    borderBottomWidth: Rule.major,
+    gap: Space.sm,
+  },
+  updateNotesKicker: {
+    ...Type.label(10),
+    letterSpacing: tracking(10, 0.1),
+  },
+  updateNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Space.sm,
+  },
+  updateNoteMark: {
+    width: 8,
+    height: Rule.major,
+    // Sits on the text's first-line baseline rather than its box top.
+    marginTop: 8,
+  },
+  updateNoteText: {
+    ...Type.body(13),
+    flex: 1,
+  },
+  updateMore: {
+    ...Type.label(10),
+    // Aligns with the note text, past the 8px mark and its gap.
+    marginLeft: 8 + Space.sm,
   },
   back: {
     flexDirection: 'row',

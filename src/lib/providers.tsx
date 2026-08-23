@@ -38,6 +38,7 @@ import { ToastProvider } from '@/components/ui';
 import { AuthProvider, useAuth } from '@/lib/auth';
 import { queryClient } from '@/lib/query';
 import { useColors } from '@/lib/theme-context';
+import { UpdateProvider } from '@/lib/updates';
 
 /* ------------------------------------------------------------ profile gate */
 
@@ -244,15 +245,24 @@ export function Providers({ children }: { children: ReactNode }) {
           <QueryClientProvider client={queryClient}>
             <AuthProvider>
               <LocalProfileProvider>
-                <ToastProvider>
-                  {children}
-                  {/*
-                    Last sibling, so it paints above everything including the tab
-                    bar. Inside ToastProvider because it is chrome, not a screen
-                    — it has to survive navigation rather than unmount with it.
-                  */}
-                  <UpdatePrompt />
-                </ToastProvider>
+                {/*
+                  Above ToastProvider so that BOTH the sheet below and the
+                  Settings screen inside `children` read the same update state.
+                  That shared state is what lets Settings still offer an update
+                  the user has already waved away.
+                */}
+                <UpdateProvider>
+                  <ToastProvider>
+                    {children}
+                    {/*
+                      Last sibling, so it paints above everything including the
+                      tab bar. Inside ToastProvider because it is chrome, not a
+                      screen — it has to survive navigation rather than unmount
+                      with it.
+                    */}
+                    <UpdatePrompt />
+                  </ToastProvider>
+                </UpdateProvider>
               </LocalProfileProvider>
             </AuthProvider>
           </QueryClientProvider>

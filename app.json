@@ -48,12 +48,19 @@
       "eas": {
         "projectId": "3c252219-3619-434b-9ab4-f0931d09722a"
       },
-      "patch": 3,
+      "patch": 4,
       "releaseNotes": [
-        "Update notes now cover every patch you skipped, not just the newest",
-        "The update sheet rises from the bottom and follows light and dark"
+        "Settings has a Software update section — apply an update you turned down earlier",
+        "A strip at the top of the app shows when you are on an older version"
       ],
       "changelog": [
+        {
+          "patch": 4,
+          "notes": [
+            "Settings has a Software update section — apply an update you turned down earlier",
+            "A strip at the top of the app shows when you are on an older version"
+          ]
+        },
         {
           "patch": 3,
           "notes": [
