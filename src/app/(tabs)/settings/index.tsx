@@ -1,12 +1,19 @@
 import { Redirect, router } from 'expo-router';
 import { ArrowLeft, ChevronRight, Mic, Monitor, Moon, Sun } from 'lucide-react-native';
 import type { LucideIcon } from 'lucide-react-native';
-import type { ReactNode } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown, useReducedMotion } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useToast } from '@/components/ui';
+import {
+  checkForNewApk,
+  downloadAndInstallApk,
+  formatBytes,
+  installedVersionCode,
+  type ApkCheck,
+} from '@/lib/apk-updates';
 import { useAuth } from '@/lib/auth';
 import { Duration, Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
 import type { ThemeChoice } from '@/lib/theme';
@@ -38,6 +45,37 @@ export default function SettingsScreen() {
    * now" waved away at a bad moment is still here afterwards.
    */
   const update = useUpdates();
+
+  /**
+   * The APK half, kept local because this screen is the only place it appears.
+   *
+   * Checked on demand rather than on mount: it is a network call for a 50MB
+   * artefact most people will not want, and doing it automatically would spend
+   * someone's mobile data to answer a question they did not ask.
+   */
+  const [apk, setApk] = useState<ApkCheck | null>(null);
+  const [apkBusy, setApkBusy] = useState<'idle' | 'checking' | 'downloading'>('idle');
+
+  const runApkCheck = useCallback(async () => {
+    setApkBusy('checking');
+    setApk(await checkForNewApk());
+    setApkBusy('idle');
+  }, []);
+
+  const runApkInstall = useCallback(async () => {
+    if (apk?.kind !== 'available') return;
+    setApkBusy('downloading');
+    try {
+      await downloadAndInstallApk(apk.latest);
+      // Android's installer has taken over. Nothing to report — if the user
+      // accepts, this process is replaced; if they decline, they are simply
+      // back here with the build still available.
+    } catch {
+      toast.show('Could not download the build. Check your connection and try again.', 'error');
+    } finally {
+      setApkBusy('idle');
+    }
+  }, [apk, toast]);
 
   // This screen sits outside both guarded groups, so a deep link can land here
   // signed out.
@@ -71,6 +109,32 @@ export default function SettingsScreen() {
   const updateDetail = update.isAvailable
     ? `${update.pending.patchCount} ${update.pending.patchCount === 1 ? 'patch' : 'patches'} waiting · ${fixesPending} ${fixesPending === 1 ? 'fix' : 'fixes'}`
     : onPatch;
+
+  /* ------------------------------------------------------------- apk copy */
+
+  const installedBuild = installedVersionCode();
+
+  const apkTitle =
+    apkBusy === 'downloading'
+      ? 'Downloading the new build…'
+      : apkBusy === 'checking'
+        ? 'Checking…'
+        : apk?.kind === 'available'
+          ? 'A new build is ready to install'
+          : apk?.kind === 'current'
+            ? 'You have the newest build'
+            : apk?.kind === 'error'
+              ? apk.message
+              : apk?.kind === 'unsupported'
+                ? 'Installing builds is Android only'
+                : 'Check for a new build';
+
+  const apkDetail =
+    apk?.kind === 'available'
+      ? `Build ${apk.latest.versionCode} · ${formatBytes(apk.latest.sizeBytes)} · replaces this one`
+      : installedBuild > 0
+        ? `Build ${installedBuild} installed`
+        : 'Build number unavailable';
 
   const spotifyDetail = !profile?.spotify_linked
     ? 'Not linked — playing via YouTube'
@@ -113,7 +177,6 @@ export default function SettingsScreen() {
             title={updateTitle}
             detail={updateDetail}
             capped
-            closing={!update.isAvailable}
             trailing={
               update.isAvailable ? (
                 <AccentChip>{update.status === 'applying' ? 'WAIT' : 'UPDATE NOW'}</AccentChip>
@@ -153,9 +216,40 @@ export default function SettingsScreen() {
             </View>
           ) : null}
 
+          {/*
+            The other kind of update. Over-the-air ships JavaScript in seconds;
+            this ships the whole app, and is the only way native changes — a new
+            permission, a new native module, an SDK bump — can ever reach a
+            phone. It hands off to Android's installer, which asks for its own
+            confirmation.
+          */}
+          <Row
+            leading={<Tile>APK</Tile>}
+            title={apkTitle}
+            detail={apkDetail}
+            closing
+            trailing={
+              apkBusy !== 'idle' ? (
+                <ActivityIndicator size="small" color={C.ink2} />
+              ) : apk?.kind === 'available' ? (
+                <AccentChip>INSTALL</AccentChip>
+              ) : (
+                <Text style={[styles.checkLabel, { color: C.ink2 }]}>CHECK</Text>
+              )
+            }
+            onPress={
+              apkBusy !== 'idle'
+                ? () => undefined
+                : apk?.kind === 'available'
+                  ? () => void runApkInstall()
+                  : () => void runApkCheck()
+            }
+          />
+
           <Caption>
-            Updates arrive over the air and install in seconds. Turning one down never loses it —
-            it waits here until you are ready.
+            Over-the-air updates arrive on their own and install in seconds; turning one down never
+            loses it. A new build is the bigger kind — it carries native changes, downloads about
+            50 MB, and Android will ask you to confirm the install.
           </Caption>
 
           {/* ------------------------------------------------------ appearance */}
@@ -382,7 +476,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: GUTTER,
     paddingTop: Space.md,
     paddingBottom: Space.md,
-    borderBottomWidth: Rule.major,
+    // Hairline, not the section rule: the APK row follows and the 2px closing
+    // rule belongs at the end of the whole section, not in the middle of it.
+    borderBottomWidth: Rule.hair,
     gap: Space.sm,
   },
   updateNotesKicker: {

@@ -17,7 +17,7 @@ import { execSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const TYPES_PATH = 'src/lib/database.types.ts';
-const PROJECT_REF = process.env.SUPABASE_PROJECT_REF ?? 'figkjbunwqmbjisoajxe';
+const PROJECT_REF = process.env.SUPABASE_PROJECT_REF ?? 'atdusjfidswqrkuefgvr';
 
 /** The first line of the banner that opens the hand-written half. */
 const MARKER = 'Aux convenience aliases.';

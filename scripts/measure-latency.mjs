@@ -11,7 +11,7 @@ const time = async (label, fn, n = 8) => {
   console.log(`  ${label.padEnd(30)} min ${String(t[0]).padStart(4)}ms   median ${String(t[Math.floor(n/2)]).padStart(4)}ms   max ${String(t[n-1]).padStart(4)}ms`);
 };
 
-console.log('\n  Region: ap-southeast-2 (Sydney). Measuring from this machine.\n');
+console.log('\n  Region: ap-south-1 (Mumbai). Measuring from this machine.\n');
 await time('server_time_ms RPC', () => c.rpc('server_time_ms'));
 await time('SELECT on lounges (RLS)', () => c.from('lounges').select('id').limit(1));
 

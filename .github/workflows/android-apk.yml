@@ -33,8 +33,8 @@ jobs:
       # Public by design: the anon key is meant to ship inside the app, and RLS is
       # what protects the data. The YouTube key and Spotify secret are NOT here —
       # those are Edge Function secrets and never reach the client bundle.
-      EXPO_PUBLIC_SUPABASE_URL: https://figkjbunwqmbjisoajxe.supabase.co
-      EXPO_PUBLIC_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZpZ2tqYnVud3FtYmppc29hanhlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODczNzMzOTksImV4cCI6MjEwMjk0OTM5OX0.IScMnGpWF_a3cIOfsZ4xrF0pyD4lKarMjnyzrztBl3A
+      EXPO_PUBLIC_SUPABASE_URL: https://atdusjfidswqrkuefgvr.supabase.co
+      EXPO_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_mu_kqNJaYm95Gp1aaiK-oQ_in0SPlUw
 
     steps:
       - uses: actions/checkout@v7
@@ -56,6 +56,27 @@ jobs:
 
       - name: Typecheck
         run: npx tsc --noEmit
+
+      # Every build used to report versionCode 1, which left the app no way to
+      # tell one build from another — so the in-app updater had nothing to
+      # compare and Android saw no build as newer than any other.
+      #
+      # The run number is monotonic per workflow, which is exactly the property
+      # versionCode needs. Written into app.json BEFORE prebuild, because
+      # prebuild is what generates the Gradle config that carries it. The edit
+      # is never committed; it exists only for this run.
+      - name: Stamp the build number
+        id: stamp
+        run: |
+          node -e "
+            const fs = require('fs');
+            const app = JSON.parse(fs.readFileSync('app.json', 'utf8'));
+            app.expo.android = app.expo.android ?? {};
+            app.expo.android.versionCode = Number(process.env.GITHUB_RUN_NUMBER);
+            fs.writeFileSync('app.json', JSON.stringify(app, null, 2) + '\n');
+          "
+          echo "versionCode=$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "Stamped versionCode $GITHUB_RUN_NUMBER"
 
       # Generates android/ from app.json. Not committed — it is regenerated every
       # run, so app.json stays the single source of truth for native config.
@@ -120,6 +141,28 @@ jobs:
           # file that lands in Downloads is always aux-latest.apk and simply
           # overwrites the previous one.
           cp "${{ steps.rename.outputs.path }}" aux-latest.apk
+
+          # What the in-app updater reads to decide whether a newer build
+          # exists. Published as a release ASSET rather than read through the
+          # API, because unauthenticated API calls are capped at 60/hour per IP
+          # and asset downloads are not — a phone checking for updates must
+          # never be rate-limited into thinking it is current.
+          node -e "
+            const fs = require('fs');
+            const app = JSON.parse(fs.readFileSync('app.json', 'utf8')).expo;
+            fs.writeFileSync('build-info.json', JSON.stringify({
+              versionCode: Number(process.env.GITHUB_RUN_NUMBER),
+              versionName: app.version,
+              patch: app.extra?.patch ?? 0,
+              commit: (process.env.GITHUB_SHA ?? '').slice(0, 7),
+              builtAt: new Date().toISOString(),
+              apk: 'aux-latest.apk',
+              sizeBytes: fs.statSync('aux-latest.apk').size,
+              notes: app.extra?.changelog?.[0]?.notes ?? [],
+            }, null, 2) + '\n');
+          "
+          cat build-info.json
+
           gh release delete latest --yes --cleanup-tag 2>/dev/null || true
           gh release create latest             --title "aux — latest build"             --notes "Built from ${GITHUB_SHA::7} on $(date -u '+%Y-%m-%d %H:%M UTC').
 
@@ -127,4 +170,4 @@ jobs:
           is always the newest build.
 
           **Delete any older aux-*.apk from your phone's Downloads first** —
-          Android keeps both and it is easy to install the wrong file."             aux-latest.apk
+          Android keeps both and it is easy to install the wrong file."             aux-latest.apk build-info.json
