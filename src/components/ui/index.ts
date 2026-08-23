@@ -7,10 +7,35 @@ export { BLURHASH_SURFACE } from '@/components/ui/blurhash';
 export { Avatar, type AvatarProps } from '@/components/ui/avatar';
 export {
   AuxButton,
+  PillButton,
+  type AuxButtonAlign,
   type AuxButtonProps,
+  type AuxButtonShape,
   type AuxButtonSize,
   type AuxButtonVariant,
+  type PillButtonProps,
 } from '@/components/ui/aux-button';
+/*
+  `Chip` is also the name of the metrics token in '@/lib/theme' — the same
+  collision `Rule` has below. A file wanting both should alias the token:
+  `import { Chip as ChipMetrics } from '@/lib/theme'`, which is what
+  'chip.tsx' itself does.
+*/
+export {
+  Chip,
+  ChipRow,
+  type ChipItem,
+  type ChipProps,
+  type ChipRole,
+  type ChipRowProps,
+  type ChipRowVariant,
+} from '@/components/ui/chip';
+export {
+  CircleIconButton,
+  type CircleIconButtonProps,
+  type CircleIconButtonSize,
+  type CircleIconButtonTone,
+} from '@/components/ui/circle-icon-button';
 export { EmptyState, type EmptyStateProps } from '@/components/ui/empty-state';
 export {
   GlassCard,
@@ -19,6 +44,12 @@ export {
   type PanelProps,
 } from '@/components/ui/glass-card';
 export { LivePulse, type LivePulseProps } from '@/components/ui/live-pulse';
+export {
+  PhotoCard,
+  type PhotoCardCorners,
+  type PhotoCardProps,
+  type PhotoCardRadius,
+} from '@/components/ui/photo-card';
 export { ProgressBar, type ProgressBarProps } from '@/components/ui/progress-bar';
 /*
   `Rule` is also the name of the weight table in '@/lib/theme'. A file that wants
@@ -34,6 +65,12 @@ export {
   type SheetTabsVariant,
 } from '@/components/ui/sheet-tabs';
 export { Skeleton, type SkeletonProps } from '@/components/ui/skeleton';
+export {
+  StatusPill,
+  type StatusPillProps,
+  type StatusPillSize,
+  type StatusPillTone,
+} from '@/components/ui/status-pill';
 export { TextField, type TextFieldProps } from '@/components/ui/text-field';
 export {
   ToastProvider,

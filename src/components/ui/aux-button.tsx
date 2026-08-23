@@ -11,11 +11,23 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { useColors } from '@/lib/theme-context';
-import { Duration, Fonts, Radius, Rule, Space, tracking, Type, type Palette } from '@/lib/theme';
+import {
+  Duration,
+  Fonts,
+  Radii,
+  Radius,
+  Rule,
+  Space,
+  tracking,
+  Type,
+  type Palette,
+} from '@/lib/theme';
 
 /**
- * Patchbay has four button shapes, all with square corners and a left-aligned
- * label:
+ * Aux has five button tones. Every one of them defaults to the house corner
+ * and a flush-left label; `shape="pill"` and `align="center"` are the two
+ * overrides the photo-forward screens want, and `PillButton` at the bottom of
+ * this file is that pair pre-applied.
  *
  * - `live`        — accent fill, `onLive` label. The reserved colour: Join,
  *                   Play, Go live, Take the aux, Start a Session.
@@ -24,11 +36,15 @@ import { Duration, Fonts, Radius, Rule, Space, tracking, Type, type Palette } fr
  * - `bordered`    — 1px `rule3` on nothing, ink label. Every non-accent action.
  * - `ghost`       — no border at all, ink2 label.
  * - `danger`      — destructive fill.
+ * - `cream`       — the inverted card, as a button: `cream` fill, `onCream`
+ *                   label. One per screen, like the cream card it belongs to —
+ *                   it is the loudest thing on a screen that is not the accent,
+ *                   so a second one cancels the first.
  *
  * The old names are still accepted so no call site had to change: `accent` is
- * `live` and `primary` is `bordered` — there is no filled non-accent button in
- * this direction, because a second fill would compete with the one colour that
- * means live.
+ * `live` and `primary` is `bordered`. `cream` is the only non-accent fill, and
+ * it earns that by being a different VALUE rather than a second hue — another
+ * colour here would compete with the one that means live.
  */
 export type AuxButtonVariant =
   | 'live'
@@ -36,12 +52,13 @@ export type AuxButtonVariant =
   | 'bordered'
   | 'ghost'
   | 'danger'
+  | 'cream'
   /** @deprecated alias for `live`. */
   | 'accent'
   /** @deprecated alias for `bordered`. */
   | 'primary';
 
-type ResolvedVariant = 'live' | 'liveOutline' | 'bordered' | 'ghost' | 'danger';
+type ResolvedVariant = 'live' | 'liveOutline' | 'bordered' | 'ghost' | 'danger' | 'cream';
 
 const ALIASES: Record<AuxButtonVariant, ResolvedVariant> = {
   live: 'live',
@@ -49,17 +66,24 @@ const ALIASES: Record<AuxButtonVariant, ResolvedVariant> = {
   bordered: 'bordered',
   ghost: 'ghost',
   danger: 'danger',
+  cream: 'cream',
   accent: 'live',
   primary: 'bordered',
 };
 
-export type AuxButtonSize = 'sm' | 'md' | 'lg';
+export type AuxButtonSize = 'sm' | 'md' | 'lg' | 'xl';
+export type AuxButtonShape = 'square' | 'pill';
+export type AuxButtonAlign = 'left' | 'center';
 
 export type AuxButtonProps = {
   label: string;
   onPress: () => void;
   variant?: AuxButtonVariant;
   size?: AuxButtonSize;
+  /** `pill` rounds the cell fully; the default keeps the house 24px corner. */
+  shape?: AuxButtonShape;
+  /** `center` centres the icon + label group; the default keeps them flush left. */
+  align?: AuxButtonAlign;
   icon?: LucideIcon;
   loading?: boolean;
   disabled?: boolean;
@@ -113,6 +137,23 @@ function skinFor(v: ResolvedVariant, C: Palette): Skin {
         borderPress: C.danger,
         shout: true,
       };
+    case 'cream':
+      /*
+        There is no second cream in the palette — `onCream2` is the only
+        companion value and it is a text colour, so easing the fill towards it
+        would flip the cell dark mid-press. Cream presses by drawing its own
+        hairline IN instead: the border is already sitting there at 1px on every
+        variant (see `styles.base`), so the ring costs no layout and reads as
+        the cell being gripped rather than recoloured.
+      */
+      return {
+        bg: C.cream,
+        bgPress: C.cream,
+        fg: C.onCream,
+        border: CLEAR,
+        borderPress: C.onCream2,
+        shout: true,
+      };
     case 'ghost':
       return {
         bg: CLEAR,
@@ -136,9 +177,12 @@ function skinFor(v: ResolvedVariant, C: Palette): Skin {
 }
 
 /**
- * Two heights only — 46 for a control that sits inside a row or a header, 52 for
- * a screen's primary action. `lg` is kept as an alias of `md` so the old
- * three-size call sites still compile.
+ * Three heights — 46 for a control that sits inside a row or a header, 52 for a
+ * screen's primary action, 56 for the one hero button a screen is allowed. `lg`
+ * is kept as an alias of `md` so the old three-size call sites still compile.
+ *
+ * `xl` is the only step that also opens the padding out: at 56 tall the `lg`
+ * gutter leaves the label sitting too close to a pill's curve.
  */
 const SIZES: Record<
   AuxButtonSize,
@@ -147,6 +191,7 @@ const SIZES: Record<
   sm: { minHeight: 46, paddingHorizontal: Space.lg, gap: Space.sm, icon: 15, font: 11 },
   md: { minHeight: 52, paddingHorizontal: Space.lg, gap: Space.sm, icon: 18, font: 13 },
   lg: { minHeight: 52, paddingHorizontal: Space.xl, gap: Space.md, icon: 20, font: 13 },
+  xl: { minHeight: 56, paddingHorizontal: Space.xxl, gap: Space.md, icon: 20, font: 14 },
 };
 
 export function AuxButton({
@@ -154,6 +199,8 @@ export function AuxButton({
   onPress,
   variant = 'bordered',
   size = 'md',
+  shape = 'square',
+  align = 'left',
   icon: Icon,
   loading = false,
   disabled = false,
@@ -216,6 +263,7 @@ export function AuxButton({
     <Animated.View
       style={[
         styles.base,
+        shape === 'pill' && styles.pill,
         animated,
         { minHeight: s.minHeight },
         fullWidth && styles.fullWidth,
@@ -231,6 +279,7 @@ export function AuxButton({
         onPressOut={onPressOut}
         style={[
           styles.hit,
+          align === 'center' && styles.hitCenter,
           { minHeight: s.minHeight, paddingHorizontal: s.paddingHorizontal, gap: s.gap },
         ]}>
         {loading ? (
@@ -239,12 +288,26 @@ export function AuxButton({
           <Icon size={s.icon} strokeWidth={2} color={skin.fg} />
         ) : null}
 
-        <Text numberOfLines={1} style={[labelStyle, { color: skin.fg }]}>
+        <Text numberOfLines={1} style={[styles.label, labelStyle, { color: skin.fg }]}>
           {label}
         </Text>
       </Pressable>
     </Animated.View>
   );
+}
+
+/**
+ * The full-width hero button: a centred label in a fully rounded 56px cell.
+ *
+ * The four layout props are omitted rather than defaulted, because a
+ * `PillButton` that could be handed `shape="square"` is just `AuxButton` with
+ * extra steps. `variant` stays open — the hero on one screen is `live`, on the
+ * next it is `cream`.
+ */
+export type PillButtonProps = Omit<AuxButtonProps, 'shape' | 'align' | 'size' | 'fullWidth'>;
+
+export function PillButton(props: PillButtonProps) {
+  return <AuxButton {...props} shape="pill" align="center" size="xl" fullWidth />;
 }
 
 const styles = StyleSheet.create({
@@ -254,12 +317,30 @@ const styles = StyleSheet.create({
     borderWidth: Rule.hair,
     alignSelf: 'flex-start',
   },
+  /**
+   * Only ever paired with `base`, never instead of it, so the 1px border and
+   * its layout guarantee survive the rounding.
+   */
+  pill: {
+    borderRadius: Radii.pill,
+  },
   hit: {
     flexDirection: 'row',
     alignItems: 'center',
     // Labels are flush left, the way every button in the prototype sets them —
     // the gutter, not the centre line, is what this design aligns to.
     justifyContent: 'flex-start',
+  },
+  hitCenter: {
+    justifyContent: 'center',
+  },
+  /*
+    Lets a long label truncate inside a constrained button instead of running
+    past its right edge. Invisible on the default `alignSelf: 'flex-start'`
+    button, which is already exactly as wide as its content.
+  */
+  label: {
+    flexShrink: 1,
   },
   fullWidth: {
     alignSelf: 'stretch',

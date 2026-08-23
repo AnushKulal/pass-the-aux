@@ -17,7 +17,7 @@
 
 import { BlurView } from 'expo-blur';
 import { Compass, Radio, User, type LucideIcon } from 'lucide-react-native';
-import { memo } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
@@ -105,7 +105,22 @@ type CellProps = {
 const DockCell = memo(function DockCell({ icon: Icon, label, focused, onPress }: CellProps) {
   const C = useColors();
   const reduced = useReducedMotion();
+  const [held, setHeld] = useState(false);
   const press = useSharedValue(1);
+
+  /**
+   * The shared value is driven from an effect rather than written straight out
+   * of the press handler.
+   *
+   * The React Compiler is enabled on this project, and `react-hooks/immutability`
+   * treats a handler body as render-phase — so mutating `press.value` there is a
+   * lint error, not merely a style preference. `AuxButton` and
+   * `CircleIconButton` both resolve it this way; matching them keeps one press
+   * pattern across the app.
+   */
+  useEffect(() => {
+    press.value = withTiming(held && !reduced ? 0.9 : 1, { duration: Duration.press });
+  }, [held, reduced, press]);
 
   const animated = useAnimatedStyle(() => ({ transform: [{ scale: press.value }] }));
 
@@ -115,12 +130,8 @@ const DockCell = memo(function DockCell({ icon: Icon, label, focused, onPress }:
       accessibilityState={{ selected: focused }}
       accessibilityLabel={label}
       onPress={onPress}
-      onPressIn={() => {
-        press.value = reduced ? 1 : withTiming(0.9, { duration: Duration.press });
-      }}
-      onPressOut={() => {
-        press.value = withTiming(1, { duration: Duration.press });
-      }}>
+      onPressIn={() => setHeld(true)}
+      onPressOut={() => setHeld(false)}>
       <Animated.View
         style={[
           styles.cell,
