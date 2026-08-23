@@ -18,9 +18,9 @@ on:
       branch:
         description: Update branch (must match the build's channel)
         required: true
-        default: preview
+        default: production
         type: choice
-        options: [preview, development, production]
+        options: [production, preview, development]
 
 concurrency:
   group: ota-${{ github.ref }}
