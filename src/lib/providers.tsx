@@ -33,6 +33,7 @@ import { StyleSheet, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { UpdatePrompt } from '@/components/shell/update-prompt';
 import { ToastProvider } from '@/components/ui';
 import { AuthProvider, useAuth } from '@/lib/auth';
 import { queryClient } from '@/lib/query';
@@ -243,7 +244,15 @@ export function Providers({ children }: { children: ReactNode }) {
           <QueryClientProvider client={queryClient}>
             <AuthProvider>
               <LocalProfileProvider>
-                <ToastProvider>{children}</ToastProvider>
+                <ToastProvider>
+                  {children}
+                  {/*
+                    Last sibling, so it paints above everything including the tab
+                    bar. Inside ToastProvider because it is chrome, not a screen
+                    — it has to survive navigation rather than unmount with it.
+                  */}
+                  <UpdatePrompt />
+                </ToastProvider>
               </LocalProfileProvider>
             </AuthProvider>
           </QueryClientProvider>

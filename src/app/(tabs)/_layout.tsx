@@ -5,9 +5,10 @@
  * the 54px tab bar pinned to the bottom of that column — so the bar starts
  * where the rail's rule ends rather than running under it.
  *
- * Both the rail and the bar are gated on the profile being finished. Until it
- * is, neither renders at all: an unfinished profile gets the screen it is on
- * and nothing to navigate with. That is the design's gate, not a loading state.
+ * The profile gate is enforced by REDIRECTING to profile-setup, not by hiding
+ * the rail and bar in place. Hiding them alone left a signed-in user on an
+ * empty Feed with no navigation and no route to the screen that would satisfy
+ * the gate — unrecoverable without reinstalling. A gate has to lead somewhere.
  */
 
 import { Redirect } from 'expo-router';
@@ -99,7 +100,6 @@ function PatchbayTabBar({ state, navigation }: BottomTabBarProps) {
 }
 
 const renderTabBar = (props: BottomTabBarProps) => <PatchbayTabBar {...props} />;
-const renderNoTabBar = () => null;
 
 export default function TabsLayout() {
   const C = useColors();
@@ -119,12 +119,22 @@ export default function TabsLayout() {
   if (loading || gateHydrating) return null;
   if (!session) return <Redirect href="/(auth)/intro" />;
 
+  /**
+   * Send the user to the gate rather than merely hiding the chrome behind it.
+   *
+   * Hiding the rail and tab bar without redirecting left a signed-in user on an
+   * empty Feed with no navigation and no route to the screen that satisfies the
+   * gate — a dead end with no way out but reinstalling. The gate only works if
+   * something actually takes you to it.
+   */
+  if (!profileDone) return <Redirect href="/(auth)/profile-setup" />;
+
   return (
     <View style={[styles.shell, { backgroundColor: C.bg }]}>
-      {profileDone ? <LoungeRail /> : null}
+      <LoungeRail />
       <View style={styles.column}>
         <Tabs
-          tabBar={profileDone ? renderTabBar : renderNoTabBar}
+          tabBar={renderTabBar}
           screenOptions={{
             // Each tab screen renders its own header.
             headerShown: false,
