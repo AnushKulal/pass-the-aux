@@ -37,19 +37,19 @@ jobs:
       EXPO_PUBLIC_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZpZ2tqYnVud3FtYmppc29hanhlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODczNzMzOTksImV4cCI6MjEwMjk0OTM5OX0.IScMnGpWF_a3cIOfsZ4xrF0pyD4lKarMjnyzrztBl3A
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17
 
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
 
       - name: Install dependencies
         run: npm ci
@@ -96,7 +96,7 @@ jobs:
           echo "path=$OUT" >> "$GITHUB_OUTPUT"
           ls -la "$OUT"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: aux-apk
           path: ${{ steps.rename.outputs.path }}
