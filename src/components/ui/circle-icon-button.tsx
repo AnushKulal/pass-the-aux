@@ -45,7 +45,7 @@ import {
   Space,
   TOUCH_TARGET,
   Type,
-  glowShadow,
+  bloom,
   type Palette,
 } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
@@ -175,7 +175,7 @@ export function CircleIconButton({
 
     (The direct write this replaced lints clean only by accident: the old
     worklet closed over `reduced`, which made the compiler bail on the whole
-    component and take `react-hooks/immutability` down with it. `NavDock` does
+    component and take `react-hooks/immutability` down with it. The old dock did
     the same write with a worklet that captures nothing, and still errors.)
   */
   const [held, setHeld] = useState(false);
@@ -242,9 +242,10 @@ export function CircleIconButton({
           styles.circle,
           animated,
           { width: size, height: size, backgroundColor: skin.bg },
-          /* The bloom scales with the button: a 24px radius that reads as
-             ambient light at 44 reads as a smudge at 72. */
-          skin.glow ? glowShadow(C.glow, Math.round(size / 2)) : null,
+          /* The bloom scales with the button: a blur that reads as ambient
+             light at 72 reads as fog at 36. Same helper as the play circle and
+             the Session artwork, so one light lights the whole app. */
+          skin.glow ? bloom(C.glow, size >= 72 ? 'lg' : size >= 48 ? 'md' : 'sm') : null,
         ]}>
         <Icon size={GLYPH[size]} strokeWidth={2} color={skin.fg} />
       </Animated.View>

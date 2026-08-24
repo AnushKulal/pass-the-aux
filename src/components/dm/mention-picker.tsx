@@ -24,7 +24,7 @@ import { memo, useMemo } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View, type ListRenderItemInfo } from 'react-native';
 
 import { Avatar } from '@/components/ui';
-import { Fonts, Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
+import { Fonts, Radii, Rule, Space, TOUCH_TARGET, Type, dropped, tracking } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
 /**
@@ -124,7 +124,7 @@ export type MentionPickerProps = {
   /** The token from `findMentionQuery`. */
   token: string;
   onPick: (person: MentionCandidate) => void;
-  /** The kicker, e.g. `IN THIS LOUNGE`, `IN THIS SESSION`. */
+  /** The kicker, e.g. `In this lounge`, `In this Session`. */
   scopeLabel?: string;
   /** Overrides the four-row cap where a screen has more or less room. */
   maxHeight?: number;
@@ -145,7 +145,7 @@ function MentionRowBase({ person, onPick }: RowProps) {
       onPress={() => onPick(person)}
       style={({ pressed }) => [
         styles.row,
-        { borderTopColor: C.ruleSoft, backgroundColor: pressed ? C.surface : 'transparent' },
+        { borderTopColor: C.ruleSoft, backgroundColor: pressed ? C.surface2 : 'transparent' },
       ]}>
       <Avatar uri={person.avatarUrl} name={person.displayName} size={AVATAR} />
 
@@ -160,7 +160,7 @@ function MentionRowBase({ person, onPick }: RowProps) {
         ) : null}
       </View>
 
-      <Text numberOfLines={1} style={[styles.handle, { color: C.liveText }]}>
+      <Text numberOfLines={1} style={[styles.handle, { color: C.ink2 }]}>
         @{person.handle}
       </Text>
     </Pressable>
@@ -173,7 +173,7 @@ export function MentionPicker({
   people,
   token,
   onPick,
-  scopeLabel = 'IN THIS CONVERSATION',
+  scopeLabel = 'In this conversation',
   maxHeight = MAX_HEIGHT,
 }: MentionPickerProps) {
   const C = useColors();
@@ -188,13 +188,16 @@ export function MentionPicker({
   );
 
   return (
-    <View style={[styles.dock, { backgroundColor: C.bgRecessed, borderTopColor: C.rule }]}>
+    <View
+      style={[
+        styles.dock,
+        { backgroundColor: C.surface, borderTopColor: C.rule },
+        dropped(C, 'md'),
+      ]}>
       <View style={styles.head}>
-        <Text style={[styles.scope, { color: C.liveText }]}>{scopeLabel}</Text>
-        <Text
-          accessibilityLiveRegion="polite"
-          style={[styles.count, { color: C.ink3 }]}>
-          {matches.length} {matches.length === 1 ? 'MATCH' : 'MATCHES'}
+        <Text style={[styles.scope, { color: C.ink3 }]}>{scopeLabel}</Text>
+        <Text accessibilityLiveRegion="polite" style={[styles.count, { color: C.ink3 }]}>
+          {matches.length} {matches.length === 1 ? 'match' : 'matches'}
         </Text>
       </View>
 
@@ -222,18 +225,22 @@ const styles = StyleSheet.create({
     flexGrow: 0,
     flexShrink: 0,
     borderTopWidth: Rule.hair,
+    borderTopLeftRadius: Radii.lg,
+    borderTopRightRadius: Radii.lg,
+    overflow: 'hidden',
   },
   head: {
     flexDirection: 'row',
     alignItems: 'baseline',
     justifyContent: 'space-between',
     gap: Space.sm,
-    paddingHorizontal: Space.md,
-    paddingTop: Space.sm,
-    paddingBottom: Space.xs,
+    paddingHorizontal: Space.lg,
+    paddingTop: Space.md,
+    paddingBottom: Space.sm,
   },
   scope: {
-    ...Type.label(10),
+    ...Type.label(10.5),
+    letterSpacing: tracking(10.5, 0.15),
   },
   count: {
     /*
@@ -250,7 +257,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 9,
-    paddingHorizontal: Space.md,
+    paddingHorizontal: Space.lg,
     height: ROW_HEIGHT,
     // Over the 44px floor, and `getItemLayout` above depends on it being fixed.
     minHeight: TOUCH_TARGET,
@@ -271,8 +278,9 @@ const styles = StyleSheet.create({
     letterSpacing: tracking(10, 0.09),
   },
   handle: {
-    ...Type.heading(11),
-    letterSpacing: tracking(11, 0.04),
+    fontFamily: Fonts.semibold,
+    fontSize: 12,
+    lineHeight: 16,
     flexShrink: 0,
   },
 });

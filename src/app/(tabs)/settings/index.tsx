@@ -1,12 +1,44 @@
+/**
+ * Settings. Design canvas: `data-screen-label="Settings"`.
+ *
+ * Kicker, then cards. The theme switcher is a recessed well with three raised
+ * segments; the update card carries its own notes and its own button; every
+ * other setting is a raised row of TITLE + VALUE.
+ *
+ * `Row` has no `detail` prop, deliberately. It used to require one, which is
+ * how every setting on this screen ended up with a sentence under it.
+ *
+ * FOUR STATES, scoped to the block that actually has data behind it. Appearance
+ * and Software update answer instantly and are never blanked; ACCOUNTS is the
+ * only block waiting on a network read, so it carries the states:
+ *   loading   two row-shaped skeletons
+ *   error     one row that names the failure and retries on press
+ *   empty     signed in with no profile row — the one action that makes one
+ *   ready     Spotify and YouTube with their real values
+ */
+
 import { Redirect, router } from 'expo-router';
-import { ArrowLeft, ChevronRight, Mic, Monitor, Moon, Sun } from 'lucide-react-native';
-import type { LucideIcon } from 'lucide-react-native';
-import { useCallback, useState, type ReactNode } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeInDown, useReducedMotion } from 'react-native-reanimated';
+import { ChevronLeft, ChevronRight } from 'lucide-react-native';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  type TextStyle,
+} from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useToast } from '@/components/ui';
+import { Skeleton, useToast } from '@/components/ui';
+import { useProfile } from '@/features/profile/queries';
 import {
   checkForNewApk,
   downloadAndInstallApk,
@@ -15,46 +47,78 @@ import {
   type ApkCheck,
 } from '@/lib/apk-updates';
 import { useAuth } from '@/lib/auth';
-import { Duration, Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
+import {
+  Duration,
+  Fonts,
+  Radii,
+  Space,
+  TOUCH_TARGET,
+  Type,
+  dropped,
+  pressed as pressedWell,
+  raised,
+  tracking,
+} from '@/lib/theme';
 import type { ThemeChoice } from '@/lib/theme';
 import { useColors, useTheme } from '@/lib/theme-context';
 import { useUpdates } from '@/lib/updates';
 
-/** Settings rows are full-bleed; only their contents are inset. */
-const GUTTER = 12;
-const CELL = 52;
+const CARD_GUTTER = 20;
+const TEXT_GUTTER = 24;
 
-const APPEARANCE: { key: ThemeChoice; label: string; icon: LucideIcon }[] = [
-  { key: 'dark', label: 'DARK', icon: Moon },
-  { key: 'light', label: 'LIGHT', icon: Sun },
-  { key: 'system', label: 'SYSTEM', icon: Monitor },
+const BACK_TILE = 38;
+const BACK_SLOP = { top: 3, bottom: 3, left: 6, right: 6 };
+/** A row is 15 + 18 line + 15. The skeleton has to match it exactly. */
+const ROW_HEIGHT = TOUCH_TARGET + Space.xs;
+
+const SEGMENTS: { key: ThemeChoice; label: string }[] = [
+  { key: 'dark', label: 'DARK' },
+  { key: 'light', label: 'LIGHT' },
+  { key: 'system', label: 'SYSTEM' },
 ];
+
+/** `Type.readout()` hands back a readonly tuple; `TextStyle` wants a mutable one. */
+const readout = (size: number): TextStyle => ({
+  ...Type.readout(size),
+  fontVariant: ['tabular-nums'],
+});
 
 export default function SettingsScreen() {
   const C = useColors();
   const reduced = useReducedMotion();
   const toast = useToast();
-  const { session, profile, loading } = useAuth();
+  const { session, profile, loading, refreshProfile } = useAuth();
   // The control surface for the whole theming system. Everything that calls
   // `useColors()` is downstream of this one setter.
   const { choice, setChoice } = useTheme();
 
+  /*
+    The same cache entry AuthProvider already holds — identical key, identical
+    options, so no second request. The context hands over the row and a coarse
+    `loading`; the FAILURE only exists here, and without it the Accounts block
+    would report "Not linked" to someone whose profile simply did not arrive.
+  */
+  const profileQuery = useProfile(session?.user.id);
+
   /**
    * The same update state the sheet reads. This screen is the recovery path:
-   * dismissing the sheet hides it without discarding the update, so an "Update
-   * now" waved away at a bad moment is still here afterwards.
+   * dismissing the sheet hides it without discarding the update.
    */
   const update = useUpdates();
 
   /**
-   * The APK half, kept local because this screen is the only place it appears.
-   *
-   * Checked on demand rather than on mount: it is a network call for a 50MB
-   * artefact most people will not want, and doing it automatically would spend
-   * someone's mobile data to answer a question they did not ask.
+   * The APK half, checked on demand rather than on mount: it is a network call
+   * for a 50MB artefact, and doing it automatically would spend someone's
+   * mobile data to answer a question they did not ask.
    */
   const [apk, setApk] = useState<ApkCheck | null>(null);
   const [apkBusy, setApkBusy] = useState<'idle' | 'checking' | 'downloading'>('idle');
+
+  const enter = useSharedValue(0);
+  useEffect(() => {
+    enter.value = reduced ? 1 : withTiming(1, { duration: Duration.enter });
+  }, [reduced, enter]);
+  const enterStyle = useAnimatedStyle(() => ({ opacity: enter.value }));
 
   const runApkCheck = useCallback(async () => {
     setApkBusy('checking');
@@ -67,289 +131,272 @@ export default function SettingsScreen() {
     setApkBusy('downloading');
     try {
       await downloadAndInstallApk(apk.latest);
-      // Android's installer has taken over. Nothing to report — if the user
-      // accepts, this process is replaced; if they decline, they are simply
-      // back here with the build still available.
+      // Android's installer has taken over. Nothing to report.
     } catch {
-      toast.show('Could not download the build. Check your connection and try again.', 'error');
+      toast.show('Could not download the build.', 'error');
     } finally {
       setApkBusy('idle');
     }
   }, [apk, toast]);
 
+  const retryProfile = useCallback(() => {
+    void refreshProfile();
+  }, [refreshProfile]);
+
   // This screen sits outside both guarded groups, so a deep link can land here
   // signed out.
   if (!loading && !session) return <Redirect href="/(auth)/sign-in" />;
 
-  /* ---------------------------------------------------------- update copy */
-
-  const fixesPending = update.pending.notes.length + update.pending.hidden;
+  const fixes = update.pending.notes.length + update.pending.hidden;
 
   const updateTitle = update.isAvailable
     ? update.status === 'applying'
       ? 'Restarting…'
-      : 'Update ready to install'
+      : 'Update ready'
     : update.status === 'checking'
       ? 'Checking…'
       : update.status === 'error'
-        ? 'Could not reach the update server'
+        ? 'Check failed'
         : update.confirmedCurrent
-          ? 'You are up to date'
+          ? 'Up to date'
           : 'Check for updates';
 
-  /**
-   * Patch 0 means a build made before patches were numbered, so there is no
-   * honest version to report — saying "on patch 0" would invent one.
-   */
-  const onPatch =
-    update.currentPatch > 0
-      ? `On patch ${update.currentPatch}`
-      : 'Version not tracked on this build';
+  /*
+    On a failed check the meta line is the only place that can say WHY, so it
+    stops reporting the installed patch and names the fault instead. The button
+    below it is the fix, which is why this stays one clause.
+  */
+  const updateMeta = update.isAvailable
+    ? `${update.pending.patchCount} ${update.pending.patchCount === 1 ? 'patch' : 'patches'} · ${fixes} ${fixes === 1 ? 'fix' : 'fixes'}`
+    : update.status === 'error'
+      ? 'Could not reach the update server.'
+      : update.currentPatch > 0
+        ? `Patch ${update.currentPatch}`
+        : 'Untracked build';
 
-  const updateDetail = update.isAvailable
-    ? `${update.pending.patchCount} ${update.pending.patchCount === 1 ? 'patch' : 'patches'} waiting · ${fixesPending} ${fixesPending === 1 ? 'fix' : 'fixes'}`
-    : onPatch;
-
-  /* ------------------------------------------------------------- apk copy */
+  const updateAction = update.isAvailable
+    ? update.status === 'applying'
+      ? 'Restarting…'
+      : 'Update now'
+    : update.status === 'checking'
+      ? 'Checking…'
+      : 'Check now';
 
   const installedBuild = installedVersionCode();
-
-  const apkTitle =
+  const apkValue =
     apkBusy === 'downloading'
-      ? 'Downloading the new build…'
+      ? 'Downloading…'
       : apkBusy === 'checking'
         ? 'Checking…'
         : apk?.kind === 'available'
-          ? 'A new build is ready to install'
+          ? `Build ${apk.latest.versionCode} · ${formatBytes(apk.latest.sizeBytes)}`
           : apk?.kind === 'current'
-            ? 'You have the newest build'
+            ? 'Up to date'
             : apk?.kind === 'error'
-              ? apk.message
+              ? 'Check failed'
               : apk?.kind === 'unsupported'
-                ? 'Installing builds is Android only'
-                : 'Check for a new build';
+                ? 'Android only'
+                : installedBuild > 0
+                  ? `Build ${installedBuild}`
+                  : 'Check';
 
-  const apkDetail =
-    apk?.kind === 'available'
-      ? `Build ${apk.latest.versionCode} · ${formatBytes(apk.latest.sizeBytes)} · replaces this one`
-      : installedBuild > 0
-        ? `Build ${installedBuild} installed`
-        : 'Build number unavailable';
-
-  const spotifyDetail = !profile?.spotify_linked
-    ? 'Not linked — playing via YouTube'
+  const spotifyValue = !profile?.spotify_linked
+    ? 'Not linked'
     : profile.is_premium
-      ? 'Linked · Premium — playing via Spotify'
-      : 'Linked · free — playing via YouTube';
+      ? 'Premium · linked'
+      : 'Free · linked';
+
+  const accounts: 'loading' | 'error' | 'empty' | 'ready' = profile
+    ? 'ready'
+    : loading
+      ? 'loading'
+      : profileQuery.isError
+        ? 'error'
+        : 'empty';
 
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={[styles.root, { backgroundColor: C.bg }]}>
-      <Animated.View
-        style={styles.flex}
-        entering={
-          reduced
-            ? undefined
-            : FadeInDown.duration(Duration.enter).withInitialValues({
-                opacity: 0,
-                transform: [{ translateY: 8 }],
-              })
-        }>
-        <ScrollView
-          contentContainerStyle={styles.content}
-          showsVerticalScrollIndicator={false}>
-          <BackChip
-            label="YOU"
-            onPress={() => {
-              if (router.canGoBack()) router.back();
-              else router.replace('/(tabs)/profile');
-            }}
-          />
-          <Text style={[styles.screenTitle, { color: C.ink, borderBottomColor: C.rule }]}>
-            Settings
-          </Text>
-
-          {/* ------------------------------------------------- software update */}
-          <Kicker>SOFTWARE UPDATE</Kicker>
-          <Row
-            leading={
-              <Tile>{update.currentPatch > 0 ? `P${update.currentPatch}` : '—'}</Tile>
-            }
-            title={updateTitle}
-            detail={updateDetail}
-            capped
-            trailing={
-              update.isAvailable ? (
-                <AccentChip>{update.status === 'applying' ? 'WAIT' : 'UPDATE NOW'}</AccentChip>
-              ) : update.status === 'checking' ? (
-                <ActivityIndicator size="small" color={C.ink2} />
-              ) : (
-                <Text style={[styles.checkLabel, { color: C.ink2 }]}>CHECK</Text>
-              )
-            }
-            onPress={
-              update.isAvailable ? () => void update.apply() : () => void update.check(true)
-            }
-          />
-
-          {/*
-            The same notes the sheet shows, for the user who dismissed it and
-            came here to find out what they turned down.
-          */}
-          {update.isAvailable && update.pending.notes.length > 0 ? (
-            <View style={[styles.updateNotes, { borderBottomColor: C.rule }]}>
-              <Text style={[styles.updateNotesKicker, { color: C.ink3 }]}>
-                {update.pending.patchCount > 1
-                  ? `IN THE LAST ${update.pending.patchCount} PATCHES`
-                  : 'IN THIS PATCH'}
-              </Text>
-              {update.pending.notes.map((note) => (
-                <View key={note} style={styles.updateNote}>
-                  <View style={[styles.updateNoteMark, { backgroundColor: C.ink3 }]} />
-                  <Text style={[styles.updateNoteText, { color: C.ink2 }]}>{note}</Text>
-                </View>
-              ))}
-              {update.pending.hidden > 0 ? (
-                <Text style={[styles.updateMore, { color: C.ink3 }]}>
-                  {`+${update.pending.hidden} more ${update.pending.hidden === 1 ? 'fix' : 'fixes'}`}
-                </Text>
-              ) : null}
-            </View>
-          ) : null}
-
-          {/*
-            The other kind of update. Over-the-air ships JavaScript in seconds;
-            this ships the whole app, and is the only way native changes — a new
-            permission, a new native module, an SDK bump — can ever reach a
-            phone. It hands off to Android's installer, which asks for its own
-            confirmation.
-          */}
-          <Row
-            leading={<Tile>APK</Tile>}
-            title={apkTitle}
-            detail={apkDetail}
-            closing
-            trailing={
-              apkBusy !== 'idle' ? (
-                <ActivityIndicator size="small" color={C.ink2} />
-              ) : apk?.kind === 'available' ? (
-                <AccentChip>INSTALL</AccentChip>
-              ) : (
-                <Text style={[styles.checkLabel, { color: C.ink2 }]}>CHECK</Text>
-              )
-            }
-            onPress={
-              apkBusy !== 'idle'
-                ? () => undefined
-                : apk?.kind === 'available'
-                  ? () => void runApkInstall()
-                  : () => void runApkCheck()
-            }
-          />
-
-          <Caption>
-            Over-the-air updates arrive on their own and install in seconds; turning one down never
-            loses it. A new build is the bigger kind — it carries native changes, downloads about
-            50 MB, and Android will ask you to confirm the install.
-          </Caption>
+      <Animated.View style={[styles.flex, enterStyle]}>
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <View style={styles.head}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Back to you"
+              hitSlop={BACK_SLOP}
+              onPress={() => {
+                if (router.canGoBack()) router.back();
+                else router.replace('/(tabs)/profile');
+              }}
+              style={({ pressed }) => [
+                styles.backTile,
+                { backgroundColor: pressed ? C.surface2 : C.surface },
+                raised(C),
+              ]}>
+              <ChevronLeft size={20} strokeWidth={2.4} color={C.ink} />
+            </Pressable>
+            <Text style={[styles.title, { color: C.ink }]}>Settings</Text>
+          </View>
 
           {/* ------------------------------------------------------ appearance */}
-          <Kicker>APPEARANCE</Kicker>
-          <View
-            accessibilityRole="radiogroup"
-            style={[styles.appearance, { borderColor: C.rule3 }]}>
-            {APPEARANCE.map((option, index) => {
-              const selected = choice === option.key;
-              const Icon = option.icon;
-
-              return (
-                <Pressable
-                  key={option.key}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected }}
-                  accessibilityLabel={`${option.label} appearance`}
-                  onPress={() => setChoice(option.key)}
-                  style={({ pressed }) => [
-                    styles.appearanceCell,
-                    index > 0 && { borderLeftWidth: Rule.hair, borderLeftColor: C.rule3 },
-                    {
-                      backgroundColor: selected
-                        ? C.live
+          <Kicker>Appearance</Kicker>
+          <View style={styles.block}>
+            <View
+              accessibilityRole="radiogroup"
+              style={[styles.well, { backgroundColor: C.bgRecessed }, pressedWell(C)]}>
+              {SEGMENTS.map((segment) => {
+                const selected = choice === segment.key;
+                return (
+                  <Pressable
+                    key={segment.key}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={`${segment.label} appearance`}
+                    onPress={() => setChoice(segment.key)}
+                    style={({ pressed }) => [
+                      styles.segment,
+                      selected
+                        ? [{ backgroundColor: C.surface }, raised(C)]
                         : pressed
-                          ? C.surface
-                          : 'transparent',
-                    },
-                  ]}>
-                  <Icon size={17} strokeWidth={2} color={selected ? C.onLive : C.ink2} />
-                  <Text
-                    style={[styles.appearanceLabel, { color: selected ? C.onLive : C.ink2 }]}>
-                    {option.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
+                          ? { backgroundColor: C.surface2 }
+                          : null,
+                    ]}>
+                    <Text style={[styles.segmentLabel, { color: selected ? C.ink : C.ink2 }]}>
+                      {segment.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text style={[styles.caption, { color: C.ink3 }]}>
+              Light reverses the palette. Red stays reserved for live.
+            </Text>
           </View>
-          <Caption>
-            System follows your phone. Aux was built for the dark one, but the grid holds either
-            way.
-          </Caption>
 
-          {/* --------------------------------------------------- music accounts */}
-          <Kicker>MUSIC ACCOUNTS</Kicker>
-          <Row
-            leading={<Tile>SP</Tile>}
-            title="Spotify"
-            detail={spotifyDetail}
-            capped
-            onPress={() => router.push('/settings/connections')}
-          />
-          {/*
-            There is no YouTube account model in this build — Sessions already
-            play through YouTube without one. The signed-out state is the honest
-            one to show until the link exists.
-          */}
-          <Row
-            leading={<Tile>YT</Tile>}
-            title="YouTube"
-            detail="Not signed in — tap to sign in"
-            trailing={<AccentChip>SIGN IN</AccentChip>}
-            onPress={() =>
-              toast.show(
-                'YouTube sign-in is not wired up yet. Sessions already play through YouTube without an account.',
-                'info'
-              )
-            }
-          />
-          <Caption>
-            Signing in to YouTube removes ads mid-session if you have Premium there. Aux never
-            streams audio itself — both accounts stay yours.
-          </Caption>
+          {/* -------------------------------------------------- software update */}
+          <Kicker>Software update</Kicker>
+          <View style={styles.block}>
+            <View style={[styles.updateCard, { backgroundColor: C.surface }, raised(C)]}>
+              <View style={styles.updateHead}>
+                <View style={styles.updateHeadText}>
+                  <Text style={[styles.updateTitle, { color: C.ink }]}>{updateTitle}</Text>
+                  <Text style={[styles.updateMeta, { color: C.ink2 }]}>{updateMeta}</Text>
+                </View>
+                {/*
+                  Ink, NOT the accent. Red means live / playing / joinable / in
+                  sync / on aux / unread in this design, and a pending update is
+                  none of those.
 
-          {/* -------------------------------------------------- voice and video */}
-          <Kicker>VOICE &amp; VIDEO</Kicker>
-          <Row
-            leading={<Mic size={19} strokeWidth={2} color={C.ink2} />}
-            title="Microphone & audio"
-            detail="Push to talk · medium · system default"
-            capped
-            onPress={() =>
-              toast.show('Voice settings arrive with voice chat. Nothing to set yet.', 'info')
-            }
-          />
+                  All three surfaces that report this event now agree: this dot,
+                  `update-banner.tsx`'s mark, and `update-prompt.tsx`'s kicker
+                  and CTA. The prompt used to answer the same question in the
+                  accent, which made one event three different volumes.
+                */}
+                {update.isAvailable ? (
+                  <View style={[styles.updateDot, { backgroundColor: C.ink }]} />
+                ) : null}
+              </View>
 
-          {/* ------------------------------------------------------- account */}
-          <Kicker>ACCOUNT</Kicker>
-          <Row
-            title="Edit your profile"
-            detail="Handle, display name, avatar"
-            capped
-            onPress={() => router.push('/(auth)/claim-username')}
-          />
-          <Row
-            title="About the developer"
-            detail="Build info, sync internals, credits"
-            closing
-            onPress={() => router.push('/settings/about')}
-          />
+              {/*
+                The same notes the sheet shows, for the user who dismissed it
+                and came here to find out what they turned down.
+              */}
+              {update.isAvailable && update.pending.notes.length > 0 ? (
+                <View style={styles.notes}>
+                  {update.pending.notes.map((note) => (
+                    <View key={note} style={styles.note}>
+                      <View style={[styles.noteMark, { backgroundColor: C.ink3 }]} />
+                      <Text style={[styles.noteText, { color: C.ink2 }]}>{note}</Text>
+                    </View>
+                  ))}
+                  {update.pending.hidden > 0 ? (
+                    <View style={styles.note}>
+                      <View style={[styles.noteMark, { backgroundColor: C.ink3 }]} />
+                      <Text style={[styles.noteText, { color: C.ink3 }]}>
+                        {`+${update.pending.hidden} more`}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
+
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={updateAction}
+                accessibilityState={{ busy: update.status === 'applying' }}
+                onPress={
+                  update.isAvailable ? () => void update.apply() : () => void update.check(true)
+                }
+                style={({ pressed }) => [
+                  styles.updateButton,
+                  { backgroundColor: pressed ? C.cream : C.pill },
+                  dropped(C, 'md'),
+                ]}>
+                {update.status === 'checking' ? (
+                  <ActivityIndicator size="small" color={C.pillInk} />
+                ) : (
+                  <Text style={[styles.updateButtonLabel, { color: C.pillInk }]}>
+                    {updateAction}
+                  </Text>
+                )}
+              </Pressable>
+            </View>
+
+            {/*
+              The other kind of update. Over-the-air ships JavaScript; this
+              ships the whole app, and is the only way native changes can reach
+              a phone. It hands off to Android's own installer.
+            */}
+            <Row
+              title="Android build"
+              value={apkValue}
+              trailing={
+                apkBusy !== 'idle' ? <ActivityIndicator size="small" color={C.ink2} /> : undefined
+              }
+              onPress={
+                apkBusy !== 'idle'
+                  ? undefined
+                  : apk?.kind === 'available'
+                    ? () => void runApkInstall()
+                    : () => void runApkCheck()
+              }
+            />
+          </View>
+
+          {/* ------------------------------------------------------- accounts */}
+          <Kicker>Accounts</Kicker>
+          <View style={styles.block}>
+            {accounts === 'ready' ? (
+              <>
+                <Row
+                  title="Spotify"
+                  value={spotifyValue}
+                  chevron
+                  onPress={() => router.push('/settings/connections')}
+                />
+                <Row
+                  title="YouTube"
+                  value="Not linked"
+                  onPress={() => toast.show('YouTube sign-in is not built yet.', 'info')}
+                />
+              </>
+            ) : accounts === 'loading' ? (
+              <View accessibilityRole="progressbar" accessibilityLabel="Loading your accounts">
+                <Skeleton width="100%" height={ROW_HEIGHT} style={styles.skeletonRow} />
+                <Skeleton width="100%" height={ROW_HEIGHT} style={styles.skeletonRowNext} />
+              </View>
+            ) : accounts === 'error' ? (
+              <Row title="Accounts did not load" value="Try again" onPress={retryProfile} />
+            ) : (
+              <Row title="Finish setting up" chevron onPress={() => router.push('/(auth)/claim-username')} />
+            )}
+          </View>
+
+          {/* -------------------------------------------------------- account */}
+          <Kicker>Account</Kicker>
+          <View style={styles.block}>
+            <Row title="Edit profile" chevron onPress={() => router.push('/(auth)/claim-username')} />
+            <Row title="About" chevron onPress={() => router.push('/settings/about')} />
+          </View>
         </ScrollView>
       </Animated.View>
     </SafeAreaView>
@@ -358,95 +405,62 @@ export default function SettingsScreen() {
 
 /* ------------------------------------------------------------------- parts */
 
-function BackChip({ label, onPress }: { label: string; onPress: () => void }) {
-  const C = useColors();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`Back to ${label.toLowerCase()}`}
-      onPress={onPress}
-      style={({ pressed }) => [styles.back, pressed && { opacity: 0.6 }]}>
-      <ArrowLeft size={15} strokeWidth={2} color={C.ink2} />
-      <Text style={[styles.backLabel, { color: C.ink2 }]}>{label}</Text>
-    </Pressable>
-  );
-}
-
 function Kicker({ children }: { children: ReactNode }) {
   const C = useColors();
   return <Text style={[styles.kicker, { color: C.ink3 }]}>{children}</Text>;
 }
 
-function Caption({ children }: { children: ReactNode }) {
-  const C = useColors();
-  return <Text style={[styles.caption, { color: C.ink3 }]}>{children}</Text>;
-}
-
-function Tile({ children }: { children: ReactNode }) {
-  const C = useColors();
-  return (
-    <View style={[styles.tile, { borderColor: C.rule2 }]}>
-      <Text style={[styles.tileLabel, { color: C.ink2 }]}>{children}</Text>
-    </View>
-  );
-}
-
-function AccentChip({ children }: { children: ReactNode }) {
-  const C = useColors();
-  return (
-    <View style={[styles.accentChip, { backgroundColor: C.live }]}>
-      <Text style={[styles.accentChipLabel, { color: C.onLive }]}>{children}</Text>
-    </View>
-  );
-}
-
 /**
- * One tappable settings row.
+ * One settings row: a raised card with a title and, at most, a VALUE.
  *
- * `capped` adds the top hairline for the first row of a group; `closing` swaps
- * the bottom hairline for the 2px rule that ends a major section.
+ * There is no `detail` prop and there should not be one — a required
+ * explanation under every row is what made this screen a wall of text.
  */
 function Row({
-  leading,
   title,
-  detail,
+  value,
   trailing,
-  capped = false,
-  closing = false,
+  chevron = false,
   onPress,
 }: {
-  leading?: ReactNode;
   title: string;
-  detail: string;
+  value?: string;
   trailing?: ReactNode;
-  capped?: boolean;
-  closing?: boolean;
-  onPress: () => void;
+  chevron?: boolean;
+  onPress?: () => void;
 }) {
   const C = useColors();
+
+  const body = (
+    <>
+      <Text numberOfLines={1} style={[styles.rowTitle, { color: C.ink }]}>
+        {title}
+      </Text>
+      {value ? (
+        <Text numberOfLines={1} style={[styles.rowValue, { color: C.ink2 }]}>
+          {value}
+        </Text>
+      ) : null}
+      {trailing}
+      {chevron ? <ChevronRight size={17} strokeWidth={2} color={C.ink3} /> : null}
+    </>
+  );
+
+  if (!onPress) {
+    return <View style={[styles.row, { backgroundColor: C.surface }, raised(C)]}>{body}</View>;
+  }
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${title}. ${detail}`}
+      accessibilityLabel={value ? `${title}. ${value}` : title}
       onPress={onPress}
       style={({ pressed }) => [
         styles.row,
-        capped && { borderTopWidth: Rule.hair, borderTopColor: C.rule },
-        {
-          borderBottomWidth: closing ? Rule.major : Rule.hair,
-          borderBottomColor: C.rule,
-          backgroundColor: pressed ? C.surface : 'transparent',
-        },
+        { backgroundColor: pressed ? C.surface2 : C.surface },
+        raised(C),
       ]}>
-      {leading}
-      <View style={styles.rowText}>
-        <Text style={[styles.rowTitle, { color: C.ink }]}>{title}</Text>
-        <Text numberOfLines={1} style={[styles.rowDetail, { color: C.ink2 }]}>
-          {detail}
-        </Text>
-      </View>
-      {trailing ?? <ChevronRight size={18} strokeWidth={2} color={C.ink3} />}
+      {body}
     </Pressable>
   );
 }
@@ -464,134 +478,150 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 720,
     alignSelf: 'center',
-    paddingBottom: Space.xxxl,
-  },
-  checkLabel: {
-    ...Type.label(10),
-    letterSpacing: tracking(10, 0.1),
-  },
-  updateNotes: {
-    // Hangs off the row above it, so it reads as that row's detail rather than
-    // a section of its own.
-    paddingHorizontal: GUTTER,
     paddingTop: Space.md,
-    paddingBottom: Space.md,
-    // Hairline, not the section rule: the APK row follows and the 2px closing
-    // rule belongs at the end of the whole section, not in the middle of it.
-    borderBottomWidth: Rule.hair,
-    gap: Space.sm,
+    paddingBottom: Space.huge,
   },
-  updateNotesKicker: {
-    ...Type.label(10),
-    letterSpacing: tracking(10, 0.1),
-  },
-  updateNote: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: Space.sm,
-  },
-  updateNoteMark: {
-    width: 8,
-    height: Rule.major,
-    // Sits on the text's first-line baseline rather than its box top.
-    marginTop: 8,
-  },
-  updateNoteText: {
-    ...Type.body(13),
-    flex: 1,
-  },
-  updateMore: {
-    ...Type.label(10),
-    // Aligns with the note text, past the 8px mark and its gap.
-    marginLeft: 8 + Space.sm,
-  },
-  back: {
+
+  head: {
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-start',
-    gap: 7,
-    minHeight: TOUCH_TARGET,
-    paddingHorizontal: GUTTER,
+    gap: 14,
+    paddingHorizontal: TEXT_GUTTER,
   },
-  backLabel: {
-    ...Type.label(11),
-    letterSpacing: tracking(11, 0.1),
+  backTile: {
+    width: BACK_TILE,
+    height: BACK_TILE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radii.sm,
   },
-  screenTitle: {
-    ...Type.display(26),
-    letterSpacing: tracking(26, -0.025),
-    paddingHorizontal: GUTTER,
-    paddingBottom: 14,
-    borderBottomWidth: Rule.major,
+  title: {
+    ...Type.display(24),
+    letterSpacing: tracking(24, -0.03),
   },
+
   kicker: {
-    ...Type.label(11),
-    letterSpacing: tracking(11, 0.12),
-    paddingHorizontal: GUTTER,
-    paddingTop: Space.xl,
-    paddingBottom: Space.sm,
+    ...Type.label(10.5),
+    letterSpacing: tracking(10.5, 0.15),
+    paddingHorizontal: TEXT_GUTTER,
+    paddingTop: Space.xxxl,
+    paddingBottom: Space.md,
+  },
+  block: {
+    paddingHorizontal: CARD_GUTTER,
+    gap: 10,
+  },
+
+  well: {
+    flexDirection: 'row',
+    gap: 6,
+    padding: 6,
+    borderRadius: Radii.lg,
+  },
+  segment: {
+    flex: 1,
+    minHeight: TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radii.sm + 1,
+  },
+  segmentLabel: {
+    fontFamily: Fonts.semibold,
+    fontSize: 12.5,
+    lineHeight: 16,
+    letterSpacing: tracking(12.5, 0.06),
   },
   caption: {
-    ...Type.body(14),
-    paddingHorizontal: GUTTER,
-    paddingTop: Space.sm,
+    ...Type.body(12.5),
+    marginTop: 1,
   },
-  appearance: {
-    flexDirection: 'row',
-    marginHorizontal: GUTTER,
-    borderWidth: Rule.hair,
+
+  updateCard: {
+    padding: 17,
+    borderRadius: Radii.xl,
   },
-  appearanceCell: {
-    flex: 1,
-    minHeight: CELL,
-    justifyContent: 'center',
-    alignItems: 'flex-start',
-    gap: Space.xs,
-    paddingHorizontal: 10,
-    paddingVertical: Space.sm,
-  },
-  appearanceLabel: {
-    ...Type.heading(11),
-    letterSpacing: tracking(11, 0.08),
-  },
-  row: {
+  updateHead: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    minHeight: 56,
-    paddingHorizontal: GUTTER,
-    paddingVertical: Space.md,
+    gap: Space.md,
   },
-  rowText: {
+  updateHeadText: {
     flex: 1,
     minWidth: 0,
   },
-  rowTitle: {
-    ...Type.label(14),
-    letterSpacing: 0,
-    textTransform: 'none',
+  updateTitle: {
+    fontFamily: Fonts.semibold,
+    fontSize: 15,
+    lineHeight: 20,
+    letterSpacing: tracking(15, -0.01),
   },
-  rowDetail: {
-    ...Type.body(14),
-    letterSpacing: tracking(14, 0.02),
+  updateMeta: {
+    ...Type.body(12.5),
+    marginTop: 3,
   },
-  tile: {
-    width: 34,
-    height: 34,
+  updateDot: {
+    width: 9,
+    height: 9,
+    borderRadius: Radii.pill,
+  },
+  notes: {
+    marginTop: 14,
+    gap: Space.sm,
+  },
+  note: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 11,
+  },
+  noteMark: {
+    width: 9,
+    height: 2,
+    borderRadius: 1,
+    // Sits on the text's first-line baseline rather than its box top.
+    marginTop: 8,
+  },
+  noteText: {
+    ...Type.body(13),
+    flex: 1,
+  },
+  updateButton: {
+    marginTop: Space.lg,
+    minHeight: 46,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: Rule.hair,
+    borderRadius: Radii.sm + 1,
   },
-  tileLabel: {
-    ...Type.heading(11),
-    letterSpacing: tracking(11, 0.04),
+  updateButtonLabel: {
+    fontFamily: Fonts.semibold,
+    fontSize: 13.5,
+    lineHeight: 18,
   },
-  accentChip: {
-    paddingHorizontal: Space.sm,
-    paddingVertical: 5,
+
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.md,
+    minHeight: ROW_HEIGHT,
+    padding: 15,
+    borderRadius: Radii.lg,
   },
-  accentChipLabel: {
-    ...Type.heading(11),
-    letterSpacing: tracking(11, 0.08),
+  rowTitle: {
+    flex: 1,
+    minWidth: 0,
+    fontFamily: Fonts.semibold,
+    fontSize: 14.5,
+    lineHeight: 19,
+  },
+  rowValue: {
+    ...readout(13),
+    fontFamily: Fonts.semibold,
+  },
+
+  skeletonRow: {
+    borderRadius: Radii.lg,
+  },
+  skeletonRowNext: {
+    borderRadius: Radii.lg,
+    marginTop: 10,
   },
 });

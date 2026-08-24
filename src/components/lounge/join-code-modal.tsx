@@ -141,7 +141,11 @@ export function JoinCodeModal({ visible, onClose, onJoined }: JoinCodeModalProps
           <Animated.View
             style={[
               styles.sheet,
-              { backgroundColor: C.bg, borderTopColor: C.live, paddingBottom: insets.bottom },
+              // A neutral edge. The 2px accent top border was the abandoned
+              // direction's sheet signature: a sheet opening is not something
+              // live, and the accent spent here is accent not available to the
+              // one thing on screen that is.
+              { backgroundColor: C.bg, borderTopColor: C.rule2, paddingBottom: insets.bottom },
               sheetStyle,
             ]}>
             <View style={[styles.head, { borderBottomColor: C.rule }]}>
@@ -163,12 +167,17 @@ export function JoinCodeModal({ visible, onClose, onJoined }: JoinCodeModalProps
               <Text style={[styles.kicker, { color: C.ink3 }]}>INVITE CODE</Text>
 
               {/*
-                The panel is the field. A 2px accent frame and the code itself,
-                turned around so you can type into it. The frame never changes
-                width — a thicker focus ring would shift the code by a pixel
-                every time the field is touched.
+                The panel is the field. The frame never changes width — a
+                thicker focus ring would shift the code by a pixel every time
+                the field is touched.
+
+                Frame and code in ink, not accent: a code you are still typing
+                is not joinable yet, and the accent belongs to the state you
+                reach by submitting it. The error block below is the one thing
+                here that gets to be loud, and it can only be loud if this is
+                not.
               */}
-              <View style={[styles.codePanel, { borderColor: C.live }]}>
+              <View style={[styles.codePanel, { borderColor: C.rule3 }]}>
                 <TextInput
                   value={code}
                   onChangeText={handleChange}
@@ -180,7 +189,7 @@ export function JoinCodeModal({ visible, onClose, onJoined }: JoinCodeModalProps
                   maxLength={CODE_LENGTH}
                   selectionColor={C.live}
                   accessibilityLabel="Invite code"
-                  style={[styles.codeInput, { color: C.liveText }]}
+                  style={[styles.codeInput, { color: C.ink }]}
                 />
               </View>
 

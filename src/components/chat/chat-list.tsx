@@ -1,16 +1,30 @@
-import { MessageCircle } from 'lucide-react-native';
+/**
+ * The lounge / Session log.
+ *
+ * Newest-first data rendered `inverted`, decorated with run and day boundaries,
+ * and drawn through `./bubble-kit` — the same bubble language the DM thread
+ * uses. All four states live here: a skeleton of the real bubble geometry, a
+ * failure that offers the retry, an empty log that says what to do, and the log
+ * itself.
+ */
+
 import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
   StyleSheet,
-  Text,
   View,
   type ListRenderItemInfo,
 } from 'react-native';
 
+import {
+  ChatNotice,
+  LogStart,
+  styles as kit,
+  BUBBLE_GAP,
+} from '@/components/chat/bubble-kit';
 import { MessageActionsSheet, MessageRow } from '@/components/chat/message-row';
-import { AuxButton, EmptyState, Skeleton } from '@/components/ui';
+import { Skeleton } from '@/components/ui';
 import {
   useDeleteMessage,
   useMessageSubscription,
@@ -20,16 +34,24 @@ import {
   type ChatMessage,
   type ChatScope,
 } from '@/features/chat/queries';
-import { Radius, Rule, Space, Type } from '@/lib/theme';
+import { Radii, Space } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
 /** Messages closer together than this from one author render as one run. */
 const GROUP_WINDOW_MS = 5 * 60_000;
 
+/** Alternating widths and sides read as "messages are coming", not as breakage. */
+const SKELETON_BUBBLES = [
+  { width: '62%', height: 44, mine: false },
+  { width: '48%', height: 44, mine: true },
+  { width: '74%', height: 66, mine: false },
+  { width: '40%', height: 44, mine: true },
+  { width: '58%', height: 44, mine: false },
+] as const;
+
 export type ChatListProps = ChatScope & {
   /** Copy for the empty state, which differs between a lounge and a Session. */
-  emptyTitle?: string;
-  emptyDescription?: string;
+  emptyLabel?: string;
   /** Forwarded to every row: avatars and names become profile targets. */
   onOpenProfile?: (userId: string) => void;
 };
@@ -37,6 +59,8 @@ export type ChatListProps = ChatScope & {
 type Decorated = {
   message: ChatMessage;
   showHeader: boolean;
+  /** Last of its run: the one row of the run that carries a timestamp. */
+  showStamp: boolean;
   daySeparator: string | null;
 };
 
@@ -82,9 +106,12 @@ function dayLabel(iso: string): string {
  * is the NEXT index, not the previous one. Getting this backwards is the classic
  * inverted-chat bug: avatars appear on the last message of a run instead of the
  * first.
+ *
+ * `showStamp` is the mirror of that: the visually LAST message of a run is the
+ * one whose NEWER neighbour — index − 1 — starts a fresh run.
  */
 function decorate(messages: ChatMessage[]): Decorated[] {
-  return messages.map((message, index) => {
+  const rows = messages.map((message, index) => {
     const older = messages[index + 1];
 
     const newDay = !older || startOfDay(older.createdAt) !== startOfDay(message.createdAt);
@@ -97,16 +124,22 @@ function decorate(messages: ChatMessage[]): Decorated[] {
       message,
       // A day break always starts a fresh run, whoever spoke last.
       showHeader: newDay || newAuthor || gap,
+      showStamp: false,
       daySeparator: newDay ? dayLabel(message.createdAt) : null,
     };
   });
+
+  for (let index = 0; index < rows.length; index += 1) {
+    rows[index].showStamp = index === 0 || rows[index - 1].showHeader;
+  }
+
+  return rows;
 }
 
 export function ChatList({
   loungeId,
   roomId,
-  emptyTitle,
-  emptyDescription,
+  emptyLabel,
   onOpenProfile,
 }: ChatListProps) {
   const C = useColors();
@@ -132,14 +165,16 @@ export function ChatList({
     ({ item }: ListRenderItemInfo<Decorated>) => (
       <MessageRow
         message={item.message}
+        mine={item.message.userId === viewerId}
         showHeader={item.showHeader}
+        showStamp={item.showStamp}
         daySeparator={item.daySeparator}
         onLongPress={openActions}
         onToggleReaction={toggleReaction}
         onOpenProfile={onOpenProfile}
       />
     ),
-    [openActions, toggleReaction, onOpenProfile],
+    [openActions, toggleReaction, onOpenProfile, viewerId],
   );
 
   const closeActions = useCallback(() => setSelected(null), []);
@@ -152,25 +187,16 @@ export function ChatList({
 
   if (isError && messages.length === 0) {
     return (
-      <View style={styles.emptyDock}>
-        <EmptyState
-          icon={MessageCircle}
-          title="Chat didn't load"
-          description="Check your connection and try again."
-          action={<AuxButton label="Retry" onPress={refetch} variant="ghost" size="sm" />}
-        />
+      <View style={kit.noticeDock}>
+        <ChatNotice label="The log didn't load." action={{ label: 'Retry', onPress: refetch }} />
       </View>
     );
   }
 
   if (messages.length === 0) {
     return (
-      <View style={styles.emptyDock}>
-        <EmptyState
-          icon={MessageCircle}
-          title={emptyTitle ?? 'No messages yet'}
-          description={emptyDescription ?? 'Say something to get it started.'}
-        />
+      <View style={kit.noticeDock}>
+        <ChatNotice label={emptyLabel ?? 'Say something.'} />
       </View>
     );
   }
@@ -191,17 +217,7 @@ export function ChatList({
               <ActivityIndicator size="small" color={C.ink3} />
             </View>
           ) : !hasNextPage ? (
-            /*
-              The top of the log terminates in the same rule-plus-label figure
-              the day separators use, so "the log ends here" and "a new day
-              starts here" read as one system rather than two unrelated captions.
-            */
-            <View style={styles.logStartBlock}>
-              <View style={[styles.logStartRule, { backgroundColor: C.rule }]} />
-              <Text style={[styles.logStart, { color: C.ink3 }]}>
-                This is the beginning of the conversation.
-              </Text>
-            </View>
+            <LogStart />
           ) : null
         }
         contentContainerStyle={styles.content}
@@ -234,23 +250,15 @@ export function ChatList({
   );
 }
 
-/**
- * First-load placeholder. Alternating widths and an occasional avatar read as
- * "messages are coming" rather than as a broken layout. Square, like every
- * other block in this direction.
- */
+/** First-load placeholder, in the real bubble geometry so nothing shifts. */
 function ChatSkeleton() {
   return (
     <View accessibilityLabel="Loading messages" style={styles.skeleton}>
-      {[82, 54, 68, 40, 74, 60].map((width, index) => (
-        <View key={width} style={styles.skeletonRow}>
-          <View style={styles.skeletonGutter}>
-            {index % 2 === 0 ? <Skeleton width={30} height={30} radius={Radius} /> : null}
-          </View>
-          <View style={styles.skeletonBody}>
-            {index % 2 === 0 ? <Skeleton width={104} height={12} radius={Radius} /> : null}
-            <Skeleton width={`${width}%`} height={14} radius={Radius} />
-          </View>
+      {SKELETON_BUBBLES.map((bubble) => (
+        <View
+          key={`${bubble.width}-${bubble.height}`}
+          style={[styles.skeletonRow, bubble.mine ? kit.alignEnd : kit.alignStart]}>
+          <Skeleton width={bubble.width} height={bubble.height} radius={Radii.lg} />
         </View>
       ))}
     </View>
@@ -261,43 +269,18 @@ const styles = StyleSheet.create({
   content: {
     paddingVertical: Space.md,
   },
-  emptyDock: {
-    flex: 1,
-    justifyContent: 'center',
-  },
   olderLoader: {
     paddingVertical: Space.lg,
     alignItems: 'center',
-  },
-  logStartBlock: {
-    paddingVertical: Space.lg,
-    gap: Space.md,
-  },
-  logStartRule: {
-    height: Rule.hair,
-    marginHorizontal: Space.md,
-  },
-  logStart: {
-    ...Type.body(12),
-    textAlign: 'center',
-    paddingHorizontal: Space.xl,
   },
   skeleton: {
     flex: 1,
     justifyContent: 'flex-end',
     paddingHorizontal: Space.md,
     paddingBottom: Space.lg,
-    gap: Space.lg,
+    gap: BUBBLE_GAP,
   },
   skeletonRow: {
     flexDirection: 'row',
-  },
-  skeletonGutter: {
-    width: 30 + 9,
-    paddingRight: 9,
-  },
-  skeletonBody: {
-    flex: 1,
-    gap: Space.sm,
   },
 });

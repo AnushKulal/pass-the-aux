@@ -1,136 +1,114 @@
 /**
- * What the Session is playing, where the playhead is, and how far off you are.
+ * The Session stage: the art, the title, the waveform, the sync readout.
  *
- * Four things here are load-bearing:
+ * Built from design/v2/aux-v2.dc.html, screen "Session".
  *
- *  - The progress bar is driven by a local 250ms ticker over
+ * Three things are load-bearing:
+ *
+ *  - The `media` slot is rendered unconditionally, in a FIXED tree position, in
+ *    every branch of this component — including the loading and error branches,
+ *    which change only what is drawn AROUND it. It holds the YouTube player
+ *    host, and unmounting that mid-song stops the audio for this listener. When
+ *    YouTube is the active provider the slot becomes the art tile itself;
+ *    otherwise it parks at 1×1 and keeps playing.
+ *  - The playhead is driven by a local 250ms ticker over
  *    `expectedPositionMs(timeline)`, never by asking the adapter. On Spotify,
- *    `getPosition()` is a rate-limited HTTP call; polling it for a progress bar
- *    would burn the quota and still be less accurate than the arithmetic.
- *  - The `media` slot is rendered unconditionally, in a fixed tree position, in
- *    every layout. It holds the YouTube player host, and unmounting that
- *    mid-song stops the audio for this listener. When YouTube is the active
- *    provider it becomes the artwork well itself, which is what YouTube's terms
- *    expect.
- *  - The artwork well carries the two signature marks of the direction: the
- *    25px modular grid, and one horizontal accent rule straight through the
- *    middle. Everything else in the well is a typographic placeholder that real
- *    artwork drops over without moving anything.
- *  - The sync block is the only place on the screen that states a rung in
- *    words. It loses the red as drift grows; it never turns amber, because
- *    there is no amber.
+ *    `getPosition()` is a rate-limited HTTP call.
+ *  - The sync readout loses the red as drift grows; it never turns amber,
+ *    because there is no amber.
+ *
+ * Four states, all drawn here rather than swapped in by the screen:
+ *
+ *   loading    a recessed art well and skeleton bars in the real layout
+ *   empty      loaded, nothing on the deck — the well says so in one line
+ *   error      what failed, and the button that fixes it
+ *   populated  the artboard
  */
 
 import { Image } from 'expo-image';
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Disc3, MoreHorizontal, RotateCw } from 'lucide-react-native';
+import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Pressable,
   StyleSheet,
   Text,
   View,
   type AccessibilityActionEvent,
-  type DimensionValue,
   type GestureResponderEvent,
   type LayoutChangeEvent,
 } from 'react-native';
-import Animated, {
-  cancelAnimation,
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withRepeat,
-  withTiming,
-} from 'react-native-reanimated';
 
-import { BLURHASH_SURFACE } from '@/components/ui';
-import { getClockOffset } from '@/lib/clock';
+import { BLURHASH_SURFACE, Skeleton } from '@/components/ui';
 import {
   Duration,
-  glowShadow,
+  Fonts,
   GRID,
   PointerEvents,
   Radii,
-  Rule,
   Space,
   TOUCH_TARGET,
   Type,
+  bloom,
+  pressed as pressedDepth,
+  raised,
   tracking,
 } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 import { expectedPositionMs, type RoomTimeline } from '@/playback/sync-controller';
 import type { ResolvedTrack } from '@/playback/types';
 
-import {
-  RUNG_LABEL,
-  driftRung,
-  formatClock,
-  formatDrift,
-  formatOffset,
-  formatRemaining,
-  initialFor,
-  readout,
-  rungColor,
-} from './drift';
+import { RUNG_LABEL, driftRung, formatClock, formatDrift, initialFor, rungColor } from './drift';
 
 /** 4Hz: smooth enough that the bar never visibly steps, cheap enough to ignore. */
 const TICK_MS = 250;
 /** Screen-reader adjust step on the scrubber. */
 const NUDGE_MS = 10_000;
 
-/** The artwork well, exactly as the artboard. */
-const WELL_HEIGHT = 250;
-/** How far the 2px playhead overhangs the 6px progress track, top and bottom. */
-const PLAYHEAD_BLEED = 5;
-const TRACK_HEIGHT = 6;
-const COMPACT_TILE = 34;
+/** The art tile, exactly as the artboard: 252 square, 26 corner. */
+const ART = 252;
+const ART_RADIUS = 26;
 
-/** The gutter every block on this screen shares. */
-const GUTTER = Space.md;
+/** Takes the 36px waveform the rest of the way to the 44px floor. */
+const SCRUB_SLOP = { top: 6, bottom: 6, left: 0, right: 0 } as const;
 
-/** Takes the 26px scrub box the rest of the way to the 44px floor. */
-const SCRUB_SLOP = { top: 9, bottom: 9, left: 0, right: 0 } as const;
+/** The artboard's 32 bars. Fixed, not random — the shape is part of the screen. */
+const WAVE = [
+  28, 48, 34, 64, 40, 76, 52, 30, 58, 92, 44, 36, 68, 54, 32, 56, 100, 38, 66, 48, 26, 44, 72, 54,
+  82, 34, 60, 46, 78, 30, 52, 68,
+] as const;
+
+/** Flat, quiet, and obviously not a waveform: the loading shape of one. */
+const WAVE_RESTING = 22;
 
 export type NowPlayingProps = {
   /** The YouTube player host. Always mounted, never conditionally rendered. */
   media: ReactNode;
-  /** True when the active provider is YouTube and the well should show video. */
+  /** True when the active provider is YouTube and the tile should show video. */
   showMedia: boolean;
-  /** Collapsed to a single row, for the docked/parked layout. */
-  compact: boolean;
   track: ResolvedTrack | null;
   timeline: RoomTimeline | null;
   isLoading: boolean;
   driftMs: number;
+  /** Re-measures the clock offset and seeks back onto the room's position. */
   onResync: () => void;
+  /** Opens the lobby controls. */
+  onMore: () => void;
   /** Whoever is on aux. Absent for passengers, who get no scrubber at all. */
   onSeek?: (positionMs: number) => void;
   errorMessage?: string | null;
-  /** Whoever currently holds the aux, for the passenger line below. Optional. */
-  onAuxName?: string | null;
-  /** SPOTIFY / YOUTUBE, for the well's corner chip. */
-  providerLabel?: string | null;
-  /**
-   * Best round-trip from the last clock measurement. `src/lib/clock.ts` keeps
-   * this internally but does not export it, so the cell renders an honest dash
-   * until it does — see the handoff note.
-   */
-  rttMs?: number | null;
 };
 
 export function NowPlaying({
   media,
   showMedia,
-  compact,
   track,
   timeline,
   isLoading,
   driftMs,
   onResync,
+  onMore,
   onSeek,
   errorMessage,
-  onAuxName,
-  providerLabel,
-  rttMs,
 }: NowPlayingProps) {
   const C = useColors();
 
@@ -141,9 +119,7 @@ export function NowPlaying({
     The playhead is a clock, so it is READ at render rather than mirrored into
     state: `expectedPositionMs` is pure arithmetic over the room row and the
     corrected server time, and the only thing the timer has to do is ask for
-    another frame. Copying it into state instead would mean a setState in the
-    effect body on every timeline change, and a stale first frame every time a
-    paused Session resumes.
+    another frame.
   */
   const [, requestFrame] = useState(0);
 
@@ -157,9 +133,8 @@ export function NowPlaying({
 
   const rawPosition = timeline ? expectedPositionMs(timeline) : 0;
   const positionMs = durationMs > 0 ? Math.min(rawPosition, durationMs) : rawPosition;
-  const clockOffsetMs = Math.round(getClockOffset());
-
   const progress = durationMs > 0 ? Math.min(1, Math.max(0, positionMs / durationMs)) : 0;
+
   const rung = driftRung(driftMs);
   const rungTint = rungColor(rung, C);
 
@@ -185,81 +160,62 @@ export function NowPlaying({
     [onSeek, durationMs, positionMs]
   );
 
-  const artworkUrl = track?.artwork_url ?? null;
-  const stageVisible = showMedia && !compact;
-  const initial = initialFor(track?.title);
-  const barWidth = `${(progress * 100).toFixed(2)}%` as DimensionValue;
-
-  const subtitle = track
-    ? track.album
-      ? `${track.artist} · ${track.album}`
-      : track.artist
-    : 'Add a track and the Session starts';
-
-  if (compact) {
-    return (
-      <View style={[styles.compactRow, { borderColor: C.rule, backgroundColor: C.surface }]}>
-        {/* Fixed tree position: parked, not unmounted. See the file header. */}
-        <View style={[styles.stageParked, PointerEvents.none]}>{media}</View>
-
-        <View style={[styles.compactTile, { backgroundColor: C.bgRecessed, borderColor: C.rule2 }]}>
-          <Text style={[styles.compactInitial, { color: C.ink3 }]}>{initial}</Text>
-        </View>
-
-        <View style={styles.compactMeta}>
-          <Text numberOfLines={1} style={[styles.compactTitle, { color: C.ink }]}>
-            {track?.title ?? 'Nothing playing'}
-          </Text>
-          <Text numberOfLines={1} style={[styles.compactSub, { color: C.ink2 }]}>
-            {subtitle}
-          </Text>
-        </View>
-
-        <Text style={[styles.compactDrift, { color: rungTint }]}>
-          {isLoading && !track ? '—' : formatDrift(driftMs)}
-        </Text>
-      </View>
-    );
-  }
+  const waiting = isLoading && !track;
+  const played = Math.round(progress * WAVE.length);
+  const subtitle = track ? (track.album ? `${track.artist} · ${track.album}` : track.artist) : null;
 
   return (
     <View>
-      {/*
-        The media wrapper keeps ONE position in the tree in every branch of this
-        component. Parking it (1×1, transparent) rather than unmounting keeps
-        the WebView alive and the music playing.
-      */}
-      <View
-        style={[
-          stageVisible
-            ? [styles.stage, { borderBottomColor: C.rule, backgroundColor: '#000000' }]
-            : styles.stageParked,
-          stageVisible ? PointerEvents.auto : PointerEvents.none,
-        ]}>
-        {media}
+      <View style={styles.stageWrap}>
+        {/*
+          ONE position in the tree, in every branch. Parking it (1×1,
+          transparent) rather than unmounting keeps the WebView alive and the
+          music playing.
+        */}
+        <View
+          style={[
+            showMedia ? [styles.stage, { backgroundColor: '#000000' }] : styles.stageParked,
+            showMedia ? PointerEvents.auto : PointerEvents.none,
+          ]}>
+          {media}
+        </View>
+
+        {showMedia ? null : (
+          <ArtSlot
+            waiting={waiting}
+            title={track?.title ?? null}
+            artworkUrl={track?.artwork_url ?? null}
+          />
+        )}
       </View>
 
-      {stageVisible ? null : (
-        <ArtworkWell
-          initial={initial}
-          artworkUrl={artworkUrl}
-          title={track?.title ?? null}
-          providerLabel={providerLabel ?? null}
-        />
-      )}
+      <View style={styles.head}>
+        <GlyphButton icon={RotateCw} label="Re-anchor to the Session clock" onPress={onResync} />
 
-      <View style={styles.block}>
-        <Text numberOfLines={3} style={[styles.title, { color: C.ink }]}>
-          {track?.title ?? 'Nothing playing'}
-        </Text>
-        <Text numberOfLines={2} style={[styles.subtitle, { color: C.ink2 }]}>
-          {subtitle}
-        </Text>
+        <View style={styles.headMeta}>
+          {waiting ? (
+            <View style={styles.headSkeleton}>
+              <Skeleton width={168} height={22} />
+              <Skeleton width={104} height={13} />
+            </View>
+          ) : (
+            <>
+              <Text numberOfLines={1} style={[styles.title, { color: C.ink }]}>
+                {track?.title ?? 'Nothing playing'}
+              </Text>
+              <Text numberOfLines={1} style={[styles.artist, { color: C.ink2 }]}>
+                {subtitle ?? 'Queue a track to start the Session'}
+              </Text>
+            </>
+          )}
+        </View>
+
+        <GlyphButton icon={MoreHorizontal} label="Session controls" onPress={onMore} />
       </View>
 
-      <View style={styles.block}>
+      <View style={styles.progress}>
         <Pressable
-          disabled={!onSeek}
+          disabled={!onSeek || waiting}
           onLayout={handleLayout}
           onPress={handleScrub}
           accessible
@@ -272,122 +228,84 @@ export function NowPlaying({
             now: Math.round(positionMs / 1000),
             text: `${formatClock(positionMs)} of ${formatClock(durationMs)}`,
           }}
-          accessibilityActions={
-            onSeek ? [{ name: 'increment' }, { name: 'decrement' }] : undefined
-          }
+          accessibilityActions={onSeek ? [{ name: 'increment' }, { name: 'decrement' }] : undefined}
           onAccessibilityAction={handleAccessibilityAction}
           hitSlop={SCRUB_SLOP}
-          style={styles.scrubber}>
-          <View style={[styles.track, { backgroundColor: C.track }]}>
-            <View style={[styles.trackFill, { width: barWidth, backgroundColor: C.live }]} />
-            {/* Overhangs ±5px so the playhead reads as a cut through the bar,
-                not as a segment of it. */}
-            <View style={[styles.playhead, { left: barWidth, backgroundColor: C.liveText }]} />
-          </View>
+          style={styles.wave}>
+          {WAVE.map((height, index) => (
+            <View
+              key={index}
+              style={[
+                styles.bar,
+                waiting
+                  ? { height: `${WAVE_RESTING}%`, backgroundColor: C.rule2 }
+                  : { height: `${height}%`, backgroundColor: index < played ? C.ink : C.ink3 },
+              ]}
+            />
+          ))}
         </Pressable>
 
         <View style={styles.times}>
-          <Text style={[styles.time, { color: C.ink2 }]}>{formatClock(positionMs)}</Text>
           <Text style={[styles.time, { color: C.ink2 }]}>
-            {formatRemaining(Math.max(0, durationMs - positionMs))}
+            {waiting ? '—' : formatClock(positionMs)}
+          </Text>
+          <Text style={[styles.sync, { color: waiting ? C.ink3 : rungTint }]}>
+            {waiting ? 'Finding the beat' : `${RUNG_LABEL[rung]} · ${formatDrift(driftMs)}`}
+          </Text>
+          <Text style={[styles.time, { color: C.ink2 }]}>
+            {waiting ? '—' : formatClock(durationMs)}
           </Text>
         </View>
       </View>
 
-      <View style={[styles.lyrics, { borderTopColor: C.rule }]}>
-        <View style={styles.lyricsHead}>
-          <Text style={[styles.kicker, { color: C.ink3 }]}>Lyrics</Text>
-          <Text style={[styles.kickerRight, { color: C.ink3 }]}>In time with the room</Text>
-        </View>
-        {/*
-          There is no timed-lyrics source wired to this app. The documented
-          fallback says so plainly rather than showing an empty four-line window
-          that looks like a loading failure.
-        */}
-        <Text style={[styles.lyricsFallback, { color: C.ink3 }]}>
-          No timed lyrics for this one. Aux only shows lines it can line up to the second.
-        </Text>
-      </View>
-
-      <View style={[styles.syncBlock, { borderColor: C.rule2 }]}>
-        <View style={[styles.syncHead, { borderBottomColor: C.rule }]}>
-          <RungDot color={rungTint} live={rung === 'locked'} />
-          <Text style={[styles.syncRung, { color: C.ink }]}>{`You are ${RUNG_LABEL[rung]}`}</Text>
-          <Text style={[styles.syncDrift, { color: rungTint }]}>{formatDrift(driftMs)}</Text>
-        </View>
-
-        <View style={styles.syncCells}>
-          <View style={[styles.syncCell, { borderRightColor: C.rule }]}>
-            <Text style={[styles.cellLabel, { color: C.ink3 }]}>Clock offset</Text>
-            <Text style={[styles.cellValue, { color: C.ink }]}>{formatOffset(clockOffsetMs)}</Text>
-          </View>
-
-          <View style={[styles.syncCell, { borderRightColor: C.rule }]}>
-            <Text style={[styles.cellLabel, { color: C.ink3 }]}>Best RTT</Text>
-            <Text style={[styles.cellValue, { color: C.ink }]}>
-              {rttMs == null ? '—' : `${Math.round(rttMs)}ms`}
-            </Text>
-          </View>
-
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Re-anchor to the Session clock"
-            accessibilityHint="Re-measures the clock offset and seeks back onto the room's position"
-            onPress={onResync}
-            style={({ pressed }) => [
-              styles.reanchor,
-              pressed ? { backgroundColor: C.liveWash } : null,
-            ]}>
-            <Text style={[styles.reanchorLabel, { color: C.liveText }]}>Re-anchor</Text>
-          </Pressable>
-        </View>
-      </View>
-
-      {errorMessage ? (
-        <View
-          accessibilityLiveRegion="polite"
-          style={[styles.error, { borderColor: C.dangerBorder, backgroundColor: C.dangerWash }]}>
-          <Text style={[styles.errorText, { color: C.ink }]}>{errorMessage}</Text>
-        </View>
-      ) : null}
+      {errorMessage ? <PlaybackError message={errorMessage} onRetry={onResync} /> : null}
     </View>
   );
 }
 
-// ------------------------------------------------------------ artwork well
+// ---------------------------------------------------------------- art slot
 
-type ArtworkWellProps = {
-  initial: string;
-  artworkUrl: string | null;
+type ArtSlotProps = {
+  waiting: boolean;
   title: string | null;
-  providerLabel: string | null;
+  artworkUrl: string | null;
 };
 
 /**
- * A letter in a ruled box, with real artwork dropping straight over it. The
- * layout has to survive any artwork including bright and ugly, which is why
- * nothing is measured off the image — the chip and the caption sit on the well,
- * not on the art.
+ * Three faces of one 252px square.
+ *
+ * A LOADED track is a bright tile — `artwork` inverts between themes, so the
+ * letter on it must use `artInk` or it disappears. Nothing loaded is a recessed
+ * well instead: the same square, sunk rather than lit, which reads as an empty
+ * slot without needing a word. At 252px the deep recess is well clear of the
+ * size where an inset pair reads as dirt.
  */
-const ArtworkWell = memo(function ArtworkWell({
-  initial,
-  artworkUrl,
-  title,
-  providerLabel,
-}: ArtworkWellProps) {
+const ArtSlot = memo(function ArtSlot({ waiting, title, artworkUrl }: ArtSlotProps) {
   const C = useColors();
 
-  return (
-    /*
-      Two views, not one. The bloom has to live on a parent WITHOUT
-      `overflow: hidden`, because that clip is what rounds the artwork's corners
-      and it would crop the shadow away with them. So the outer view carries the
-      glow and the inner one carries the clip.
-    */
-    <View style={[styles.wellGlow, glowShadow(C.glow, 28)]}>
-      <View style={[styles.well, { backgroundColor: C.bgRecessed }]}>
-        <ModularGrid />
+  if (waiting || title === null) {
+    return (
+      <View
+        accessible
+        accessibilityLabel={waiting ? 'Loading the Session' : 'Nothing playing'}
+        style={[styles.art, { backgroundColor: C.bgRecessed }, pressedDepth(C)]}>
+        {waiting ? (
+          <Skeleton width={96} height={96} style={styles.artSkeleton} />
+        ) : (
+          <Disc3 size={44} strokeWidth={1.6} color={C.ink3} />
+        )}
+      </View>
+    );
+  }
 
+  return (
+    <View
+      style={[
+        styles.art,
+        { backgroundColor: C.artwork },
+        // A wide, soft bloom: the art is meant to look lit, not pasted on.
+        bloom(C.glow, 'lg'),
+      ]}>
       {artworkUrl ? (
         <Image
           source={{ uri: artworkUrl }}
@@ -397,32 +315,88 @@ const ArtworkWell = memo(function ArtworkWell({
           placeholder={{ blurhash: BLURHASH_SURFACE }}
           transition={Duration.press}
           accessibilityIgnoresInvertColors
-          accessibilityLabel={title ? `Artwork for ${title}` : undefined}
+          accessibilityLabel={`Artwork for ${title}`}
         />
       ) : (
-        <>
-          <Text style={[styles.wellInitial, { color: C.surface3 }]}>{initial}</Text>
-          <Text style={[styles.wellCaption, { color: C.ink3 }]}>Artwork — drop in real art</Text>
-        </>
+        <Text style={[styles.artInitial, { color: C.artInk }]}>{initialFor(title)}</Text>
       )}
-
-      {/* The one accent mark on the well: a rule straight through the middle. */}
-      <View style={[styles.wellRule, { backgroundColor: C.liveMid }, PointerEvents.none]} />
-
-        {providerLabel ? (
-          <View style={[styles.wellChip, { backgroundColor: C.live }]}>
-            <Text style={[styles.wellChipLabel, { color: C.onLive }]}>{providerLabel}</Text>
-          </View>
-        ) : null}
-      </View>
     </View>
   );
 });
 
+// -------------------------------------------------------------- error card
+
 /**
- * The 25px modular grid. Shared with the sync orbit's dial — it is the one
- * texture in this direction, and it only ever appears inside a well, never
- * across a whole screen.
+ * What broke, and the one control that fixes it.
+ *
+ * Almost every playback failure on this screen is a clock or a device problem,
+ * and re-anchoring is the answer to both — so the card carries that action
+ * rather than a bare apology. A `live` outline is the destructive/alarm device
+ * in this palette; there is no second hue.
+ */
+const PlaybackError = memo(function PlaybackError({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  const C = useColors();
+
+  return (
+    <View
+      accessibilityLiveRegion="polite"
+      style={[styles.errorCard, { backgroundColor: C.surface }, raised(C)]}>
+      <View style={styles.errorMeta}>
+        <Text style={[styles.errorKicker, { color: C.liveText }]}>Playback stopped</Text>
+        <Text style={[styles.errorBody, { color: C.ink2 }]}>{message}</Text>
+      </View>
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Re-anchor and try again"
+        onPress={onRetry}
+        style={({ pressed }) => [
+          styles.errorAction,
+          { backgroundColor: C.pill },
+          pressed ? styles.dim : null,
+        ]}>
+        <Text style={[styles.errorActionLabel, { color: C.pillInk }]}>Retry</Text>
+      </Pressable>
+    </View>
+  );
+});
+
+// ------------------------------------------------------------ glyph button
+
+/** A bare glyph on the title row. 44px target, no fill — the artboard's ♡ and ···. */
+const GlyphButton = memo(function GlyphButton({
+  icon: Icon,
+  label,
+  onPress,
+}: {
+  icon: typeof RotateCw;
+  label: string;
+  onPress: () => void;
+}) {
+  const C = useColors();
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={({ pressed }) => [styles.glyph, pressed ? styles.dim : null]}>
+      <Icon size={19} strokeWidth={2} color={C.ink2} />
+    </Pressable>
+  );
+});
+
+// ------------------------------------------------------------ modular grid
+
+/**
+ * The 25px modular grid, kept here because the sync orbit's dial draws it too.
+ * It only ever appears inside a well, never across a whole screen.
  */
 export const ModularGrid = memo(function ModularGrid({ step = GRID }: { step?: number }) {
   const C = useColors();
@@ -435,14 +409,8 @@ export const ModularGrid = memo(function ModularGrid({ step = GRID }: { step?: n
     );
   }, []);
 
-  const lines = useMemo(() => {
-    const columns = size.width > 0 ? Math.ceil(size.width / step) : 0;
-    const rows = size.height > 0 ? Math.ceil(size.height / step) : 0;
-    return {
-      columns: Array.from({ length: columns }, (_, index) => index * step),
-      rows: Array.from({ length: rows }, (_, index) => index * step),
-    };
-  }, [size, step]);
+  const columns = size.width > 0 ? Math.ceil(size.width / step) : 0;
+  const rows = size.height > 0 ? Math.ceil(size.height / step) : 0;
 
   return (
     <View
@@ -450,61 +418,27 @@ export const ModularGrid = memo(function ModularGrid({ step = GRID }: { step?: n
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
       style={[StyleSheet.absoluteFill, PointerEvents.none]}>
-      {lines.columns.map((left) => (
+      {Array.from({ length: columns }, (_, index) => index * step).map((left) => (
         <View key={`c${left}`} style={[styles.gridColumn, { left, backgroundColor: C.grid }]} />
       ))}
-      {lines.rows.map((top) => (
+      {Array.from({ length: rows }, (_, index) => index * step).map((top) => (
         <View key={`r${top}`} style={[styles.gridRow, { top, backgroundColor: C.grid }]} />
       ))}
     </View>
   );
 });
 
-// --------------------------------------------------------------- rung dot
-
-/**
- * The 8px square that pulses while you are locked. It stops pulsing — and stops
- * being red — the moment you are not, so the motion itself is a sync signal
- * rather than decoration.
- */
-const RungDot = memo(function RungDot({ color, live }: { color: string; live: boolean }) {
-  const reduced = useReducedMotion();
-  const pulse = useSharedValue(1);
-
-  useEffect(() => {
-    if (reduced || !live) {
-      cancelAnimation(pulse);
-      pulse.value = 1;
-      return;
-    }
-    pulse.value = withRepeat(withTiming(0.35, { duration: 700 }), -1, true);
-    return () => cancelAnimation(pulse);
-  }, [reduced, live, pulse]);
-
-  const style = useAnimatedStyle(() => ({ opacity: pulse.value }));
-
-  return (
-    <Animated.View
-      accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
-      style={[styles.rungDot, { backgroundColor: color }, style]}
-    />
-  );
-});
-
 const styles = StyleSheet.create({
-  // ------------------------------------------------------------------ well
-  /*
-    The artwork floats as a rounded card rather than sitting flush to the edges
-    under a hard rule. Inset by the gutter so the heat behind it reads around
-    all four sides — that separation is what makes it look lit rather than
-    pasted on.
-  */
+  // -------------------------------------------------------------- the art
+  stageWrap: {
+    alignItems: 'center',
+    paddingTop: Space.xxl + 2,
+  },
   stage: {
-    width: 'auto',
-    marginHorizontal: GUTTER,
-    height: WELL_HEIGHT,
-    borderRadius: Radii.xl,
+    width: '100%',
+    maxWidth: ART,
+    aspectRatio: 1,
+    borderRadius: ART_RADIUS,
     overflow: 'hidden',
   },
   /** Mounted and audible, out of the layout, effectively invisible. */
@@ -516,49 +450,136 @@ const styles = StyleSheet.create({
     height: 1,
     opacity: 0,
   },
-  /** Carries the bloom. No clip here, or the shadow is cropped with the corners. */
-  wellGlow: {
-    marginHorizontal: GUTTER,
-    borderRadius: Radii.xl,
-  },
-  well: {
-    position: 'relative',
-    height: WELL_HEIGHT,
+  art: {
+    width: '100%',
+    maxWidth: ART,
+    aspectRatio: 1,
+    borderRadius: ART_RADIUS,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
+  },
+  artSkeleton: {
     borderRadius: Radii.xl,
   },
-  wellInitial: {
-    ...Type.display(118),
-    lineHeight: 96,
-    letterSpacing: tracking(118, -0.06),
+  artInitial: {
+    fontFamily: Fonts.extrabold,
+    fontSize: 96,
+    letterSpacing: tracking(96, -0.06),
   },
-  wellCaption: {
-    ...Type.label(10),
-    position: 'absolute',
-    left: GUTTER,
-    bottom: GUTTER,
+
+  // -------------------------------------------------------------- the head
+  head: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingTop: Space.xxl + 4,
+    paddingHorizontal: Space.lg,
   },
-  wellRule: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: '50%',
-    height: Rule.major,
+  headMeta: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: 'center',
+    paddingHorizontal: Space.md,
   },
-  wellChip: {
-    position: 'absolute',
-    right: GUTTER,
-    top: GUTTER,
-    paddingHorizontal: 7,
+  headSkeleton: {
+    alignItems: 'center',
+    gap: Space.sm,
     paddingVertical: Space.xs,
   },
-  wellChipLabel: {
-    ...Type.heading(10),
-    letterSpacing: tracking(10, 0.1),
-    textTransform: 'uppercase',
+  title: {
+    ...Type.display(27),
+    lineHeight: 29,
+    letterSpacing: tracking(27, -0.03),
+    textAlign: 'center',
   },
+  artist: {
+    ...Type.body(14),
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  glyph: {
+    width: TOUCH_TARGET,
+    height: TOUCH_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dim: {
+    opacity: 0.5,
+  },
+
+  // ---------------------------------------------------------- the waveform
+  progress: {
+    paddingTop: Space.xxl + 2,
+    paddingHorizontal: Space.xxl + 4,
+  },
+  wave: {
+    height: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5.5,
+  },
+  bar: {
+    flex: 1,
+    minWidth: 0,
+    borderRadius: 1,
+  },
+  times: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Space.sm,
+    marginTop: Space.sm + 2,
+  },
+  time: {
+    fontFamily: Fonts.semibold,
+    fontSize: 12,
+    fontVariant: ['tabular-nums'],
+  },
+  sync: {
+    fontFamily: Fonts.extrabold,
+    fontSize: 12,
+    letterSpacing: tracking(12, 0.04),
+    fontVariant: ['tabular-nums'],
+    flexShrink: 1,
+  },
+
+  // ------------------------------------------------------------ error card
+  errorCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.md,
+    marginTop: Space.lg,
+    marginHorizontal: Space.lg + 2,
+    padding: Space.md + 1,
+    borderRadius: Radii.lg,
+  },
+  errorMeta: {
+    flex: 1,
+    minWidth: 0,
+  },
+  errorKicker: {
+    ...Type.label(10),
+    letterSpacing: tracking(10, 0.14),
+  },
+  errorBody: {
+    ...Type.body(13),
+    marginTop: 2,
+  },
+  errorAction: {
+    flexGrow: 0,
+    flexShrink: 0,
+    minHeight: TOUCH_TARGET - 8,
+    justifyContent: 'center',
+    paddingHorizontal: Space.lg,
+    borderRadius: Radii.sm,
+  },
+  errorActionLabel: {
+    fontFamily: Fonts.semibold,
+    fontSize: 12,
+    letterSpacing: tracking(12, 0.02),
+  },
+
+  // --------------------------------------------------------- modular grid
   gridColumn: {
     position: 'absolute',
     top: 0,
@@ -570,206 +591,5 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 1,
-  },
-
-  // ----------------------------------------------------------------- title
-  block: {
-    paddingHorizontal: GUTTER,
-    paddingTop: Space.lg,
-  },
-  /*
-    Larger and tighter than Patchbay's 26. In this direction the track title is
-    the headline of the screen, sitting directly under the artwork with nothing
-    competing — so it can carry the weight that a hard rule used to.
-  */
-  title: {
-    ...Type.display(32),
-    lineHeight: 33,
-    letterSpacing: tracking(32, -0.035),
-  },
-  subtitle: {
-    ...Type.body(16),
-    marginTop: 5,
-  },
-
-  // -------------------------------------------------------------- progress
-  /*
-    The playhead bleeds ±5px past the track, so the padding starts there. The
-    rest of the 44px target comes from hitSlop rather than more padding —
-    Android clips touches that fall outside the parent's own bounds, so growing
-    the box is the only way to grow the target, and this block only has 16px of
-    vertical budget to give.
-  */
-  scrubber: {
-    paddingVertical: PLAYHEAD_BLEED + 5,
-  },
-  track: {
-    height: TRACK_HEIGHT,
-    position: 'relative',
-  },
-  trackFill: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-  },
-  playhead: {
-    position: 'absolute',
-    top: -PLAYHEAD_BLEED,
-    bottom: -PLAYHEAD_BLEED,
-    width: 2,
-    marginLeft: -1,
-  },
-  times: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: Space.sm - 2,
-  },
-  time: {
-    ...readout(11),
-    letterSpacing: tracking(11, 0.06),
-  },
-
-  // ---------------------------------------------------------------- lyrics
-  lyrics: {
-    marginTop: Space.lg,
-    borderTopWidth: Rule.major,
-  },
-  lyricsHead: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-    gap: Space.md,
-    paddingHorizontal: GUTTER,
-    paddingTop: Space.md - 2,
-    paddingBottom: Space.sm - 2,
-  },
-  kicker: {
-    ...Type.label(10),
-  },
-  kickerRight: {
-    ...Type.label(10),
-    letterSpacing: tracking(10, 0.09),
-    flexShrink: 1,
-    textAlign: 'right',
-  },
-  lyricsFallback: {
-    ...Type.body(16),
-    paddingHorizontal: GUTTER,
-    paddingBottom: Space.lg - 2,
-  },
-
-  // ------------------------------------------------------------ sync block
-  syncBlock: {
-    marginTop: Space.lg - 2,
-    marginHorizontal: GUTTER,
-    borderWidth: Rule.hair,
-  },
-  syncHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space.sm,
-    paddingHorizontal: 11,
-    paddingVertical: Space.md - 2,
-    borderBottomWidth: Rule.hair,
-  },
-  rungDot: {
-    width: 8,
-    height: 8,
-    flexGrow: 0,
-    flexShrink: 0,
-  },
-  syncRung: {
-    ...Type.heading(11),
-    letterSpacing: tracking(11, 0.09),
-    textTransform: 'uppercase',
-    flex: 1,
-  },
-  syncDrift: {
-    ...readout(12),
-  },
-  syncCells: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-  },
-  syncCell: {
-    flex: 1,
-    minWidth: 0,
-    paddingHorizontal: 11,
-    paddingVertical: Space.sm,
-    justifyContent: 'center',
-    borderRightWidth: Rule.hair,
-  },
-  cellLabel: {
-    ...Type.label(10),
-    letterSpacing: tracking(10, 0.11),
-  },
-  cellValue: {
-    ...readout(13),
-    marginTop: 2,
-  },
-  reanchor: {
-    minHeight: TOUCH_TARGET,
-    flexGrow: 0,
-    flexShrink: 0,
-    paddingHorizontal: GUTTER,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  reanchorLabel: {
-    ...Type.heading(10),
-    letterSpacing: tracking(10, 0.09),
-    textTransform: 'uppercase',
-  },
-
-  // ----------------------------------------------------------------- error
-  error: {
-    marginTop: Space.md,
-    marginHorizontal: GUTTER,
-    padding: Space.md,
-    borderWidth: Rule.hair,
-  },
-  errorText: {
-    ...Type.body(16),
-  },
-
-  // --------------------------------------------------------------- compact
-  compactRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space.sm + 2,
-    paddingHorizontal: GUTTER,
-    paddingVertical: Space.sm,
-    minHeight: 56,
-    borderTopWidth: Rule.major,
-  },
-  compactTile: {
-    width: COMPACT_TILE,
-    height: COMPACT_TILE,
-    flexGrow: 0,
-    flexShrink: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: Rule.hair,
-  },
-  compactInitial: {
-    ...readout(15),
-  },
-  compactMeta: {
-    flex: 1,
-    minWidth: 0,
-  },
-  compactTitle: {
-    ...Type.heading(13),
-    letterSpacing: tracking(13, 0.03),
-  },
-  compactSub: {
-    ...Type.body(12),
-  },
-  compactDrift: {
-    ...readout(12),
-    flexGrow: 0,
-    flexShrink: 0,
-    textAlign: 'right',
   },
 });

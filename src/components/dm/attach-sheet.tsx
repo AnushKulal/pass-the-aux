@@ -1,9 +1,11 @@
 /**
- * SEND SOMETHING — the DM attach sheet.
+ * Send something — the DM attach sheet.
  *
- * Four rows under a 2px head rule: Photo or video / File / Voice note / A
- * track, each a 58px cell divided by hairlines. No radius, no shadow; the one
- * 2px accent rule along the sheet's top edge is the whole elevation cue.
+ * A rounded sheet with a grabber, and four rows inside it: Photo or video /
+ * File / Voice note / A track. Each row is a raised icon tile, a title and one
+ * line under it. The sheet floats on `dropped()`, which is what a surface
+ * genuinely above the page gets — not the raised pair, which is for things
+ * sitting ON the ground.
  *
  * ## Missing dependencies, stated honestly
  *
@@ -38,10 +40,13 @@ import {
   Duration,
   Fonts,
   PointerEvents,
-  Rule,
+  Radii,
+  Sheet as SheetMetrics,
   Space,
   TOUCH_TARGET,
   Type,
+  dropped,
+  raised,
   tracking,
 } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
@@ -68,28 +73,21 @@ export const ATTACH_UNAVAILABLE_REASON: Record<AttachOption, string> = {
 };
 
 const ROW_HEIGHT = 58;
-const ICON = 20;
+const ROW_TILE = 40;
+const ICON = 19;
 
 type OptionSpec = {
   key: AttachOption;
   title: string;
   sub: string;
   Icon: typeof ImageIcon;
-  /** The accent is spent on the play glyph only: that row is about playback. */
-  accent?: boolean;
 };
 
 const OPTIONS: readonly OptionSpec[] = [
   { key: 'media', title: 'Photo or video', sub: 'From your camera roll', Icon: ImageIcon },
   { key: 'file', title: 'File', sub: 'Up to 25 MB', Icon: FileText },
-  { key: 'voice', title: 'Voice note', sub: 'Hold to record, up to two minutes', Icon: Mic },
-  {
-    key: 'track',
-    title: 'A track',
-    sub: 'Source-agnostic — they can play it on either provider',
-    Icon: Play,
-    accent: true,
-  },
+  { key: 'voice', title: 'Voice note', sub: 'Up to two minutes', Icon: Mic },
+  { key: 'track', title: 'A track', sub: 'They can queue it anywhere', Icon: Play },
 ];
 
 export type DmAttachSheetProps = {
@@ -152,29 +150,36 @@ export function DmAttachSheet({
         <Animated.View
           style={[
             styles.sheet,
-            { backgroundColor: C.bg, borderTopColor: C.rule3, paddingBottom: insets.bottom },
+            { backgroundColor: C.bg, paddingBottom: insets.bottom + Space.md },
+            dropped(C, 'lg'),
             sheetStyle,
           ]}>
-          <View style={[styles.head, { borderBottomColor: C.rule }]}>
-            <Text style={[styles.title, { color: C.ink }]}>SEND SOMETHING</Text>
+          <View style={styles.grabberSlot}>
+            <View style={[styles.grabber, { backgroundColor: C.rule3 }]} />
+          </View>
+
+          <View style={styles.head}>
+            <Text style={[styles.title, { color: C.ink }]}>Send something</Text>
 
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Close"
               onPress={onClose}
-              style={({ pressed }) => [styles.close, pressed && styles.dim]}>
-              <Text style={[styles.closeLabel, { color: C.ink2 }]}>CLOSE</Text>
+              style={({ pressed }) => [
+                styles.close,
+                { backgroundColor: pressed ? C.surface2 : C.surface },
+                raised(C),
+              ]}>
+              <Text style={[styles.closeLabel, { color: C.ink2 }]}>Close</Text>
             </Pressable>
           </View>
 
           <View style={styles.body}>
-            {OPTIONS.map((option, index) => {
+            {OPTIONS.map((option) => {
               const enabled = available?.[option.key] ?? ATTACH_AVAILABLE[option.key];
               const reason =
                 unavailableReason?.[option.key] ?? ATTACH_UNAVAILABLE_REASON[option.key];
-              const last = index === OPTIONS.length - 1;
-
-              const iconColor = !enabled ? C.ink3 : option.accent ? C.liveText : C.ink2;
+              const iconColor = enabled ? C.ink2 : C.ink3;
 
               return (
                 <Pressable
@@ -187,10 +192,13 @@ export function DmAttachSheet({
                   onPress={() => onSelect(option.key)}
                   style={({ pressed }) => [
                     styles.row,
-                    !last && { borderBottomWidth: Rule.hair, borderBottomColor: C.ruleSoft },
-                    { backgroundColor: pressed ? C.surface : 'transparent' },
+                    { backgroundColor: pressed && enabled ? C.surface : 'transparent' },
+                    !enabled && styles.dim,
                   ]}>
-                  <option.Icon size={ICON} strokeWidth={2} color={iconColor} />
+                  <View
+                    style={[styles.rowTile, { backgroundColor: C.surface }, enabled ? raised(C) : null]}>
+                    <option.Icon size={ICON} strokeWidth={2} color={iconColor} />
+                  </View>
 
                   <View style={styles.rowText}>
                     <Text style={[styles.rowTitle, { color: enabled ? C.ink : C.ink3 }]}>
@@ -226,43 +234,51 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 720,
     alignSelf: 'center',
-    // A 2px rule at the strongest hairline: it says the surface arrived, and
-    // it is the only elevation cue in a design with no shadows. Not accent —
-    // a sheet having appeared is not a live state.
-    borderTopWidth: Rule.major,
+    borderTopLeftRadius: SheetMetrics.radius,
+    borderTopRightRadius: SheetMetrics.radius,
+  },
+  grabberSlot: {
+    paddingTop: Space.md + 2,
+    alignItems: 'center',
+  },
+  grabber: {
+    width: SheetMetrics.grabberW,
+    height: SheetMetrics.grabberH,
+    borderRadius: SheetMetrics.grabberH / 2,
   },
   head: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Space.md,
-    paddingLeft: Space.md,
-    paddingRight: Space.xs,
-    paddingTop: Space.md,
-    paddingBottom: Space.sm + 2,
-    borderBottomWidth: Rule.major,
+    paddingHorizontal: Space.xl,
+    paddingTop: Space.lg,
+    paddingBottom: Space.md,
   },
   title: {
-    ...Type.heading(15),
-    letterSpacing: tracking(15, 0.03),
+    ...Type.display(20),
+    letterSpacing: tracking(20, -0.025),
     flex: 1,
+    minWidth: 0,
   },
   close: {
     minHeight: TOUCH_TARGET,
-    minWidth: TOUCH_TARGET,
-    alignItems: 'flex-end',
+    flexShrink: 0,
+    alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: Space.xs,
+    paddingHorizontal: Space.lg,
+    borderRadius: Radii.md,
   },
   closeLabel: {
-    ...Type.heading(10),
-    letterSpacing: tracking(10, 0.1),
+    fontFamily: Fonts.semibold,
+    fontSize: 12.5,
+    lineHeight: 16,
   },
   dim: {
-    opacity: 0.6,
+    opacity: 0.55,
   },
   body: {
-    paddingTop: Space.xs,
-    paddingBottom: 18,
+    paddingHorizontal: Space.md + 2,
+    paddingBottom: Space.sm,
   },
   row: {
     flexDirection: 'row',
@@ -270,6 +286,15 @@ const styles = StyleSheet.create({
     gap: Space.md,
     paddingHorizontal: Space.md,
     minHeight: ROW_HEIGHT,
+    borderRadius: Radii.lg,
+  },
+  rowTile: {
+    width: ROW_TILE,
+    height: ROW_TILE,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radii.sm,
   },
   rowText: {
     flex: 1,

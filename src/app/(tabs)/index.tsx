@@ -1,23 +1,22 @@
 /**
  * The Feed — live "who is listening to what" across every lounge I am in.
  *
- * This is the screen that has to make the product legible in one glance, so
- * everything here is push-driven: the rows arrive over Realtime presence, and
+ * design/v2 "Feed": a masthead with the live mark, one raised hero card for the
+ * Session you can walk into (artwork, waveform, timecode, Join), then the
+ * LISTENING NOW list — raised cards for the people in a Session, flat rows for
+ * the people who are merely online.
+ *
+ * Everything here is push-driven: the rows arrive over Realtime presence, and
  * the only queries are the two slow-moving lists behind them (my lounges, my
- * Sessions).
- *
- * Patchbay: no card, no glass, no gutter. The rows run edge to edge and are
- * separated by 1px hairlines; the header is cut off from them by a 2px rule.
- * The accent appears in exactly three places — the live count, a JOIN cell, and
- * the progress fill — because all three mean the same thing.
- *
- * Rows are filtered to lounges I am actually a member of, which falls out of
- * `useMyLounges` driving both the presence subscription and the list.
+ * Sessions). Rows are filtered to lounges I am actually a member of, which
+ * falls out of `useMyLounges` driving both the subscription and the list.
  */
 
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
+import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Mail, Play, Radio, Users, WifiOff, type LucideIcon } from 'lucide-react-native';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   FlatList,
   Pressable,
@@ -25,7 +24,9 @@ import {
   StyleSheet,
   Text,
   View,
+  type LayoutChangeEvent,
   type ListRenderItemInfo,
+  type TextStyle,
 } from 'react-native';
 import Animated, {
   Easing,
@@ -35,8 +36,16 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
-import { NowPlayingCard } from '@/components/feed/now-playing-card';
-import { Screen, Skeleton } from '@/components/ui';
+import { LiveDot } from '@/components/feed/live-dot';
+import {
+  NowPlayingCard,
+  glyphFor,
+  timecode,
+  useFeedClock,
+} from '@/components/feed/now-playing-card';
+import { EmptyState, Screen, Skeleton } from '@/components/ui';
+import { useTotalUnread } from '@/features/dm/queries';
+import { livePositionMs } from '@/features/presence/presence-client';
 import {
   useBroadcastPresence,
   type LocalNowPlaying,
@@ -52,24 +61,47 @@ import {
 import { useAuth } from '@/lib/auth';
 import { syncClock } from '@/lib/clock';
 import { supabase } from '@/lib/supabase';
-import { Duration, Rule, Space, Type } from '@/lib/theme';
+import {
+  Duration,
+  Fonts,
+  Radii,
+  Space,
+  TOUCH_TARGET,
+  Type,
+  dropped,
+  raised,
+  raisedLarge,
+  tracking,
+} from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 import { usePlayback } from '@/playback/store';
-import type { RoomTimeline } from '@/playback/sync-controller';
+import { expectedPositionMs, type RoomTimeline } from '@/playback/sync-controller';
 
 const MY_SESSIONS_KEY = 'my-sessions';
-const SKELETON_ROWS = [0, 1, 2, 3];
+const SKELETON_ROWS = [0, 1, 2];
 
-/** Matches the row exactly: a resizing skeleton is worse than no skeleton. */
-const ROW_HEIGHT = 78;
-const WELL = 64;
-const RAIL = 70;
+/** design/v2: 24 at the masthead, 20 around the hero card, 14 around the rows. */
+const GUTTER = 24;
+const CARD_GUTTER = 20;
+const ROW_GUTTER = 14;
 
-/** The screen gutter inside header and prose blocks. Rows themselves bleed. */
-const GUTTER = 12;
+/** Clears the floating dock without leaving a hole under the last row. */
+const LIST_TAIL = 48;
 
-/** Clears the tab bar without leaving a hole under the last row. */
-const LIST_TAIL = 32;
+const ART = 78;
+const TILE = 52;
+
+/** The 32-bar waveform, exact from the design. Percentages of the 30px band. */
+const BARS = [
+  28, 48, 34, 64, 40, 76, 52, 30, 58, 92, 44, 36, 68, 54, 32, 56, 100, 38, 66, 48, 26, 44, 72, 54,
+  82, 34, 60, 46, 78, 30, 52, 68,
+];
+
+/** `Type.readout` hands back a readonly tuple; TextStyle wants a mutable one. */
+const readout = (size: number): TextStyle => ({
+  ...Type.readout(size),
+  fontVariant: ['tabular-nums'],
+});
 
 /** A live Session I am already a participant in. */
 type ActiveSession = {
@@ -112,9 +144,7 @@ function useMySessions(userId: string | null | undefined): UseQueryResult<Active
       if (rooms.error) throw rooms.error;
 
       const rows = rooms.data ?? [];
-      const trackIds = rows
-        .map((row) => row.track_id)
-        .filter((id): id is string => id !== null);
+      const trackIds = rows.map((row) => row.track_id).filter((id): id is string => id !== null);
 
       const tracks = trackIds.length
         ? await supabase
@@ -152,7 +182,233 @@ function useMySessions(userId: string | null | undefined): UseQueryResult<Active
   });
 }
 
-// ------------------------------------------------------------------- list parts
+// ------------------------------------------------------------------- the hero
+
+/**
+ * What the hero card is showing.
+ *
+ * `mine` is a Session I am already inside — the card becomes the way back into
+ * it, and the readout reports my own sync rather than a head count. `join` is
+ * somebody else's, reconstructed entirely from their presence beat.
+ */
+type Hero =
+  | {
+      kind: 'mine';
+      roomId: string;
+      loungeId: string;
+      loungeName: string;
+      who: string;
+      title: string;
+      artist: string;
+      artworkUrl: string | null;
+      durationMs: number;
+      timeline: RoomTimeline;
+    }
+  | {
+      kind: 'join';
+      roomId: string;
+      loungeId: string;
+      loungeName: string;
+      who: string;
+      title: string;
+      artist: string;
+      artworkUrl: string | null;
+      durationMs: number;
+      entry: FeedEntry;
+    };
+
+/**
+ * The 32-bar waveform, drawn twice: once in `track` for the whole band and once
+ * in `ink` inside a clip that is as wide as the progress. That is the design's
+ * `clip-path` — React Native has none, so the clip is a measured box with
+ * `overflow: hidden` and a full-width row inside it.
+ *
+ * Memoised on colour alone, so the 64 bars are laid out once and only the clip
+ * box moves on each 250ms tick.
+ */
+const Bars = memo(function Bars({ color }: { color: string }) {
+  return (
+    <>
+      {BARS.map((height, i) => (
+        <View
+          key={`${i}-${height}`}
+          style={[styles.bar, { height: `${height}%`, backgroundColor: color }]}
+        />
+      ))}
+    </>
+  );
+});
+
+function Waveform({ progress }: { progress: number }) {
+  const C = useColors();
+  const [width, setWidth] = useState(0);
+
+  const onLayout = useCallback((e: LayoutChangeEvent) => {
+    const next = e.nativeEvent.layout.width;
+    setWidth((prev) => (prev === next ? prev : next));
+  }, []);
+
+  return (
+    <View
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={styles.wave}
+      onLayout={onLayout}>
+      <Bars color={C.track} />
+
+      <View style={[styles.waveClip, { width: width * progress }]}>
+        <View style={[styles.waveInner, { width }]}>
+          <Bars color={C.ink} />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+/** The one filled action on the screen. Reserved for walking into a Session. */
+function HeroActions({
+  primary,
+  onPrimary,
+  secondary,
+  onSecondary,
+}: {
+  primary: string;
+  onPrimary: () => void;
+  secondary: string;
+  onSecondary: () => void;
+}) {
+  const C = useColors();
+
+  return (
+    <View style={styles.actions}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={primary}
+        onPress={onPrimary}
+        style={({ pressed }) => [
+          styles.primary,
+          { backgroundColor: C.pill },
+          dropped(C, 'md'),
+          pressed && styles.pressed,
+        ]}>
+        <Play size={16} strokeWidth={2.5} color={C.pillInk} fill={C.pillInk} />
+        <Text numberOfLines={1} style={[styles.primaryLabel, { color: C.pillInk }]}>
+          {primary}
+        </Text>
+      </Pressable>
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Open ${secondary}`}
+        onPress={onSecondary}
+        style={({ pressed }) => [
+          styles.secondary,
+          { backgroundColor: C.surface2 },
+          raised(C),
+          pressed && styles.pressed,
+        ]}>
+        <Text numberOfLines={1} style={[styles.secondaryLabel, { color: C.ink2 }]}>
+          {secondary}
+        </Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function HeroCard({
+  hero,
+  listeners,
+  onOpenRoom,
+  onOpenLounge,
+}: {
+  hero: Hero;
+  listeners: number;
+  onOpenRoom: (roomId: string) => void;
+  onOpenLounge: (loungeId: string) => void;
+}) {
+  const C = useColors();
+  const nowMs = useFeedClock();
+  const driftMs = usePlayback((state) => state.driftMs);
+  const isSynced = usePlayback((state) => state.isSynced);
+
+  /*
+    `expectedPositionMs` measures from the room's start stamp and keeps counting
+    past the end of the track — the room row simply has not been advanced yet —
+    so the readout is clamped to the duration rather than reporting 9:31 of a
+    3:12 song. `livePositionMs` already clamps itself.
+  */
+  const raw =
+    hero.kind === 'mine'
+      ? expectedPositionMs(hero.timeline, nowMs)
+      : livePositionMs(hero.entry, nowMs);
+
+  const positionMs = hero.durationMs > 0 ? Math.min(hero.durationMs, Math.max(0, raw)) : 0;
+  const progress = hero.durationMs > 0 ? positionMs / hero.durationMs : 0;
+
+  /*
+    The centre readout is the only place the two kinds diverge in meaning: my
+    own Session can report the sync the controller is actually measuring, while
+    somebody else's can only honestly report how many of my lounge-mates are in
+    it.
+  */
+  const centre =
+    hero.kind === 'mine'
+      ? isSynced
+        ? 'IN SYNC'
+        : `${driftMs > 0 ? '+' : ''}${Math.round(driftMs)}MS`
+      : `${listeners} LISTENING`;
+
+  return (
+    <View style={[styles.hero, { backgroundColor: C.surface }, raisedLarge(C)]}>
+      <View style={styles.heroTop}>
+        <View style={[styles.art, { backgroundColor: C.artwork }, dropped(C, 'md')]}>
+          <Text style={[styles.artGlyph, { color: C.artInk }]}>{glyphFor(hero.title)}</Text>
+
+          {/* Over the glyph, so the letter doubles as the error fallback. */}
+          {hero.artworkUrl ? (
+            <Image
+              source={{ uri: hero.artworkUrl }}
+              style={StyleSheet.absoluteFill}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              transition={Duration.press}
+              accessible={false}
+            />
+          ) : null}
+        </View>
+
+        <View style={styles.heroInfo}>
+          <Text numberOfLines={1} style={[styles.heroKicker, { color: C.ink3 }]}>
+            {`${hero.loungeName} · on aux · ${hero.who}`}
+          </Text>
+          <Text numberOfLines={1} style={[styles.heroTitle, { color: C.ink }]}>
+            {hero.title}
+          </Text>
+          <Text numberOfLines={1} style={[styles.heroArtist, { color: C.ink2 }]}>
+            {hero.artist}
+          </Text>
+        </View>
+      </View>
+
+      <Waveform progress={progress} />
+
+      <View style={styles.readout}>
+        <Text style={[styles.readoutSide, { color: C.ink2 }]}>{timecode(positionMs)}</Text>
+        <Text style={[styles.readoutCentre, { color: C.ink }]}>{centre}</Text>
+        <Text style={[styles.readoutSide, { color: C.ink2 }]}>{timecode(hero.durationMs)}</Text>
+      </View>
+
+      <HeroActions
+        primary={hero.kind === 'mine' ? 'Back to session' : 'Join session'}
+        onPrimary={() => onOpenRoom(hero.roomId)}
+        secondary={hero.loungeName}
+        onSecondary={() => onOpenLounge(hero.loungeId)}
+      />
+    </View>
+  );
+}
+
+// ------------------------------------------------------------------ list parts
 
 const keyExtractor = (entry: FeedEntry) => entry.userId;
 
@@ -181,127 +437,96 @@ function useModuleEnter() {
   }));
 }
 
-/** The one accent-outlined action shape used across the Feed's prose blocks. */
-function AccentAction({ label, onPress }: { label: string; onPress: () => void }) {
-  const C = useColors();
-
+/**
+ * The card that stands in the hero's place when there is no hero.
+ *
+ * A new account sees this before it sees anything else, so it is built to the
+ * hero's own geometry — `size="hero"` is the shared card's 78px tile and 21px
+ * title — rather than shrunk to a footnote. One line of what happened, one
+ * thing to do about it.
+ *
+ * The drawing lives in `@/components/ui/empty-state`. This screen, Explore and
+ * Lounges each used to carry their own copy of it, which is how the icon ended
+ * up 30px here and 24px there.
+ */
+function QuietCard({
+  icon,
+  title,
+  line,
+  action,
+}: {
+  icon: LucideIcon;
+  title: string;
+  line?: string;
+  action: { label: string; onPress: () => void };
+}) {
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.action,
-        { borderColor: C.live, backgroundColor: pressed ? C.liveWash : 'transparent' },
-      ]}>
-      <Text style={[styles.actionLabel, { color: C.liveText }]}>{label}</Text>
-    </Pressable>
+    <EmptyState
+      icon={icon}
+      title={title}
+      description={line}
+      size="hero"
+      primary={action}
+      style={styles.quiet}
+    />
   );
 }
 
-/** A ruled prose block: kicker, sentence, optional action. */
-function Notice({
-  kicker,
-  body,
-  action,
-}: {
-  kicker: string;
-  body: string;
-  action?: { label: string; onPress: () => void };
-}) {
+/**
+ * The hero card's own loading twin — artwork well, two lines, the waveform
+ * band, the readout, both action cells. The hero is the tallest thing on the
+ * screen, so leaving it out of the skeleton is what makes the Feed jump when
+ * the data lands.
+ */
+function HeroSkeleton() {
   const C = useColors();
 
   return (
-    <View style={[styles.notice, { borderBottomColor: C.rule }]}>
-      <Text style={[styles.noticeKicker, { color: C.ink3 }]}>{kicker}</Text>
-      <Text style={[styles.noticeBody, { color: C.ink2 }]}>{body}</Text>
-      {action ? (
-        <View style={styles.noticeAction}>
-          <AccentAction label={action.label} onPress={action.onPress} />
+    <View style={[styles.hero, { backgroundColor: C.surface }, raisedLarge(C)]}>
+      <View style={styles.heroTop}>
+        <Skeleton width={ART} height={ART} />
+        <View style={styles.skeletonHeroInfo}>
+          <Skeleton width="46%" height={10} />
+          <Skeleton width="82%" height={20} />
+          <Skeleton width="60%" height={12} />
         </View>
-      ) : null}
+      </View>
+
+      <Skeleton width="100%" height={30} style={styles.skeletonWave} />
+
+      <View style={styles.skeletonReadout}>
+        <Skeleton width={34} height={11} />
+        <Skeleton width={62} height={11} />
+        <Skeleton width={34} height={11} />
+      </View>
+
+      <View style={styles.actions}>
+        <Skeleton width="100%" height={50} style={styles.flex} />
+        <Skeleton width={118} height={50} />
+      </View>
     </View>
   );
 }
 
-/** Four rows of the real geometry, so nothing shifts when the data lands. */
+/** The whole screen at the geometry it will have once it arrives. */
 function FeedSkeleton() {
   const C = useColors();
 
   return (
     <View>
+      <HeroSkeleton />
+
+      <Text style={[styles.sectionKicker, { color: C.ink3 }]}>Listening now</Text>
+
       {SKELETON_ROWS.map((row) => (
-        <View key={row} style={[styles.skeletonRow, { borderBottomColor: C.rule }]}>
-          <View
-            style={[styles.skeletonWell, { borderRightColor: C.rule, backgroundColor: C.bgRecessed }]}
-          />
+        <View key={row} style={[styles.skeletonRow, { backgroundColor: C.surface }, raised(C)]}>
+          <Skeleton width={TILE} height={TILE} />
           <View style={styles.skeletonInfo}>
-            <Skeleton width="72%" height={14} radius={0} />
-            <Skeleton width="48%" height={11} radius={0} />
-            <Skeleton width={96} height={12} radius={0} />
-          </View>
-          <View style={[styles.skeletonRail, { borderLeftColor: C.rule }]}>
-            <Skeleton width={34} height={11} radius={0} />
-            <Skeleton width={26} height={9} radius={0} />
+            <Skeleton width="58%" height={13} />
+            <Skeleton width="80%" height={11} />
           </View>
         </View>
       ))}
-    </View>
-  );
-}
-
-/**
- * The Sessions I am already inside. Not in the handoff's Feed — that design
- * reaches them through the lounge rail, which this build does not have — so it
- * keeps the same ruled idiom and stays out of the rows' way.
- */
-function SessionStrip({
-  sessions,
-  loungeNames,
-  onOpen,
-}: {
-  sessions: ActiveSession[];
-  loungeNames: Map<string, string>;
-  onOpen: (roomId: string) => void;
-}) {
-  const C = useColors();
-
-  return (
-    <View style={[styles.strip, { borderBottomColor: C.rule }]}>
-      <Text style={[styles.stripKicker, { color: C.ink3 }]}>YOUR SESSIONS</Text>
-
-      <FlatList
-        horizontal
-        data={sessions}
-        keyExtractor={(session) => session.roomId}
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.stripRow}
-        renderItem={({ item }) => {
-          const loungeName = loungeNames.get(item.loungeId) ?? 'Lounge';
-          return (
-            <Pressable
-              onPress={() => onOpen(item.roomId)}
-              accessibilityRole="button"
-              accessibilityLabel={`Back to ${item.name} in ${loungeName}`}
-              style={({ pressed }) => [
-                styles.session,
-                { borderColor: C.rule2, backgroundColor: pressed ? C.surface : 'transparent' },
-              ]}>
-              <View style={styles.sessionTop}>
-                {item.timeline.isPlaying ? (
-                  <View style={[styles.sessionDot, { backgroundColor: C.live }]} />
-                ) : null}
-                <Text numberOfLines={1} style={[styles.sessionName, { color: C.ink }]}>
-                  {item.track?.title ?? item.name}
-                </Text>
-              </View>
-              <Text numberOfLines={1} style={[styles.sessionLounge, { color: C.ink3 }]}>
-                {loungeName}
-              </Text>
-            </Pressable>
-          );
-        }}
-      />
     </View>
   );
 }
@@ -314,6 +539,7 @@ export default function FeedScreen() {
   const queryClient = useQueryClient();
   const { profile } = useAuth();
   const moduleStyle = useModuleEnter();
+  const unread = useTotalUnread();
 
   const [refreshing, setRefreshing] = useState(false);
 
@@ -374,8 +600,8 @@ export default function FeedScreen() {
 
   useBroadcastPresence(identity, loungeIds, localNowPlaying);
 
-  // My own row is redundant: the Sessions strip already says where I am, and a
-  // Feed that leads with yourself is a mirror, not a party.
+  // My own row is redundant: the hero card already says where I am, and a Feed
+  // that leads with yourself is a mirror, not a party.
   const { entries, ready } = useLoungePresence(loungeList, profile?.id);
 
   const openRoom = useCallback(
@@ -383,6 +609,12 @@ export default function FeedScreen() {
     [router]
   );
 
+  const openLounge = useCallback(
+    (loungeId: string) => router.push({ pathname: '/lounge/[id]', params: { id: loungeId } }),
+    [router]
+  );
+
+  const openMessages = useCallback(() => router.push('/messages'), [router]);
   const startSession = useCallback(() => router.push('/room/create'), [router]);
 
   const onRefresh = useCallback(async () => {
@@ -402,12 +634,11 @@ export default function FeedScreen() {
   }, [queryClient]);
 
   const showSkeleton = lounges.isPending || (!ready && !lounges.isError);
-  const hasRows = !showSkeleton && entries.length > 0;
 
   /**
-   * `N IN` on a row is "people from your lounges who are in that Session",
-   * which is the only head count presence can honestly produce — the room's own
-   * participant list is not on the socket.
+   * The head count on the hero is "people from your lounges who are in that
+   * Session", which is the only one presence can honestly produce — the room's
+   * own participant list is not on the socket.
    */
   const listenersByRoom = useMemo(() => {
     const counts = new Map<string, number>();
@@ -418,85 +649,231 @@ export default function FeedScreen() {
     return counts;
   }, [entries]);
 
+  const hero = useMemo<Hero | null>(() => {
+    // A Session I am already inside wins the card: it becomes the way back in.
+    const mine =
+      (playbackRoomId ? sessionList.find((s) => s.roomId === playbackRoomId) : undefined) ??
+      sessionList.find((s) => s.timeline.isPlaying) ??
+      sessionList[0];
+
+    if (mine) {
+      const attached = playbackRoomId === mine.roomId;
+      const track =
+        attached && playbackTrack
+          ? {
+              title: playbackTrack.title,
+              artist: playbackTrack.artist,
+              artworkUrl: playbackTrack.artwork_url,
+              durationMs: playbackTrack.duration_ms,
+            }
+          : mine.track;
+
+      return {
+        kind: 'mine',
+        roomId: mine.roomId,
+        loungeId: mine.loungeId,
+        loungeName: loungeNames.get(mine.loungeId) ?? mine.name,
+        who: 'you',
+        title: track?.title ?? mine.name,
+        artist: track?.artist ?? '',
+        artworkUrl: track?.artworkUrl ?? null,
+        durationMs: track?.durationMs ?? 0,
+        timeline: attached && playbackTimeline ? playbackTimeline : mine.timeline,
+      };
+    }
+
+    const joinable = entries.find((e) => e.roomId !== null && e.trackTitle !== null);
+    if (!joinable || joinable.roomId === null) return null;
+
+    return {
+      kind: 'join',
+      roomId: joinable.roomId,
+      loungeId: joinable.loungeId,
+      loungeName: joinable.loungeName,
+      who: joinable.username,
+      title: joinable.trackTitle ?? joinable.loungeName,
+      artist: joinable.artist ?? '',
+      artworkUrl: joinable.artworkUrl,
+      durationMs: joinable.durationMs,
+      entry: joinable,
+    };
+  }, [entries, loungeNames, playbackRoomId, playbackTimeline, playbackTrack, sessionList]);
+
+  /**
+   * Live cards first, then the flat rows — the design's two loops. The hero's
+   * own person is dropped so the same beat is not drawn twice.
+   */
+  const rows = useMemo(() => {
+    const heroUser = hero && hero.kind === 'join' ? hero.entry.userId : null;
+    const visible = entries.filter((entry) => entry.userId !== heroUser);
+    return [
+      ...visible.filter((entry) => entry.roomId !== null),
+      ...visible.filter((entry) => entry.roomId === null),
+    ];
+  }, [entries, hero]);
+
   const renderItem = useCallback(
     ({ item, index }: ListRenderItemInfo<FeedEntry>) => (
-      <NowPlayingCard
-        entry={item}
-        index={index}
-        listeners={item.roomId === null ? undefined : listenersByRoom.get(item.roomId)}
-      />
+      <NowPlayingCard entry={item} index={index} />
     ),
-    [listenersByRoom]
+    []
   );
 
+  /** The masthead's second line is a readout, not a sentence. */
+  const summary = useMemo(() => {
+    if (lounges.isError) return 'Could not reach your lounges';
+    if (loungeList.length === 0) return 'No lounges yet';
+    if (entries.length === 0) return 'Nobody on right now';
+    const live = entries.filter((entry) => entry.roomId !== null).length;
+    return `${entries.length} online · ${live} on aux`;
+  }, [entries, lounges.isError, loungeList.length]);
+
+  /**
+   * The live mark is the accent, so it appears only when something is actually
+   * live. A red dot over an empty Feed is decoration, and it is also a lie.
+   */
+  const anyLive = hero !== null || entries.some((entry) => entry.roomId !== null);
+
   const header = useMemo(
-    () =>
-      sessionList.length > 0 ? (
-        <SessionStrip sessions={sessionList} loungeNames={loungeNames} onOpen={openRoom} />
-      ) : null,
-    [sessionList, loungeNames, openRoom]
+    () => (
+      <View>
+        <View style={styles.masthead}>
+          <View style={styles.mastheadText}>
+            {/* Reserved while loading, so the mark arriving does not push the
+                hero down the screen. */}
+            {showSkeleton ? (
+              <Skeleton width={78} height={14} />
+            ) : anyLive ? (
+              <View style={styles.liveRow}>
+                <LiveDot size={7} />
+                <Text style={[styles.liveLabel, { color: C.liveText }]}>Live now</Text>
+              </View>
+            ) : null}
+
+            <Text
+              style={[
+                styles.title,
+                (showSkeleton || anyLive) && styles.titleStacked,
+                { color: C.ink },
+              ]}>
+              The Feed
+            </Text>
+
+            {/* A skeleton rather than the words "Tuning in": the line keeps its
+                height, so the masthead does not reflow when the count lands. */}
+            {showSkeleton ? (
+              <Skeleton width={148} height={13} style={styles.summarySkeleton} />
+            ) : (
+              <Text numberOfLines={1} style={[styles.summary, { color: C.ink2 }]}>
+                {summary}
+              </Text>
+            )}
+          </View>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={unread > 0 ? `Messages, ${unread} unread` : 'Messages'}
+            onPress={openMessages}
+            style={({ pressed }) => [
+              styles.iconTile,
+              { backgroundColor: C.surface },
+              raised(C),
+              pressed && styles.pressed,
+            ]}>
+            <Mail size={18} strokeWidth={2} color={C.ink} />
+            {unread > 0 ? (
+              <View style={[styles.badge, { backgroundColor: C.live }]}>
+                <Text style={[styles.badgeCount, { color: C.onLive }]}>
+                  {unread > 99 ? '99+' : unread}
+                </Text>
+              </View>
+            ) : null}
+          </Pressable>
+        </View>
+
+        {hero ? (
+          <HeroCard
+            hero={hero}
+            listeners={listenersByRoom.get(hero.roomId) ?? 1}
+            onOpenRoom={openRoom}
+            onOpenLounge={openLounge}
+          />
+        ) : null}
+
+        {rows.length > 0 ? (
+          <Text style={[styles.sectionKicker, { color: C.ink3 }]}>Listening now</Text>
+        ) : null}
+      </View>
+    ),
+    [
+      C,
+      anyLive,
+      hero,
+      listenersByRoom,
+      openLounge,
+      openMessages,
+      openRoom,
+      rows.length,
+      showSkeleton,
+      summary,
+      unread,
+    ]
   );
 
   /**
-   * The handoff folds the Feed's empty state into the block that always closes
-   * the list, so there is no separate "nothing here" screen to design — the
-   * same block just changes its words.
+   * One card closes the list and stands where the hero would: there is no
+   * separate "nothing here" screen to design, only a different reason.
    */
   const footer = useMemo(() => {
     if (showSkeleton) return null;
 
     if (lounges.isError) {
       return (
-        <Notice
-          kicker="COULD NOT LOAD YOUR LOUNGES"
-          body="Check your connection and pull down to try again."
-          action={{ label: 'TRY AGAIN', onPress: () => void onRefresh() }}
+        <QuietCard
+          icon={WifiOff}
+          title="Could not load your lounges"
+          line="Check your connection."
+          action={{ label: 'Try again', onPress: () => void onRefresh() }}
         />
       );
     }
 
     if (loungeList.length === 0) {
       return (
-        <Notice
-          kicker="YOU ARE NOT IN A LOUNGE YET"
-          body="Lounges are where the music happens. Join one and this feed fills itself."
-          action={{ label: 'FIND A LOUNGE', onPress: () => router.push('/lounges') }}
+        <QuietCard
+          icon={Users}
+          title="No lounges yet"
+          line="Join one to see who is listening."
+          action={{ label: 'Find a lounge', onPress: () => router.push('/lounges') }}
         />
       );
     }
 
+    if (hero || rows.length > 0) return null;
+
     return (
-      <Notice
-        kicker={hasRows ? 'THAT IS EVERYONE' : 'YOUR FEED IS QUIET'}
-        body={
-          hasRows
-            ? 'Nobody else is on right now. Start a Session and the Feed fills up.'
-            : 'Nobody is listening yet — join a lounge, or start a Session and someone will join.'
-        }
-        action={{ label: 'START A SESSION', onPress: startSession }}
+      <QuietCard
+        icon={Radio}
+        title="Nobody is on right now"
+        action={{ label: 'Start a session', onPress: startSession }}
       />
     );
-  }, [showSkeleton, lounges.isError, loungeList.length, hasRows, onRefresh, router, startSession]);
-
-  const countLabel = hasRows
-    ? `${entries.length} ${entries.length === 1 ? 'PERSON' : 'PEOPLE'} LISTENING RIGHT NOW`
-    : 'NOBODY IS LISTENING YET';
+  }, [
+    hero,
+    lounges.isError,
+    loungeList.length,
+    onRefresh,
+    router,
+    rows.length,
+    showSkeleton,
+    startSession,
+  ]);
 
   return (
     <Screen padded={false}>
       <Animated.View style={[styles.flex, moduleStyle]}>
-        {/* Header, cut off from the rows by the 2px major rule. */}
-        <View style={[styles.head, { borderBottomColor: C.rule }]}>
-          <Text style={[styles.headTitle, { color: C.ink }]}>The Feed</Text>
-          {/* The count only takes the accent when there is something live in
-              it; "nobody is listening" is not a live signal. */}
-          <Text style={[styles.headCount, { color: hasRows ? C.liveText : C.ink3 }]}>
-            {countLabel}
-          </Text>
-        </View>
-
         <FlatList
-          data={showSkeleton ? [] : entries}
+          data={showSkeleton ? [] : rows}
           keyExtractor={keyExtractor}
           renderItem={renderItem}
           ListHeaderComponent={header}
@@ -524,113 +901,233 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
+    paddingTop: 14,
     paddingBottom: LIST_TAIL,
+    paddingHorizontal: ROW_GUTTER,
     flexGrow: 1,
   },
-
-  head: {
-    paddingHorizontal: GUTTER,
-    paddingTop: 14,
-    paddingBottom: 10,
-    borderBottomWidth: Rule.major,
-  },
-  headTitle: {
-    ...Type.display(22),
-  },
-  headCount: {
-    ...Type.label(10),
-    marginTop: 3,
+  pressed: {
+    opacity: 0.7,
   },
 
-  strip: {
-    paddingTop: 12,
-    paddingBottom: 12,
-    borderBottomWidth: Rule.hair,
+  /* ------------------------------------------------------------- masthead */
+
+  masthead: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: Space.md,
+    paddingHorizontal: GUTTER - ROW_GUTTER,
   },
-  stripKicker: {
-    ...Type.label(10),
-    paddingHorizontal: GUTTER,
-    marginBottom: 8,
+  mastheadText: {
+    flex: 1,
+    minWidth: 0,
   },
-  stripRow: {
-    gap: Space.sm,
-    paddingHorizontal: GUTTER,
-  },
-  session: {
-    minWidth: 150,
-    minHeight: 46,
-    justifyContent: 'center',
-    gap: 3,
-    paddingVertical: Space.sm,
-    paddingHorizontal: 10,
-    borderWidth: Rule.hair,
-  },
-  sessionTop: {
+  liveRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: Space.sm,
   },
-  sessionDot: {
-    width: 6,
-    height: 6,
+  liveLabel: {
+    ...Type.label(10.5),
+    letterSpacing: tracking(10.5, 0.15),
   },
-  sessionName: {
-    ...Type.heading(12),
-    flexShrink: 1,
+  title: {
+    ...Type.display(30),
+    letterSpacing: tracking(30, -0.03),
   },
-  sessionLounge: {
-    ...Type.label(10),
+  /** The 9px only exists to clear the live mark; without it the title leads. */
+  titleStacked: {
+    marginTop: 9,
   },
-
-  notice: {
-    paddingVertical: 26,
-    paddingHorizontal: 14,
-    borderBottomWidth: Rule.hair,
+  summary: {
+    ...Type.body(13.5),
+    marginTop: 5,
   },
-  noticeKicker: {
-    ...Type.label(10),
-    marginBottom: 8,
+  summarySkeleton: {
+    marginTop: 7,
   },
-  noticeBody: {
-    ...Type.body(14),
-    lineHeight: 21,
-  },
-  noticeAction: {
-    marginTop: 14,
-    alignItems: 'flex-start',
-  },
-  action: {
-    minHeight: 46,
+  iconTile: {
+    width: TOUCH_TARGET,
+    height: TOUCH_TARGET,
+    borderRadius: Radii.md,
+    alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: Space.lg,
-    borderWidth: Rule.hair,
   },
-  actionLabel: {
-    ...Type.heading(11),
-    letterSpacing: 11 * 0.1,
+  badge: {
+    position: 'absolute',
+    top: -3,
+    right: -3,
+    minWidth: 18,
+    height: 18,
+    borderRadius: Radii.pill,
+    paddingHorizontal: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeCount: {
+    ...readout(10),
+    lineHeight: 12,
   },
 
-  skeletonRow: {
-    height: ROW_HEIGHT,
-    flexDirection: 'row',
-    borderBottomWidth: Rule.hair,
+  /* ----------------------------------------------------------- hero card */
+
+  hero: {
+    marginTop: 22,
+    marginHorizontal: CARD_GUTTER - ROW_GUTTER,
+    padding: Space.lg,
+    borderRadius: Radii.xl,
   },
-  skeletonWell: {
-    width: WELL,
+  heroTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 15,
+  },
+  art: {
+    width: ART,
+    height: ART,
+    borderRadius: Radii.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  artGlyph: {
+    fontFamily: Fonts.extrabold,
+    fontSize: 30,
+    lineHeight: 34,
+  },
+  heroInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  heroKicker: {
+    ...Type.label(10.5),
+    letterSpacing: tracking(10.5, 0.14),
+  },
+  heroTitle: {
+    ...Type.display(21),
+    letterSpacing: tracking(21, -0.025),
+    marginTop: 5,
+  },
+  heroArtist: {
+    ...Type.body(13),
+    marginTop: 2,
+  },
+
+  wave: {
+    height: 30,
+    marginTop: Space.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5.5,
+    overflow: 'hidden',
+  },
+  waveClip: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    overflow: 'hidden',
+  },
+  waveInner: {
     height: '100%',
-    borderRightWidth: Rule.hair,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5.5,
+  },
+  bar: {
+    flex: 1,
+    minWidth: 0,
+    borderRadius: 1,
+  },
+
+  readout: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 9,
+  },
+  readoutSide: {
+    ...readout(11.5),
+    fontFamily: Fonts.semibold,
+  },
+  readoutCentre: {
+    ...readout(11.5),
+  },
+
+  actions: {
+    flexDirection: 'row',
+    gap: 11,
+    marginTop: Space.lg,
+  },
+  primary: {
+    flex: 1,
+    height: 50,
+    borderRadius: Radii.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 9,
+  },
+  primaryLabel: {
+    fontFamily: Fonts.semibold,
+    fontSize: 14,
+    lineHeight: 18,
+  },
+  secondary: {
+    width: 118,
+    height: 50,
+    borderRadius: Radii.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Space.md,
+  },
+  secondaryLabel: {
+    fontFamily: Fonts.regular,
+    fontSize: 14,
+    lineHeight: 18,
+  },
+
+  /* ---------------------------------------------------------- list parts */
+
+  sectionKicker: {
+    ...Type.label(10.5),
+    letterSpacing: tracking(10.5, 0.15),
+    paddingHorizontal: GUTTER - ROW_GUTTER,
+    paddingTop: 26,
+    paddingBottom: 10,
+  },
+  skeletonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: ROW_GUTTER,
+    padding: 10,
+    borderRadius: Radii.lg,
+    marginBottom: 9,
   },
   skeletonInfo: {
     flex: 1,
-    justifyContent: 'center',
     gap: Space.sm,
-    paddingHorizontal: 10,
   },
-  skeletonRail: {
-    width: RAIL,
-    borderLeftWidth: Rule.hair,
-    justifyContent: 'center',
+  skeletonHeroInfo: {
+    flex: 1,
     gap: Space.sm,
-    paddingHorizontal: 10,
+  },
+  skeletonWave: {
+    marginTop: Space.lg,
+  },
+  skeletonReadout: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 9,
+  },
+
+  /* ------------------------------------------- loading, empty and error */
+
+  /* Placement only. The card itself is drawn by `EmptyState`. */
+  quiet: {
+    marginTop: 22,
+    marginHorizontal: CARD_GUTTER - ROW_GUTTER,
   },
 });

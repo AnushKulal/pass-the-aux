@@ -1,8 +1,8 @@
 /**
- * VOICE NOTE — the recording sheet.
+ * Voice note — the recording sheet.
  *
- * A pulsing accent square, a 12-bar live waveform, a tabular timer, and one
- * full-width SEND VOICE NOTE cell. The 12 bars are not a decoration: they are
+ * A pulsing accent dot, a 12-bar live waveform in its own well, a tabular
+ * timer, and one full-width send cell. The 12 bars are not a decoration: they are
  * the same twelve values that get written to `attachments.waveform` and drawn
  * again by the voice-note bubble, so what you watch while recording is what the
  * other person sees afterwards.
@@ -14,7 +14,7 @@
  * no runtime probe to write — an absent module is a build error, not a caught
  * exception. `RECORDING_AVAILABLE` is therefore a static flag and the sheet
  * renders a truthful disabled state by default: the reason on one line, the
- * transport greyed, SEND VOICE NOTE out of the accent and not pressable.
+ * transport greyed, and the send cell inert.
  *
  * Everything the recorder needs is already here and pure:
  *
@@ -42,7 +42,20 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Duration, PointerEvents, Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
+import {
+  Duration,
+  Fonts,
+  PointerEvents,
+  Radii,
+  Rule,
+  Sheet as SheetMetrics,
+  Space,
+  TOUCH_TARGET,
+  Type,
+  dropped,
+  raised,
+  tracking,
+} from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
 /** The bar count is fixed by the schema and by the bubble that redraws it. */
@@ -54,7 +67,7 @@ export const MAX_DURATION_MS = 120_000;
 export const RECORDING_AVAILABLE: boolean = false;
 export const RECORDING_UNAVAILABLE_REASON = 'Recording unavailable — expo-audio is not installed';
 
-const DOT = 12;
+const DOT = 10;
 const WAVE_HEIGHT = 44;
 const BAR_GAP = 3;
 /** A silent bar still has to be visible, or the row reads as broken. */
@@ -221,16 +234,21 @@ export function DmRecordSheet({
         <Animated.View
           style={[
             styles.sheet,
-            { backgroundColor: C.bg, borderTopColor: C.rule3, paddingBottom: insets.bottom },
+            { backgroundColor: C.bg, paddingBottom: insets.bottom + Space.md },
+            dropped(C, 'lg'),
             sheetStyle,
           ]}>
-          <View style={[styles.head, { borderBottomColor: C.rule }]}>
+          <View style={styles.grabberSlot}>
+            <View style={[styles.grabber, { backgroundColor: C.rule3 }]} />
+          </View>
+
+          <View style={styles.head}>
             <View style={styles.headText}>
-              <Text style={[styles.title, { color: C.ink }]}>VOICE NOTE</Text>
+              <Text style={[styles.title, { color: C.ink }]}>Voice note</Text>
               <Text
                 accessibilityLiveRegion="polite"
                 style={[styles.kicker, { color: live ? C.liveText : C.ink3 }]}>
-                {blocked ? 'UNAVAILABLE' : live ? 'RECORDING' : 'READY'}
+                {blocked ? 'Unavailable' : live ? 'Recording' : 'Ready'}
               </Text>
             </View>
 
@@ -238,13 +256,18 @@ export function DmRecordSheet({
               accessibilityRole="button"
               accessibilityLabel="Cancel"
               onPress={onCancel}
-              style={({ pressed }) => [styles.close, pressed && styles.dim]}>
-              <Text style={[styles.closeLabel, { color: C.ink2 }]}>CANCEL</Text>
+              style={({ pressed }) => [
+                styles.close,
+                { backgroundColor: pressed ? C.surface2 : C.surface },
+                raised(C),
+              ]}>
+              <Text style={[styles.closeLabel, { color: C.ink2 }]}>Cancel</Text>
             </Pressable>
           </View>
 
           <View style={styles.body}>
-            <View style={styles.transport}>
+            <View
+              style={[styles.transport, { backgroundColor: C.bgRecessed, borderColor: C.rule }]}>
               <Animated.View
                 accessibilityElementsHidden
                 importantForAccessibility="no-hide-descendants"
@@ -295,11 +318,12 @@ export function DmRecordSheet({
               style={({ pressed }) => [
                 styles.send,
                 canSend
-                  ? { backgroundColor: pressed ? C.liveText : C.live }
-                  : { backgroundColor: C.surface, borderWidth: Rule.hair, borderColor: C.rule2 },
+                  ? { backgroundColor: pressed ? C.cream : C.pill }
+                  : { backgroundColor: C.bgRecessed, borderWidth: Rule.hair, borderColor: C.rule },
+                canSend ? dropped(C, 'sm') : null,
               ]}>
-              <Text style={[styles.sendLabel, { color: canSend ? C.onLive : C.ink3 }]}>
-                SEND VOICE NOTE
+              <Text style={[styles.sendLabel, { color: canSend ? C.pillInk : C.ink3 }]}>
+                Send voice note
               </Text>
             </Pressable>
           </View>
@@ -325,59 +349,80 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 720,
     alignSelf: 'center',
-    borderTopWidth: Rule.major,
+    borderTopLeftRadius: SheetMetrics.radius,
+    borderTopRightRadius: SheetMetrics.radius,
+  },
+  grabberSlot: {
+    paddingTop: Space.md + 2,
+    alignItems: 'center',
+  },
+  grabber: {
+    width: SheetMetrics.grabberW,
+    height: SheetMetrics.grabberH,
+    borderRadius: SheetMetrics.grabberH / 2,
   },
   head: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Space.md,
-    paddingLeft: Space.md,
-    paddingRight: Space.xs,
-    paddingTop: Space.md,
-    paddingBottom: Space.sm + 2,
-    borderBottomWidth: Rule.major,
+    paddingHorizontal: Space.xl,
+    paddingTop: Space.lg,
+    paddingBottom: Space.md,
   },
   headText: {
     flex: 1,
     minWidth: 0,
   },
   title: {
-    ...Type.heading(15),
-    letterSpacing: tracking(15, 0.03),
+    ...Type.display(20),
+    letterSpacing: tracking(20, -0.025),
   },
   kicker: {
-    ...Type.label(10),
-    marginTop: 2,
+    ...Type.label(10.5),
+    letterSpacing: tracking(10.5, 0.15),
+    marginTop: 3,
   },
   close: {
     minHeight: TOUCH_TARGET,
-    minWidth: TOUCH_TARGET,
-    alignItems: 'flex-end',
+    flexShrink: 0,
+    alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: Space.xs,
+    paddingHorizontal: Space.lg,
+    borderRadius: Radii.md,
   },
   closeLabel: {
-    ...Type.heading(10),
-    letterSpacing: tracking(10, 0.1),
+    fontFamily: Fonts.semibold,
+    fontSize: 12.5,
+    lineHeight: 16,
   },
   dim: {
-    opacity: 0.6,
+    opacity: 0.55,
   },
   body: {
-    paddingHorizontal: Space.md,
-    paddingTop: 22,
-    paddingBottom: 22,
+    paddingHorizontal: Space.xl,
+    paddingTop: Space.sm,
+    paddingBottom: Space.xl,
     gap: Space.lg,
   },
+  /*
+    A well, not `pressed()`. The inset pair needs about 80px of surface before
+    its light half is visible on a dark ground; below that only the dark half
+    lands and it reads as a smudge.
+  */
   transport: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Space.md,
+    paddingHorizontal: Space.lg,
+    paddingVertical: Space.md,
+    borderRadius: Radii.lg,
+    borderWidth: Rule.hair,
   },
   dot: {
     width: DOT,
     height: DOT,
     flexShrink: 0,
+    borderRadius: Radii.pill,
   },
   wave: {
     flex: 1,
@@ -389,6 +434,7 @@ const styles = StyleSheet.create({
   },
   bar: {
     flex: 1,
+    borderRadius: 1,
   },
   timer: {
     // A duration measures. Tabular figures, so the row does not shift on 1:09
@@ -402,15 +448,16 @@ const styles = StyleSheet.create({
     marginTop: -Space.sm,
   },
   send: {
-    minHeight: 52,
-    // Left-aligned, like every other full-width action cell in this design —
-    // the label starts on the same 16px margin as the text above it.
+    minHeight: 56,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     paddingHorizontal: Space.lg,
+    borderRadius: Radii.button,
   },
   sendLabel: {
-    ...Type.heading(12),
-    letterSpacing: tracking(12, 0.1),
+    fontFamily: Fonts.semibold,
+    fontSize: 15,
+    lineHeight: 20,
   },
 });

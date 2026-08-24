@@ -137,20 +137,6 @@ export function useLoungePresence(
   useEffect(() => {
     const ids = loungeKey === '' ? [] : loungeKey.split(',');
 
-    // Drop lounges we no longer watch, so a lounge I just left cannot leave
-    // its members lingering in the Feed.
-    setByLounge((prev) => {
-      const next: Record<string, PresencePayload[]> = {};
-      let changed = Object.keys(prev).length !== ids.length;
-
-      for (const id of ids) {
-        const existing = prev[id];
-        if (existing) next[id] = existing;
-        else changed = true;
-      }
-      return changed ? next : prev;
-    });
-
     const unsubscribes = ids.map((id) =>
       watchLoungePresence(id, (members) => {
         setByLounge((prev) => ({ ...prev, [id]: members }));
@@ -159,6 +145,25 @@ export function useLoungePresence(
 
     return () => {
       for (const off of unsubscribes) off();
+
+      // Drop the rosters we just stopped watching, so a lounge I left cannot
+      // leave its members lingering in the Feed.
+      //
+      // In the teardown, not at the top of the effect: pruning up front is a
+      // synchronous setState in an effect body, which cascades a second render
+      // on every subscription change. Doing it here is also strictly more
+      // correct — the rosters die with the sockets that fed them, in one pass,
+      // instead of surviving until the next effect run.
+      setByLounge((prev) => {
+        let changed = false;
+        const next: Record<string, PresencePayload[]> = {};
+
+        for (const [id, members] of Object.entries(prev)) {
+          if (ids.includes(id)) next[id] = members;
+          else changed = true;
+        }
+        return changed ? next : prev;
+      });
     };
   }, [loungeKey]);
 

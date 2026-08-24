@@ -1,13 +1,14 @@
 /**
  * A shared-track bubble: the track, and the one thing you would want to do with
- * it — **ADD TO THE QUEUE** (§13).
+ * it — **Add to the queue**.
  *
- * The card is framed in accent because a track someone passed you is a
- * *playable* thing, which is exactly what the red is reserved for. The action
- * cell, though, follows the same discipline the composer's SEND does: it is
- * accent only while pressing it would actually do something. With no Session
- * attached there is nothing to queue into, so the cell drops to ink and states
- * the reason instead of failing after the tap.
+ * Drawn exactly as `design/v2/aux-v2.dc.html` draws it in "Thread": a surface
+ * bubble with a bright artwork tile, the title and artist beside it, and a
+ * filled action cell across the bottom. Deliberately NOT accent-framed. A track
+ * in a thread is a thing you were handed, not a thing that is playing, and the
+ * red has to keep meaning the second one. The action cell is the inverted pill,
+ * and it drops to a bordered surface cell — stating the reason — the moment
+ * pressing it would fail.
  *
  * "In a Session" is read from the playback store rather than from a route
  * param: `usePlayback().roomId` is the Session this device is actually driving,
@@ -16,20 +17,24 @@
  */
 
 import { Image } from 'expo-image';
-import { ListPlus, Music } from 'lucide-react-native';
+import { Music } from 'lucide-react-native';
 import { memo, useCallback } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { Bubble } from '@/components/chat/bubble-kit';
 import { BLURHASH_SURFACE, useToast } from '@/components/ui';
 import type { DmTrack } from '@/features/dm';
 import { useAddToQueue } from '@/features/rooms/queries';
 import { usePlayback } from '@/playback/store';
-import { Duration, Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
+import { Duration, Fonts, Radii, Rule, Space, Type, tracking } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
-/** The artboard's card. Wide enough for a title, narrow enough to read as a card. */
-const CARD_WIDTH = 212;
-const ARTWORK = 38;
+/** Wide enough for a title, narrow enough to still read as a bubble. */
+const CARD_WIDTH = 214;
+const ARTWORK = 46;
+/** The design's 38px cell, carried to the 44px floor by its slop. */
+const ACTION_HEIGHT = 40;
+const ACTION_SLOP = { top: 2, bottom: 2, left: 0, right: 0 } as const;
 
 export type TrackCardProps = {
   /** Null while an optimistic share has not resolved its track row yet. */
@@ -39,9 +44,11 @@ export type TrackCardProps = {
    * something has to draw it or a note sent with the track disappears.
    */
   caption?: string;
+  /** Which edge the bubble's cut corner points at. */
+  mine?: boolean;
 };
 
-function TrackCardBase({ track, caption }: TrackCardProps) {
+function TrackCardBase({ track, caption, mine = false }: TrackCardProps) {
   const C = useColors();
   const toast = useToast();
 
@@ -57,11 +64,11 @@ function TrackCardBase({ track, caption }: TrackCardProps) {
   const artist = track?.artist?.trim() || 'Unknown artist';
 
   const canQueue = Boolean(track && roomId) && !addToQueue.isPending;
-  /** Why the action is off, in the words §13 would use. Null when it is on. */
+  /** Why the action is off, in as few words as say it. Null when it is on. */
   const blockedReason = !track
-    ? 'TRACK UNAVAILABLE'
+    ? 'Track unavailable'
     : !roomId
-      ? 'JOIN A SESSION TO QUEUE THIS'
+      ? 'Join a session to queue this'
       : null;
 
   const onAdd = useCallback(() => {
@@ -76,15 +83,11 @@ function TrackCardBase({ track, caption }: TrackCardProps) {
   const trimmedCaption = caption?.trim();
 
   return (
-    <View style={[styles.card, { borderColor: C.live, backgroundColor: C.bg }]}>
-      <Text style={[styles.kicker, { backgroundColor: C.live, color: C.onLive }]}>
-        SHARED A TRACK
-      </Text>
-
+    <Bubble mine={mine} tone="surface" card style={styles.card}>
       <View style={styles.identity}>
-        <View style={[styles.artwork, { backgroundColor: C.bgRecessed, borderColor: C.rule }]}>
+        <View style={[styles.artwork, { backgroundColor: C.artwork }]}>
           {/* The glyph sits under the image, so it doubles as the error state. */}
-          <Music size={18} strokeWidth={2} color={C.artwork} />
+          <Music size={18} strokeWidth={2} color={C.artInk} />
           {track?.artwork_url ? (
             <Image
               source={{ uri: track.artwork_url }}
@@ -109,35 +112,33 @@ function TrackCardBase({ track, caption }: TrackCardProps) {
       </View>
 
       {trimmedCaption ? (
-        <Text style={[styles.caption, { color: C.ink2, borderTopColor: C.rule }]}>
-          {trimmedCaption}
-        </Text>
+        <Text style={[styles.caption, { color: C.ink2 }]}>{trimmedCaption}</Text>
       ) : null}
 
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`Add ${title} to the queue`}
         accessibilityHint={
-          blockedReason === 'JOIN A SESSION TO QUEUE THIS'
+          blockedReason === 'Join a session to queue this'
             ? 'Join a Session first — there is nowhere to queue this yet'
             : undefined
         }
         accessibilityState={{ disabled: !canQueue, busy: addToQueue.isPending }}
         disabled={!canQueue}
         onPress={onAdd}
+        hitSlop={ACTION_SLOP}
         style={({ pressed }) => [
           styles.action,
-          {
-            borderTopColor: C.rule,
-            backgroundColor: pressed && canQueue ? C.liveWash : 'transparent',
-          },
+          canQueue
+            ? { backgroundColor: pressed ? C.cream : C.pill }
+            : { backgroundColor: C.bgRecessed, borderWidth: Rule.hair, borderColor: C.rule },
         ]}>
-        <ListPlus size={15} strokeWidth={2} color={canQueue ? C.liveText : C.ink3} />
-        <Text numberOfLines={1} style={[styles.actionLabel, { color: canQueue ? C.liveText : C.ink3 }]}>
-          {addToQueue.isPending ? 'ADDING…' : (blockedReason ?? 'ADD TO THE QUEUE')}
+        {addToQueue.isPending ? <ActivityIndicator size="small" color={C.pillInk} /> : null}
+        <Text numberOfLines={1} style={[styles.actionLabel, { color: canQueue ? C.pillInk : C.ink3 }]}>
+          {addToQueue.isPending ? 'Adding' : (blockedReason ?? 'Add to the queue')}
         </Text>
       </Pressable>
-    </View>
+    </Bubble>
   );
 }
 
@@ -146,20 +147,11 @@ export const TrackCard = memo(TrackCardBase);
 const styles = StyleSheet.create({
   card: {
     width: CARD_WIDTH,
-    borderWidth: Rule.hair,
-  },
-  kicker: {
-    ...Type.heading(10),
-    letterSpacing: tracking(10, 0.1),
-    paddingHorizontal: 9,
-    paddingVertical: 5,
   },
   identity: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 9,
-    paddingHorizontal: 9,
-    paddingVertical: Space.sm + 2,
+    gap: Space.md,
   },
   artwork: {
     width: ARTWORK,
@@ -167,7 +159,7 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: Rule.hair,
+    borderRadius: Radii.sm + 1,
     overflow: 'hidden',
   },
   text: {
@@ -175,29 +167,33 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   title: {
-    ...Type.heading(13),
-    letterSpacing: tracking(13, 0.01),
+    fontFamily: Fonts.semibold,
+    fontSize: 14,
+    lineHeight: 18,
+    letterSpacing: tracking(14, -0.01),
   },
   artist: {
-    ...Type.body(11),
+    ...Type.body(12),
+    marginTop: 2,
   },
   caption: {
     ...Type.body(12),
-    paddingHorizontal: 9,
-    paddingVertical: 7,
-    borderTopWidth: Rule.hair,
+    marginTop: Space.sm,
   },
   action: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: Space.sm,
-    minHeight: TOUCH_TARGET,
-    paddingHorizontal: 9,
-    borderTopWidth: Rule.hair,
+    height: ACTION_HEIGHT,
+    marginTop: 11,
+    paddingHorizontal: Space.md,
+    borderRadius: Radii.xs,
   },
   actionLabel: {
-    ...Type.heading(10),
-    letterSpacing: tracking(10, 0.09),
+    fontFamily: Fonts.semibold,
+    fontSize: 12.5,
+    lineHeight: 16,
     flexShrink: 1,
   },
 });

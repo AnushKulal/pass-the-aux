@@ -16,8 +16,14 @@
  */
 
 import { router } from 'expo-router';
+import { useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeInUp, useReducedMotion } from 'react-native-reanimated';
+import Animated, {
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { Duration, Rule, Space, Type, tracking } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
@@ -27,6 +33,27 @@ export function UpdateBanner() {
   const C = useColors();
   const reduced = useReducedMotion();
   const { isAvailable, pending } = useUpdates();
+
+  /*
+    Driven by a shared value from an effect, NOT `entering={FadeInUp…}`.
+    Reanimated marks an entering view `visibility: hidden` until its animation
+    runs, and on react-native-web it never runs — the strip would occupy its
+    28px and stay blank. Gated on `isAvailable` so the slide still plays at the
+    moment the update actually lands, not on the mount that renders nothing.
+
+    Above the early return: hooks cannot run conditionally.
+  */
+  const enter = useSharedValue(0);
+
+  useEffect(() => {
+    if (!isAvailable) return;
+    enter.value = reduced ? 1 : withTiming(1, { duration: Duration.enter });
+  }, [isAvailable, reduced, enter]);
+
+  const enterStyle = useAnimatedStyle(() => ({
+    opacity: enter.value,
+    transform: [{ translateY: (1 - enter.value) * -6 }],
+  }));
 
   if (!isAvailable) return null;
 
@@ -41,8 +68,7 @@ export function UpdateBanner() {
 
   return (
     <Animated.View
-      entering={reduced ? undefined : FadeInUp.duration(Duration.enter)}
-      style={[styles.wrap, { backgroundColor: C.surface, borderBottomColor: C.rule2 }]}>
+      style={[styles.wrap, { backgroundColor: C.surface, borderBottomColor: C.rule2 }, enterStyle]}>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`Update available. ${fixes > 0 ? `${fixes} fixes waiting. ` : ''}Opens Settings.`}
@@ -53,7 +79,10 @@ export function UpdateBanner() {
           rules and rectangles, and a circle would be the only round thing on
           the screen.
         */}
-        <View style={[styles.mark, { backgroundColor: C.ink2 }]} />
+        {/* `ink`, not `ink2`: this is the mark, not the sentence beside it, and
+            it is the same token the Settings row's dot uses. Those two comments
+            claimed to agree and did not — one was on `ink`, one on `ink2`. */}
+        <View style={[styles.mark, { backgroundColor: C.ink }]} />
         <Text numberOfLines={1} style={[styles.label, { color: C.ink2 }]}>
           {detail}
         </Text>

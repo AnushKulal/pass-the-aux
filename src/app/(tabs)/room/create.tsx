@@ -1,18 +1,24 @@
 /**
  * Start a Session.
  *
+ * The design never drew this screen, so it is built from the parts that are
+ * drawn elsewhere: the "New lounge" header and field, the "Lounge detail" card
+ * row, and one accent cell at the bottom.
+ *
  * A Session always belongs to a lounge — that is what scopes who can hear it,
  * who can queue, and who can chat. So the lounge is a required choice, not a
- * setting buried behind "advanced".
+ * setting buried behind "advanced". Choosing one is a passive form choice, so
+ * it is marked with an accent BORDER and a word; the FILL is spent once, on the
+ * control that actually puts you on aux, because that is the one live thing on
+ * the screen.
  *
- * Flat throughout: bordered cells, hard rules, one accent fill on the single
- * control that actually starts something live. Selecting a lounge is a passive
- * form choice, so it is marked with an accent BORDER and a word, never an
- * accent fill — the fill has to keep meaning "live".
+ * Four states, all present: a skeleton of the real card while the lounges load,
+ * a failure that offers the retry, an empty roster that says where to get one,
+ * and the list itself.
  */
 
 import { router, useLocalSearchParams } from 'expo-router';
-import { Check, Users } from 'lucide-react-native';
+import { Check, ChevronLeft } from 'lucide-react-native';
 import { memo, useCallback, useState } from 'react';
 import {
   ActivityIndicator,
@@ -20,19 +26,34 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
   type ListRenderItemInfo,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { EmptyState, Screen, Skeleton, TextField, useToast } from '@/components/ui';
+import { ChatNotice } from '@/components/chat/bubble-kit';
+import { Skeleton, useToast } from '@/components/ui';
 import { useCreateRoom, useMyLounges } from '@/features/rooms/queries';
 import type { LoungeRow } from '@/lib/database.types';
-import { Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
+import {
+  Fonts,
+  Radii,
+  Rule,
+  Space,
+  Type,
+  dropped,
+  raised,
+  tracking,
+} from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
 const MAX_NAME_LENGTH = 50;
 const SKELETON_ROWS = 3;
-const OPTION_HEIGHT = 58;
+const OPTION_HEIGHT = 70;
+
+const BACK_TILE = 38;
+const BACK_SLOP = { top: 3, bottom: 3, left: 6, right: 6 };
 
 export default function CreateRoomScreen() {
   const C = useColors();
@@ -45,8 +66,9 @@ export default function CreateRoomScreen() {
   const createRoom = useCreateRoom();
 
   const [name, setName] = useState('');
+  const [focused, setFocused] = useState(false);
   const [picked, setPicked] = useState<string | null>(
-    typeof params.loungeId === 'string' ? params.loungeId : null
+    typeof params.loungeId === 'string' ? params.loungeId : null,
   );
 
   /*
@@ -76,10 +98,10 @@ export default function CreateRoomScreen() {
         onError: (error) => {
           toast.show(
             error instanceof Error ? error.message : 'Could not start the Session.',
-            'error'
+            'error',
           );
         },
-      }
+      },
     );
   }, [createRoom, loungeId, name, toast]);
 
@@ -92,19 +114,19 @@ export default function CreateRoomScreen() {
     ({ item }: ListRenderItemInfo<LoungeRow>) => (
       <LoungeOption lounge={item} selected={item.id === loungeId} onSelect={setPicked} />
     ),
-    [loungeId]
+    [loungeId],
   );
 
   const canStart = Boolean(loungeId) && !createRoom.isPending;
 
   return (
     /*
-      No `scroll` on Screen: membership is unbounded, so the options need a
-      virtualised list — and a FlatList nested in Screen's ScrollView would
-      warn, lose virtualisation and fight it for the gesture. The FlatList owns
-      the scrolling instead, with the form around it as header and footer.
+      No ScrollView: membership is unbounded, so the options need a virtualised
+      list — and a FlatList nested in a ScrollView would warn, lose
+      virtualisation and fight it for the gesture. The FlatList owns the
+      scrolling instead, with the form around it as header and footer.
     */
-    <Screen title="Start a Session" onBack={handleBack}>
+    <SafeAreaView edges={['top', 'left', 'right']} style={[styles.root, { backgroundColor: C.bg }]}>
       <FlatList
         style={styles.flex}
         data={lounges.data ?? []}
@@ -116,46 +138,63 @@ export default function CreateRoomScreen() {
         contentContainerStyle={styles.content}
         ListHeaderComponent={
           <View style={styles.header}>
-            <TextField
-              label="Name it"
+            <View style={styles.head}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Back"
+                hitSlop={BACK_SLOP}
+                onPress={handleBack}
+                style={({ pressed }) => [
+                  styles.backTile,
+                  { backgroundColor: pressed ? C.surface2 : C.surface },
+                  raised(C),
+                ]}>
+                <ChevronLeft size={20} strokeWidth={2.4} color={C.ink} />
+              </Pressable>
+              <Text style={[styles.title, { color: C.ink }]}>Start a Session</Text>
+            </View>
+
+            <Text style={[styles.kicker, { color: C.ink3 }]}>Name it — optional</Text>
+            <TextInput
               value={name}
               onChangeText={setName}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
               placeholder="Friday night"
+              placeholderTextColor={C.ink3}
               maxLength={MAX_NAME_LENGTH}
               autoCapitalize="sentences"
+              selectionColor={C.live}
+              accessibilityLabel="Name it, optional"
+              // A surface with a hairline, never the inset pair: at 52px only
+              // the dark half of that pair lands and it reads as dirt.
+              style={[
+                styles.field,
+                { color: C.ink, backgroundColor: C.surface, borderColor: focused ? C.rule3 : C.rule },
+              ]}
             />
 
-            <View style={styles.section}>
-              <Text style={[styles.sectionTitle, { color: C.ink3 }]}>Which lounge?</Text>
-              <View style={[styles.sectionRule, { backgroundColor: C.rule }]} />
-            </View>
+            <Text style={[styles.kicker, styles.kickerSpaced, { color: C.ink3 }]}>
+              Which lounge?
+            </Text>
           </View>
         }
         ListEmptyComponent={
-          lounges.isLoading && !lounges.data ? (
+          lounges.isPending ? (
             <View style={styles.skeletons}>
               {Array.from({ length: SKELETON_ROWS }, (_, index) => (
-                <Skeleton key={index} width="100%" height={OPTION_HEIGHT} radius={0} />
+                <Skeleton key={index} width="100%" height={OPTION_HEIGHT} radius={Radii.lg} />
               ))}
             </View>
+          ) : lounges.isError ? (
+            <ChatNotice
+              label="Your lounges didn't load."
+              action={{ label: 'Retry', onPress: () => void lounges.refetch() }}
+            />
           ) : (
-            <EmptyState
-              icon={Users}
-              title="No lounges yet"
-              description="A Session lives inside a lounge. Join one with an invite code, or start your own."
-              action={
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Find a lounge"
-                  onPress={() => router.replace('/lounges')}
-                  style={({ pressed }) => [
-                    styles.ghost,
-                    { borderColor: C.rule2 },
-                    pressed ? { borderColor: C.ink } : null,
-                  ]}>
-                  <Text style={[styles.ghostLabel, { color: C.ink }]}>Find a lounge</Text>
-                </Pressable>
-              }
+            <ChatNotice
+              label="A Session lives inside a lounge. Join one first."
+              action={{ label: 'Find a lounge', onPress: () => router.replace('/lounges') }}
             />
           )
         }
@@ -169,24 +208,21 @@ export default function CreateRoomScreen() {
               onPress={handleCreate}
               style={({ pressed }) => [
                 styles.start,
-                { backgroundColor: C.live },
-                pressed ? { backgroundColor: C.liveText } : null,
+                { backgroundColor: pressed ? C.liveText : C.live },
+                dropped(C, 'lg'),
                 canStart ? null : styles.inert,
               ]}>
-              {createRoom.isPending ? (
-                <ActivityIndicator size="small" color={C.onLive} />
-              ) : (
-                <Text style={[styles.startLabel, { color: C.onLive }]}>Go on aux</Text>
-              )}
+              {createRoom.isPending ? <ActivityIndicator size="small" color={C.onLive} /> : null}
+              <Text style={[styles.startLabel, { color: C.onLive }]}>Go on aux</Text>
             </Pressable>
 
-            <Text style={[styles.footnote, { color: C.ink2 }]}>
-              You go on aux. Anyone in the lounge can join and add to the queue.
+            <Text style={[styles.footnote, { color: C.ink3 }]}>
+              Anyone in the lounge can join and add to the queue.
             </Text>
           </View>
         }
       />
-    </Screen>
+    </SafeAreaView>
   );
 }
 
@@ -216,8 +252,11 @@ const LoungeOption = memo(function LoungeOption({
       onPress={() => onSelect(lounge.id)}
       style={({ pressed }) => [
         styles.option,
-        { borderColor: selected ? C.live : C.rule2 },
-        pressed ? { backgroundColor: C.surface } : null,
+        {
+          backgroundColor: pressed ? C.surface2 : C.surface,
+          borderColor: selected ? C.live : 'transparent',
+        },
+        raised(C),
       ]}>
       <View style={styles.optionMeta}>
         <Text numberOfLines={1} style={[styles.optionName, { color: C.ink }]}>
@@ -235,7 +274,7 @@ const LoungeOption = memo(function LoungeOption({
       {selected ? (
         <>
           <Text style={[styles.optionSelected, { color: C.liveText }]}>Selected</Text>
-          <Check size={18} color={C.liveText} strokeWidth={2} />
+          <Check size={18} color={C.liveText} strokeWidth={2.2} />
         </>
       ) : null}
     </Pressable>
@@ -243,94 +282,121 @@ const LoungeOption = memo(function LoungeOption({
 });
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
   flex: {
     flex: 1,
   },
   content: {
     flexGrow: 1,
+    width: '100%',
+    maxWidth: 720,
+    alignSelf: 'center',
+    paddingHorizontal: Space.xl,
     paddingTop: Space.md,
-    paddingBottom: Space.xxl,
+    paddingBottom: Space.xxxl,
   },
   header: {
-    gap: Space.xl,
     paddingBottom: Space.md,
   },
-  footer: {
-    gap: Space.lg,
-    paddingTop: Space.xl,
+
+  head: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    marginBottom: Space.xl,
+  },
+  backTile: {
+    width: BACK_TILE,
+    height: BACK_TILE,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radii.sm,
+  },
+  title: {
+    flex: 1,
+    minWidth: 0,
+    ...Type.display(24),
+    letterSpacing: tracking(24, -0.03),
+  },
+
+  kicker: {
+    ...Type.label(10.5),
+    letterSpacing: tracking(10.5, 0.15),
+    marginBottom: Space.sm,
+  },
+  kickerSpaced: {
+    marginTop: Space.xl,
+  },
+  field: {
+    ...Type.body(15),
+    minHeight: 52,
+    paddingHorizontal: Space.lg,
+    paddingVertical: 0,
+    borderRadius: Radii.md,
+    borderWidth: Rule.hair,
+  },
+
+  skeletons: {
+    gap: Space.sm,
   },
   optionGap: {
     height: Space.sm,
-  },
-  section: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space.md,
-  },
-  sectionTitle: {
-    // A kicker with a hairline running out of it: the same figure the chat log
-    // uses for day breaks and the lounge uses for its sections.
-    ...Type.label(10),
-  },
-  sectionRule: {
-    flex: 1,
-    height: Rule.hair,
-  },
-  skeletons: {
-    gap: Space.sm,
   },
   option: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Space.md,
     minHeight: OPTION_HEIGHT,
-    paddingHorizontal: Space.md - 1,
+    paddingHorizontal: Space.lg,
     paddingVertical: Space.md,
-    borderWidth: Rule.hair,
+    borderRadius: Radii.lg,
+    borderWidth: Rule.thick,
   },
   optionMeta: {
     flex: 1,
     minWidth: 0,
   },
   optionName: {
-    ...Type.heading(14),
-    letterSpacing: tracking(14, 0.01),
+    fontFamily: Fonts.semibold,
+    fontSize: 15,
+    lineHeight: 20,
+    letterSpacing: tracking(15, -0.01),
   },
   optionDescription: {
-    ...Type.body(13),
+    ...Type.body(12.5),
+    marginTop: 2,
   },
   optionSelected: {
-    ...Type.heading(10),
-    letterSpacing: tracking(10, 0.09),
-    textTransform: 'uppercase',
+    ...Type.label(10),
+    letterSpacing: tracking(10, 0.13),
+    flexShrink: 0,
+  },
+
+  footer: {
+    gap: Space.md,
+    paddingTop: Space.xxl,
   },
   start: {
-    minHeight: 52,
-    alignItems: 'flex-start',
-    justifyContent: 'center',
-    paddingHorizontal: Space.lg,
-  },
-  startLabel: {
-    ...Type.heading(13),
-    letterSpacing: tracking(13, 0.1),
-    textTransform: 'uppercase',
-  },
-  inert: {
-    opacity: 0.55,
-  },
-  ghost: {
-    minHeight: TOUCH_TARGET,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: Space.sm + 2,
+    minHeight: 56,
     paddingHorizontal: Space.lg,
-    borderWidth: Rule.hair,
+    borderRadius: Radii.button,
   },
-  ghostLabel: {
-    ...Type.heading(11),
-    letterSpacing: tracking(11, 0.1),
-    textTransform: 'uppercase',
+  startLabel: {
+    fontFamily: Fonts.semibold,
+    fontSize: 15,
+    lineHeight: 20,
+  },
+  inert: {
+    opacity: 0.45,
   },
   footnote: {
-    ...Type.body(16),
+    ...Type.body(12.5),
   },
 });

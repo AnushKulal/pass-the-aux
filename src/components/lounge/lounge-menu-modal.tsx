@@ -128,7 +128,9 @@ export function LoungeMenuModal({
         <Animated.View
           style={[
             styles.sheet,
-            { backgroundColor: C.bg, borderTopColor: C.live, paddingBottom: insets.bottom },
+            // Neutral, matching JoinCodeModal. The accent top border belonged
+            // to the abandoned direction; a sheet is not live.
+            { backgroundColor: C.bg, borderTopColor: C.rule2, paddingBottom: insets.bottom },
             sheetStyle,
           ]}>
           <View style={[styles.head, { borderBottomColor: C.rule }]}>

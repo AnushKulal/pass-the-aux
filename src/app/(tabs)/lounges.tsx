@@ -1,16 +1,27 @@
 /**
- * Lounges — the communities I belong to.
+ * Lounges — the communities I belong to. A top-level destination.
  *
- * The handoff reaches these through the lounge rail rather than a tab, so this
- * screen borrows the rail's vocabulary instead of inventing one: the same ruled
- * rows Explore uses, the same tag wells, and the same reservation of red for
- * the live count. Neither action in the header is filled — you either have a
- * code or you do not, and a filled button here would compete with the one
- * colour that means a Session is running.
+ * design/v2 "Lounges": a masthead carrying the count and one raised + tile, then
+ * raised rows — tag tile, name, one line of counts, and a recessed live pill on
+ * the right for the lounges with a Session running. The pill is the only accent
+ * on the screen, which is what keeps the red meaning "there is something to walk
+ * into".
+ *
+ * This screen used to be reachable only from a left rail that no longer exists,
+ * so it was built as a secondary list. It is the third cell in the bottom bar
+ * now, which is why the masthead is fixed above the list rather than scrolling
+ * with it, and why the empty state is the whole screen rather than a footnote:
+ * a brand-new account lands here with nothing, and this is where it finds out
+ * what to do about that.
+ *
+ * Redeeming a code lives on Explore, where the design puts it. It stays
+ * reachable from the empty state, which is the one moment you have no lounges
+ * and somebody has just sent you one.
  */
 
 import { router } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { Plus, Users, WifiOff, type LucideIcon } from 'lucide-react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   FlatList,
   Pressable,
@@ -30,13 +41,24 @@ import Animated, {
 
 import { JoinCodeModal } from '@/components/lounge/join-code-modal';
 import { LoungeCard, LoungeListSkeleton } from '@/components/lounge/lounge-card';
-import { Screen, useToast } from '@/components/ui';
+import { EmptyState, Screen, Skeleton, useToast } from '@/components/ui';
 import { loungeErrorMessage, useMyLounges, type LoungeSummary } from '@/features/lounges/queries';
-import { Duration, Rule, Space, Type } from '@/lib/theme';
+import {
+  Duration,
+  Radii,
+  Space,
+  TOUCH_TARGET,
+  Type,
+  raised,
+  tracking,
+} from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
-const GUTTER = 12;
-const LIST_TAIL = 32;
+const GUTTER = 24;
+const ROW_GUTTER = 14;
+const LIST_TAIL = 48;
+
+/** Matches the row's tile, so the empty card stands where a row would. */
 
 function useModuleEnter() {
   const reduced = useReducedMotion();
@@ -56,52 +78,38 @@ function useModuleEnter() {
   }));
 }
 
-/** A bordered, unfilled control. The non-accent action shape in this direction. */
-function RuleButton({ label, onPress }: { label: string; onPress: () => void }) {
-  const C = useColors();
-
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.ruleButton,
-        { borderColor: C.rule2, backgroundColor: pressed ? C.surface : 'transparent' },
-      ]}>
-      <Text style={[styles.ruleButtonLabel, { color: C.ink }]}>{label}</Text>
-    </Pressable>
-  );
-}
-
-function Notice({
-  kicker,
-  body,
-  action,
+/**
+ * The screen with no list on it: a raised card standing where the first row
+ * would, saying what happened and what to do next.
+ */
+/**
+ * This screen is where the two-action case earns its keep: a new account with
+ * no lounges has two genuinely different routes out — make one, or join one
+ * with a code — and neither is a rephrasing of the other.
+ *
+ * Drawn by `@/components/ui/empty-state`, shared with the Feed and Explore.
+ */
+function QuietCard({
+  icon,
+  title,
+  line,
+  primary,
+  secondary,
 }: {
-  kicker: string;
-  body: string;
-  action?: { label: string; onPress: () => void };
+  icon: LucideIcon;
+  title: string;
+  line?: string;
+  primary: { label: string; onPress: () => void };
+  secondary?: { label: string; onPress: () => void };
 }) {
-  const C = useColors();
-
   return (
-    <View style={[styles.notice, { borderBottomColor: C.rule }]}>
-      <Text style={[styles.noticeKicker, { color: C.ink3 }]}>{kicker}</Text>
-      <Text style={[styles.noticeBody, { color: C.ink2 }]}>{body}</Text>
-      {action ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={action.label}
-          onPress={action.onPress}
-          style={({ pressed }) => [
-            styles.action,
-            { borderColor: C.live, backgroundColor: pressed ? C.liveWash : 'transparent' },
-          ]}>
-          <Text style={[styles.actionLabel, { color: C.liveText }]}>{action.label}</Text>
-        </Pressable>
-      ) : null}
-    </View>
+    <EmptyState
+      icon={icon}
+      title={title}
+      description={line}
+      primary={primary}
+      secondary={secondary}
+    />
   );
 }
 
@@ -130,42 +138,71 @@ export default function LoungesScreen() {
     ({ item, index }: ListRenderItemInfo<LoungeSummary>) => (
       <LoungeCard
         name={item.lounge.name}
-        description={item.lounge.description || undefined}
         iconUrl={item.lounge.icon_url}
-        memberCount={item.memberCount}
+        meta={`${item.memberCount} ${item.memberCount === 1 ? 'member' : 'members'}`}
+        isLive={item.activeSessions > 0}
         listeners={item.listeners}
-        activeSessions={item.activeSessions}
-        isPublic={item.lounge.is_public}
-        showJoined
         index={index}
-        onPress={() =>
-          router.push({ pathname: '/lounge/[id]', params: { id: item.lounge.id } })
-        }
+        accessibilityHint="Opens this lounge"
+        onPress={() => router.push({ pathname: '/lounge/[id]', params: { id: item.lounge.id } })}
       />
     ),
     []
   );
 
+  /** The masthead's second line is a readout, not a sentence. */
+  const summary = useMemo(() => {
+    if (isError) return 'Could not reach your lounges';
+    const lounges = data ?? [];
+    if (lounges.length === 0) return 'No lounges yet';
+    const live = lounges.filter((item) => item.activeSessions > 0).length;
+    return live > 0 ? `${lounges.length} joined · ${live} live` : `${lounges.length} joined`;
+  }, [data, isError]);
+
   return (
     <Screen padded={false}>
       <Animated.View style={[styles.flex, moduleStyle]}>
-        <View style={[styles.head, { borderBottomColor: C.rule }]}>
-          <Text style={[styles.headTitle, { color: C.ink }]}>Lounges</Text>
-
-          <View style={styles.actions}>
-            <RuleButton label="CREATE" onPress={openCreate} />
-            <RuleButton label="JOIN WITH CODE" onPress={openJoin} />
+        <View style={styles.masthead}>
+          <View style={styles.mastheadText}>
+            <Text style={[styles.title, { color: C.ink }]}>Lounges</Text>
+            {/* A skeleton rather than the word "Loading": the line keeps its
+                height, so the masthead does not reflow when the count lands. */}
+            {isPending ? (
+              <Skeleton width={132} height={13} style={styles.summarySkeleton} />
+            ) : (
+              <Text numberOfLines={1} style={[styles.summary, { color: C.ink2 }]}>
+                {summary}
+              </Text>
+            )}
           </View>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Create a lounge"
+            onPress={openCreate}
+            style={({ pressed }) => [
+              styles.iconTile,
+              { backgroundColor: C.surface },
+              raised(C),
+              pressed && styles.pressed,
+            ]}>
+            <Plus size={18} strokeWidth={2.5} color={C.ink} />
+          </Pressable>
         </View>
 
         {isError ? (
-          <Notice
-            kicker="COULD NOT LOAD YOUR LOUNGES"
-            body={loungeErrorMessage(error, 'Check your connection and try again.')}
-            action={{ label: 'TRY AGAIN', onPress: () => void refetch() }}
-          />
+          <View style={styles.list}>
+            <QuietCard
+              icon={WifiOff}
+              title="Could not load your lounges"
+              line={loungeErrorMessage(error, 'Check your connection.')}
+              primary={{ label: 'Try again', onPress: () => void refetch() }}
+            />
+          </View>
         ) : isPending ? (
-          <LoungeListSkeleton />
+          <View style={styles.list}>
+            <LoungeListSkeleton count={4} />
+          </View>
         ) : (
           <FlatList
             data={data}
@@ -184,10 +221,11 @@ export default function LoungesScreen() {
               />
             }
             ListEmptyComponent={
-              <Notice
-                kicker="NO LOUNGES YET"
-                body="Create one or join with a code."
-                action={{ label: 'CREATE A LOUNGE', onPress: openCreate }}
+              <QuietCard
+                icon={Users}
+                title="No lounges yet"
+                primary={{ label: 'Create a lounge', onPress: openCreate }}
+                secondary={{ label: 'I have a code', onPress: openJoin }}
               />
             }
           />
@@ -207,62 +245,50 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
   },
+  pressed: {
+    opacity: 0.7,
+  },
 
-  head: {
-    paddingHorizontal: GUTTER,
-    paddingTop: 14,
-    paddingBottom: 12,
-    borderBottomWidth: Rule.major,
-  },
-  headTitle: {
-    ...Type.display(22),
-    marginBottom: 10,
-  },
-  actions: {
+  masthead: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    // 8px is the floor between adjacent targets; these two sit at 10.
-    gap: 10,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Space.md,
+    paddingTop: 14,
+    paddingHorizontal: GUTTER,
   },
-  ruleButton: {
-    minHeight: 44,
+  mastheadText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  title: {
+    ...Type.display(30),
+    letterSpacing: tracking(30, -0.03),
+  },
+  summary: {
+    ...Type.body(13.5),
+    marginTop: 5,
+  },
+  summarySkeleton: {
+    marginTop: 7,
+  },
+  iconTile: {
+    width: TOUCH_TARGET,
+    height: TOUCH_TARGET,
+    borderRadius: Radii.md,
+    alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 12,
-    borderWidth: Rule.hair,
-  },
-  ruleButtonLabel: {
-    ...Type.heading(10),
-    letterSpacing: 10 * 0.09,
   },
 
+  list: {
+    paddingHorizontal: ROW_GUTTER,
+    paddingTop: 24,
+  },
   listContent: {
     flexGrow: 1,
+    paddingHorizontal: ROW_GUTTER,
+    paddingTop: 24,
     paddingBottom: LIST_TAIL,
   },
 
-  notice: {
-    paddingVertical: 26,
-    paddingHorizontal: 14,
-    borderBottomWidth: Rule.hair,
-  },
-  noticeKicker: {
-    ...Type.label(10),
-    marginBottom: 8,
-  },
-  noticeBody: {
-    ...Type.body(14),
-    lineHeight: 21,
-  },
-  action: {
-    marginTop: 14,
-    alignSelf: 'flex-start',
-    minHeight: 46,
-    justifyContent: 'center',
-    paddingHorizontal: Space.lg,
-    borderWidth: Rule.hair,
-  },
-  actionLabel: {
-    ...Type.heading(11),
-    letterSpacing: 11 * 0.1,
-  },
 });

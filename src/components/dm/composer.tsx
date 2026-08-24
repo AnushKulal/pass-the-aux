@@ -1,15 +1,19 @@
 /**
- * The DM composer.
+ * The DM composer. Design canvas: `data-screen-label="Thread"`, bottom bar.
  *
- * Four flush cells under a 2px rule: attach / field / mic / SEND, divided by
- * hairlines. They are butted together on purpose — this is one control bar, not
- * four neighbouring buttons, so the "8px between adjacent targets" floor is met
- * by the 1px rules that separate them the way the segmented tabs do. Each cell
- * still clears 44x44 on its own.
+ * Three raised tiles around one recessed field, over a hairline: attach, the
+ * field, record, send. Not the flush cell-bar the previous direction used —
+ * every control here is its own 44px square with 11px of air around it, which
+ * is what lets the field read as a well rather than as another cell.
  *
- * SEND carries the accent only while pressing it would actually send. Idle it
- * loses the red and drops to a bordered surface cell — the same signal the rest
- * of the app uses: red means the thing is live, its absence means it is not.
+ * THE FIELD IS NOT `pressed()`. A 44px well on a dark ground shows only the
+ * dark half of the inset pair and reads as dirt; the recipe is for surfaces of
+ * about 80px and up. It gets `bgRecessed` and a hairline instead — the same fix
+ * the auth fields already carry.
+ *
+ * SEND is the inverted pill, never the accent. In a thread the accent means
+ * "this message is mine", and spending it on a button as well would leave the
+ * one distinction a log has to make competing with a control.
  *
  * Fully controlled. The thread screen owns `value` and the mutation; this file
  * never touches the data layer. It owns exactly three pieces of local state —
@@ -17,7 +21,7 @@
  * used to place the caret after completing a mention.
  */
 
-import { Mic, Paperclip } from 'lucide-react-native';
+import { Mic, Paperclip, Send } from 'lucide-react-native';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -40,7 +44,7 @@ import {
   findMentionQuery,
   type MentionCandidate,
 } from '@/components/dm/mention-picker';
-import { Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
+import { Radii, Rule, Space, TOUCH_TARGET, Type, dropped, raised } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
 /** `dm_body_length` on `direct_messages` — reject before the round-trip. */
@@ -48,16 +52,15 @@ const MAX_LENGTH = 4000;
 /** A counter that is always on is noise; it only matters near the wall. */
 const COUNTER_FROM = 3800;
 
-const BODY = Type.body(16);
-const INPUT_PADDING_Y = 14;
-/** The prototype's 52px bar, comfortably over the 44px floor. */
-const MIN_INPUT_HEIGHT = BODY.lineHeight + INPUT_PADDING_Y * 2;
+const BODY = Type.body(14.5);
+const INPUT_PADDING_Y = 12;
+/** The design's 44px bar, which is also the touch floor. */
+const MIN_INPUT_HEIGHT = TOUCH_TARGET;
 /** Four lines, then the field scrolls instead of eating the thread. */
 const MAX_INPUT_HEIGHT = BODY.lineHeight * 4 + INPUT_PADDING_Y * 2;
-/** The prototype's icon cells and SEND cell. */
-const ICON_CELL = 46;
-const SEND_WIDTH = 58;
-const ICON = 19;
+
+const TILE = TOUCH_TARGET;
+const ICON = 18;
 
 /** `Type.readout` hands back a readonly fontVariant tuple; TextStyle wants a mutable one. */
 const readout = (size: number): TextStyle => ({
@@ -79,7 +82,7 @@ export type DmComposerProps = {
   onRecord?: () => void;
 
   placeholder?: string;
-  /** A send is in flight — SEND drops out of the accent until it lands. */
+  /** A send is in flight — SEND goes inert until it lands. */
   sending?: boolean;
   /** Blanket disable: no thread yet, blocked, offline. */
   disabled?: boolean;
@@ -176,6 +179,8 @@ export function DmComposer({
 
   const handleContentSizeChange = useCallback(
     (event: NativeSyntheticEvent<TextInputContentSizeChangeEventData>) => {
+      // contentSize already carries the field's own padding; adding it again
+      // makes the bar jump a line taller than the text in it.
       const next = event.nativeEvent.contentSize.height;
       setHeight(clamp(next, MIN_INPUT_HEIGHT, MAX_INPUT_HEIGHT));
     },
@@ -228,7 +233,7 @@ export function DmComposer({
           {
             backgroundColor: C.bg,
             borderTopColor: C.rule,
-            paddingBottom: bottomInset ?? insets.bottom,
+            paddingBottom: (bottomInset ?? insets.bottom) + Space.md,
           },
         ]}>
         <Pressable
@@ -238,13 +243,19 @@ export function DmComposer({
           disabled={!attachEnabled}
           onPress={onAttach}
           style={({ pressed }) => [
-            styles.iconCell,
-            { borderRightColor: C.rule, backgroundColor: pressed ? C.surface : 'transparent' },
+            styles.tile,
+            { backgroundColor: pressed ? C.surface2 : C.surface },
+            raised(C),
+            !attachEnabled && styles.inert,
           ]}>
           <Paperclip size={ICON} strokeWidth={2} color={attachEnabled ? C.ink2 : C.ink3} />
         </Pressable>
 
-        <View style={[styles.field, { backgroundColor: C.bgRecessed }]}>
+        <View
+          style={[
+            styles.field,
+            { backgroundColor: C.bgRecessed, borderColor: C.rule, height },
+          ]}>
           <TextInput
             value={value}
             onChangeText={handleChangeText}
@@ -258,16 +269,16 @@ export function DmComposer({
             maxLength={MAX_LENGTH}
             // A multiline field already treats Return as a newline; sending is
             // the button's job alone, so submitBehavior stays at its default.
-            textAlignVertical="top"
+            textAlignVertical="center"
             selectionColor={C.live}
             accessibilityLabel={placeholder}
-            style={[styles.input, { color: C.ink, height }]}
+            style={[styles.input, { color: C.ink }]}
           />
 
           {value.length >= COUNTER_FROM ? (
             <Text
               accessibilityLiveRegion="polite"
-              style={[styles.counter, { color: remaining <= 0 ? C.danger : C.ink3 }]}>
+              style={[styles.counter, { color: remaining <= 0 ? C.liveText : C.ink3 }]}>
               {remaining}
             </Text>
           ) : null}
@@ -280,9 +291,10 @@ export function DmComposer({
           disabled={!recordEnabled}
           onPress={onRecord}
           style={({ pressed }) => [
-            styles.iconCell,
-            styles.iconCellLeft,
-            { borderLeftColor: C.rule, backgroundColor: pressed ? C.surface : 'transparent' },
+            styles.tile,
+            { backgroundColor: pressed ? C.surface2 : C.surface },
+            raised(C),
+            !recordEnabled && styles.inert,
           ]}>
           <Mic size={ICON} strokeWidth={2} color={recordEnabled ? C.ink2 : C.ink3} />
         </Pressable>
@@ -294,12 +306,12 @@ export function DmComposer({
           disabled={!canSend}
           onPress={handleSend}
           style={({ pressed }) => [
-            styles.send,
-            canSend
-              ? { backgroundColor: pressed ? C.liveText : C.live }
-              : { backgroundColor: C.surface, borderLeftWidth: Rule.hair, borderLeftColor: C.rule },
+            styles.tile,
+            { backgroundColor: pressed ? C.cream : C.pill },
+            dropped(C, 'sm'),
+            !canSend && styles.inert,
           ]}>
-          <Text style={[styles.sendLabel, { color: canSend ? C.onLive : C.ink3 }]}>SEND</Text>
+          <Send size={ICON} strokeWidth={2.2} color={C.pillInk} />
         </Pressable>
       </View>
     </KeyboardAvoidingView>
@@ -309,55 +321,45 @@ export function DmComposer({
 const styles = StyleSheet.create({
   bar: {
     flexDirection: 'row',
-    // The field grows upward; every other cell stays on the bottom edge.
+    // The field grows upward; every tile stays on the bottom edge.
     alignItems: 'flex-end',
-    // 2px, because this is a boundary between two major regions of the screen.
-    borderTopWidth: Rule.major,
+    gap: 11,
+    paddingHorizontal: Space.lg,
+    paddingTop: Space.md,
+    borderTopWidth: Rule.hair,
   },
-  iconCell: {
-    width: ICON_CELL,
-    height: MIN_INPUT_HEIGHT,
-    minWidth: TOUCH_TARGET,
-    minHeight: TOUCH_TARGET,
+  tile: {
+    width: TILE,
+    height: TILE,
     flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRightWidth: Rule.hair,
+    borderRadius: Radii.md,
   },
-  iconCellLeft: {
-    borderRightWidth: 0,
-    borderLeftWidth: Rule.hair,
+  inert: {
+    opacity: 0.45,
   },
   field: {
     flex: 1,
     minWidth: 0,
-    justifyContent: 'center',
-    paddingHorizontal: Space.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: Radii.md,
+    // Small recessed things get a hairline, never the inset pair.
+    borderWidth: Rule.hair,
   },
   input: {
     ...BODY,
+    flex: 1,
+    minWidth: 0,
+    alignSelf: 'stretch',
+    paddingHorizontal: 15,
     paddingVertical: INPUT_PADDING_Y,
-    // The field must never be shorter than the cells beside it.
-    minHeight: MIN_INPUT_HEIGHT,
-    maxHeight: MAX_INPUT_HEIGHT,
   },
   counter: {
     // A remaining-character count measures. Tabular figures.
     ...readout(11),
-    alignSelf: 'flex-end',
-    paddingBottom: Space.sm,
-  },
-  send: {
-    width: SEND_WIDTH,
-    height: MIN_INPUT_HEIGHT,
-    minWidth: TOUCH_TARGET,
-    minHeight: TOUCH_TARGET,
-    flexShrink: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sendLabel: {
-    ...Type.heading(11),
-    letterSpacing: tracking(11, 0.06),
+    alignSelf: 'center',
+    paddingRight: Space.md,
   },
 });

@@ -1,29 +1,26 @@
 /**
- * Messages — the DM inbox (README §13).
+ * Messages — the DM inbox. Design canvas: `data-screen-label="Messages"`.
  *
- * `N UNREAD` over a list of conversations, newest first, staggered in at 50ms;
- * then a **PEOPLE** section for starting a thread with somebody you have never
- * written to.
+ * A back tile and a title, then CONVERSATIONS. The artboard says the whole
+ * screen in one gesture: an unread thread is a RAISED CARD, a read one is a
+ * bare row on the ground. That contrast is the design — the weights and the
+ * lift both come from `row.unreadCount` and nothing else.
  *
- * The screen lives inside `(tabs)` so the rail and the tab bar survive the
- * push, but it deliberately owns no tab cell — `PatchbayTabBar` renders from a
- * fixed CELLS list, so a file added to this group is a route and nothing more.
- * The way in is the rail's DM tile.
+ * PEOPLE keeps its section below. It is the only way to start a thread with
+ * somebody you have never written to, so cutting it would leave the screen
+ * unable to do the one thing it is for.
  *
  * Two data sources, and they are not the same shape of question:
  *
- *  - `useInbox()` is the conversations, with exact unread counts, kept live by
- *    `useDmSubscription(null)` — the inbox-wide variant, which watches every
- *    `direct_messages` row RLS lets this viewer see rather than one thread.
- *  - `usePeople()` is "who could I write to", which the DM schema has no notion
- *    of. It is answered from the lounges you are in, because in this product
- *    that IS the social graph: there is no friends table (see the handoff's
- *    Schema gaps), so the section lists the people you share a lounge with.
+ *  - `useInbox()` is the conversations, kept live by `useDmSubscription(null)`
+ *    — the inbox-wide variant, which watches every row RLS lets this viewer see.
+ *  - `usePeople()` is "who could I write to", answered from the lounges you are
+ *    in, because in this product that IS the social graph.
  */
 
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import { MessageCircle } from 'lucide-react-native';
+import { ChevronLeft, MessageCircle } from 'lucide-react-native';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   FlatList,
@@ -36,20 +33,16 @@ import {
   type TextStyle,
 } from 'react-native';
 import Animated, {
-  Easing,
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import {
-  ConversationRow,
-  CONVERSATION_ROW_HEIGHT,
-  presenceFor,
-  presenceLabel,
-} from '@/components/dm/conversation-row';
-import { Avatar, EmptyState, Screen, Skeleton, useToast } from '@/components/ui';
+import { ChatNotice } from '@/components/chat/bubble-kit';
+import { presenceFor, stampFor } from '@/components/dm/conversation-row';
+import { Avatar, Skeleton } from '@/components/ui';
 import {
   useDmSubscription,
   useInbox,
@@ -60,13 +53,27 @@ import {
 } from '@/features/dm';
 import { serverNow } from '@/lib/clock';
 import { supabase } from '@/lib/supabase';
-import { Duration, Fonts, Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
+import {
+  Duration,
+  Fonts,
+  Radii,
+  Space,
+  TOUCH_TARGET,
+  Type,
+  raised,
+  tracking,
+} from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
-/** The screen gutter the artboards use for rows and headers alike. */
-const GUTTER = Space.md;
-/** Clears the tab bar without leaving a hole under the last row. */
-const LIST_TAIL = Space.xxxl;
+const CARD_GUTTER = 14;
+const TEXT_GUTTER = 24;
+
+const BACK_TILE = 38;
+const BACK_SLOP = { top: 3, bottom: 3, left: 6, right: 6 };
+
+const AVATAR = 50;
+const PERSON_AVATAR = 42;
+const DOT = 13;
 
 const INBOX_SKELETONS = [0, 1, 2, 3];
 const PEOPLE_SKELETONS = [0, 1, 2];
@@ -75,9 +82,6 @@ const PEOPLE_SKELETONS = [0, 1, 2];
 const PEOPLE_LIMIT = 24;
 /** How many roster rows to scan before giving up on de-duplicating by hand. */
 const ROSTER_SCAN = 400;
-
-const PERSON_AVATAR = 36;
-const PERSON_DOT = 10;
 
 /** `Type.readout()` hands back a readonly tuple; `TextStyle` wants a mutable one. */
 const readout = (size: number): TextStyle => ({
@@ -95,11 +99,11 @@ const PROFILE_COLUMNS =
 /**
  * The people you share a lounge with.
  *
- * Three round trips rather than one embedded select, for the same reason the
- * Feed's `useMySessions` is split: the hand-authored `Database` type declares no
- * relationships, so PostgREST embeds do not typecheck against it. RLS does the
- * scoping — `members read the roster` only returns rows for lounges you are
- * actually in — so this cannot leak a stranger's profile into the list.
+ * Three round trips rather than one embedded select: the hand-authored
+ * `Database` type declares no relationships, so PostgREST embeds do not
+ * typecheck against it. RLS does the scoping — `members read the roster` only
+ * returns rows for lounges you are actually in — so this cannot leak a
+ * stranger's profile into the list.
  */
 async function fetchPeople(viewerId: string): Promise<DmAuthor[]> {
   const mine = await supabase.from('lounge_members').select('lounge_id').eq('user_id', viewerId);
@@ -144,143 +148,165 @@ function usePeople() {
   });
 }
 
+/* ---------------------------------------------------------- conversation row */
+
+type ThreadRowProps = {
+  row: InboxRow;
+  onOpenThread: (conversationId: string) => void;
+};
+
+/**
+ * The artboard's row.
+ *
+ * Unread lifts off the ground on `raised()` and sets in `ink`; read lies flat
+ * on the ground in `ink2`. Nothing else separates the two states, which is why
+ * neither may be softened for consistency.
+ */
+function ThreadRowBase({ row, onOpenThread }: ThreadRowProps) {
+  const C = useColors();
+
+  const person = row.other;
+  const name = person ? person.display_name.trim() || person.username : 'Someone';
+  const unread = row.unreadCount > 0;
+
+  const nowMs = serverNow();
+  const live = presenceFor(person, nowMs) === 'online';
+  const stamp = stampFor(row.previewAt ?? row.lastMessageAt, nowMs);
+
+  const hasPreview = row.preview.trim().length > 0;
+  const preview = hasPreview
+    ? row.previewIsMine
+      ? `You: ${row.preview}`
+      : row.preview
+    : 'No messages yet';
+
+  const open = useCallback(() => onOpenThread(row.conversationId), [onOpenThread, row]);
+
+  const summary = [name, unread ? `${row.unreadCount} unread` : null, preview]
+    .filter(Boolean)
+    .join(', ');
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={summary}
+      accessibilityHint="Opens the conversation"
+      onPress={open}
+      style={({ pressed }) => [
+        styles.thread,
+        unread
+          ? [{ backgroundColor: pressed ? C.surface2 : C.surface }, raised(C)]
+          : pressed
+            ? { backgroundColor: C.surface }
+            : null,
+      ]}>
+      <View style={styles.avatarWell}>
+        <Avatar name={name} uri={person?.avatar_url} size={AVATAR} />
+        {live ? (
+          <View
+            style={[
+              styles.dot,
+              { backgroundColor: C.live, borderColor: unread ? C.surface : C.bg },
+            ]}
+          />
+        ) : null}
+      </View>
+
+      <View style={styles.threadText}>
+        <Text numberOfLines={1} style={[styles.threadName, { color: unread ? C.ink : C.ink2 }]}>
+          {name}
+        </Text>
+        <Text
+          numberOfLines={1}
+          style={[styles.threadPreview, { color: unread ? C.ink2 : C.ink3 }]}>
+          {preview}
+        </Text>
+      </View>
+
+      <View style={styles.threadMeta}>
+        <Text style={[styles.stamp, { color: C.ink3 }]}>{stamp}</Text>
+        {/* The one accent on the row, and it means exactly one thing. */}
+        {unread ? (
+          <View style={[styles.badge, { backgroundColor: C.live }]}>
+            <Text numberOfLines={1} style={[styles.badgeLabel, { color: C.onLive }]}>
+              {row.unreadCount > 99 ? '99+' : row.unreadCount}
+            </Text>
+          </View>
+        ) : null}
+      </View>
+    </Pressable>
+  );
+}
+
+/**
+ * Memoised: realtime commits a message into one thread and the inbox re-renders
+ * whole, so every other row gets the same props it already had.
+ */
+const ThreadRow = memo(ThreadRowBase);
+
 /* ---------------------------------------------------------------- person row */
 
 type PersonRowProps = {
   person: DmAuthor;
-  /** The row itself: their profile. */
-  onOpenProfile: (person: DmAuthor) => void;
-  /** The message cell: open (or reuse) the thread with them. */
+  /** Open (or reuse) the thread with them. */
   onMessage: (userId: string) => void;
-  onAdd: (person: DmAuthor) => void;
   /** True while `open_direct_conversation` is in flight for this person. */
   busy?: boolean;
 };
 
-function PersonRowBase({ person, onOpenProfile, onMessage, onAdd, busy = false }: PersonRowProps) {
+function PersonRowBase({ person, onMessage, busy = false }: PersonRowProps) {
   const C = useColors();
   const name = person.display_name.trim() || person.username;
-  const presence = presenceFor(person, serverNow());
-  const status = presenceLabel(presence);
+  const live = presenceFor(person, serverNow()) === 'online';
 
-  const open = useCallback(() => onOpenProfile(person), [onOpenProfile, person]);
   const message = useCallback(() => onMessage(person.id), [onMessage, person.id]);
-  const add = useCallback(() => onAdd(person), [onAdd, person]);
 
   return (
-    <View style={[styles.personRow, { borderBottomColor: C.rule }]}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`${name}${status ? `, ${status.toLowerCase()}` : ''}`}
-        accessibilityHint="Opens their profile"
-        onPress={open}
-        style={({ pressed }) => [styles.personMain, pressed && styles.pressed]}>
-        <View style={styles.personAvatar}>
-          <Avatar name={name} uri={person.avatar_url} size={PERSON_AVATAR} />
-          {presence === 'online' ? (
-            <View style={[styles.personDot, { backgroundColor: C.ink, borderColor: C.bg }]} />
-          ) : null}
-        </View>
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Message ${name}`}
+      accessibilityState={{ disabled: busy, busy }}
+      disabled={busy}
+      onPress={message}
+      style={({ pressed }) => [
+        styles.person,
+        pressed && { backgroundColor: C.surface },
+        busy && styles.blocked,
+      ]}>
+      <View style={styles.avatarWell}>
+        <Avatar name={name} uri={person.avatar_url} size={PERSON_AVATAR} />
+        {live ? (
+          <View style={[styles.personDot, { backgroundColor: C.live, borderColor: C.bg }]} />
+        ) : null}
+      </View>
 
-        <View style={styles.personIdentity}>
-          <View style={styles.personNameLine}>
-            <Text numberOfLines={1} style={[styles.personName, { color: C.ink }]}>
-              {name}
-            </Text>
-            {person.is_premium ? (
-              <View style={[styles.premium, { backgroundColor: C.ink }]}>
-                <Text style={[styles.premiumLabel, { color: C.bg }]}>PREMIUM</Text>
-              </View>
-            ) : null}
-          </View>
+      <View style={styles.threadText}>
+        <Text numberOfLines={1} style={[styles.threadName, { color: C.ink2 }]}>
+          {name}
+        </Text>
+        <Text numberOfLines={1} style={[styles.threadPreview, { color: C.ink3 }]}>
+          @{person.username}
+        </Text>
+      </View>
 
-          <Text numberOfLines={1} style={[styles.personMeta, { color: C.ink2 }]}>
-            {status ? `@${person.username} · ${status}` : `@${person.username}`}
-          </Text>
-        </View>
-      </Pressable>
-
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Message ${name}`}
-        accessibilityState={{ disabled: busy }}
-        disabled={busy}
-        onPress={message}
-        style={({ pressed }) => [styles.iconCell, pressed && styles.pressed]}>
-        <MessageCircle size={18} strokeWidth={2} color={busy ? C.ink3 : C.ink2} />
-      </Pressable>
-
-      {/*
-        §13 asks for message AND add. There is no friends table in the schema —
-        no follows, no requests, nothing to write — so the cell states that
-        plainly on tap instead of pretending to save something. It stays in ink:
-        a control that cannot act has not earned the accent.
-      */}
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Add ${name}`}
-        onPress={add}
-        style={({ pressed }) => [
-          styles.addCell,
-          { borderColor: C.rule2 },
-          pressed && { backgroundColor: C.surface },
-        ]}>
-        <Text style={[styles.addLabel, { color: C.ink3 }]}>ADD</Text>
-      </Pressable>
-    </View>
+      <MessageCircle size={18} strokeWidth={2} color={busy ? C.ink3 : C.ink2} />
+    </Pressable>
   );
 }
 
 const PersonRow = memo(PersonRowBase);
 
-/* ------------------------------------------------------------------- notices */
-
-/** The ruled prose block this app uses for "nothing here" and "that failed". */
-function Notice({
-  kicker,
-  body,
-  action,
-}: {
-  kicker: string;
-  body: string;
-  action?: { label: string; onPress: () => void };
-}) {
-  const C = useColors();
-
-  return (
-    <View style={styles.notice}>
-      <Text style={[styles.noticeKicker, { color: C.ink3 }]}>{kicker}</Text>
-      <Text style={[styles.noticeBody, { color: C.ink2 }]}>{body}</Text>
-      {action ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={action.label}
-          onPress={action.onPress}
-          style={({ pressed }) => [
-            styles.noticeAction,
-            { borderColor: C.rule2, backgroundColor: pressed ? C.surface : 'transparent' },
-          ]}>
-          <Text style={[styles.noticeActionLabel, { color: C.ink }]}>{action.label}</Text>
-        </Pressable>
-      ) : null}
-    </View>
-  );
-}
-
-/** Four rows of the real geometry, so nothing shifts when the data lands. */
+/** Rows of the real geometry, so nothing shifts when the data lands. */
 function InboxSkeleton() {
-  const C = useColors();
-
   return (
-    <View>
+    <View style={styles.skeletonGroup}>
       {INBOX_SKELETONS.map((row) => (
-        <View key={row} style={[styles.skeletonRow, { borderBottomColor: C.rule }]}>
-          <Skeleton width={40} height={40} />
-          <View style={styles.skeletonIdentity}>
+        <View key={row} style={styles.skeletonRow}>
+          <Skeleton width={AVATAR} height={AVATAR} />
+          <View style={styles.skeletonText}>
             <Skeleton width="42%" height={13} />
             <Skeleton width="76%" height={11} />
           </View>
-          <Skeleton width={26} height={10} />
         </View>
       ))}
     </View>
@@ -288,14 +314,12 @@ function InboxSkeleton() {
 }
 
 function PeopleSkeleton() {
-  const C = useColors();
-
   return (
-    <View>
+    <View style={styles.skeletonGroup}>
       {PEOPLE_SKELETONS.map((row) => (
-        <View key={row} style={[styles.skeletonPerson, { borderBottomColor: C.rule }]}>
+        <View key={row} style={styles.skeletonRow}>
           <Skeleton width={PERSON_AVATAR} height={PERSON_AVATAR} />
-          <View style={styles.skeletonIdentity}>
+          <View style={styles.skeletonText}>
             <Skeleton width="38%" height={12} />
             <Skeleton width="58%" height={10} />
           </View>
@@ -312,7 +336,6 @@ const keyExtractor = (row: InboxRow) => row.conversationId;
 export default function MessagesScreen() {
   const C = useColors();
   const router = useRouter();
-  const toast = useToast();
   const reduced = useReducedMotion();
 
   const { rows, isPending, isError, isRefetching, refetch } = useInbox();
@@ -331,29 +354,11 @@ export default function MessagesScreen() {
   const { mutate: openConversation } = useOpenConversation();
   const [messagingId, setMessagingId] = useState<string | null>(null);
 
-  const unreadTotal = useMemo(
-    () => rows.reduce((total, row) => total + row.unreadCount, 0),
-    [rows],
-  );
-
-  // ---- the screen's own entrance, matched to every other module in the app
-  const enter = useSharedValue(reduced ? 1 : 0);
-
+  const enter = useSharedValue(0);
   useEffect(() => {
-    if (reduced) {
-      enter.value = 1;
-      return;
-    }
-    enter.value = withTiming(1, {
-      duration: Duration.enter,
-      easing: Easing.bezier(0.2, 0.8, 0.2, 1),
-    });
-  }, [enter, reduced]);
-
-  const moduleStyle = useAnimatedStyle(() => ({
-    opacity: enter.value,
-    transform: [{ translateY: (1 - enter.value) * 8 }],
-  }));
+    enter.value = reduced ? 1 : withTiming(1, { duration: Duration.enter });
+  }, [reduced, enter]);
+  const enterStyle = useAnimatedStyle(() => ({ opacity: enter.value }));
 
   const openThread = useCallback(
     (conversationId: string) => {
@@ -362,20 +367,6 @@ export default function MessagesScreen() {
       router.push({ pathname: '/messages/[id]', params: { id: conversationId } });
     },
     [router],
-  );
-
-  /**
-   * There is no route for another person's profile yet — §15's "Others" screen
-   * has no file, and the handoff's Schema gaps still list the columns it needs.
-   * The targets stay real and say so plainly rather than pushing into a 404;
-   * the day that screen lands this becomes one `router.push` and nothing else
-   * on the row changes.
-   */
-  const openProfile = useCallback(
-    (person: DmAuthor) => {
-      toast.show(`@${person.username} has no profile page yet`, 'info');
-    },
-    [toast],
   );
 
   const messagePerson = useCallback(
@@ -389,20 +380,11 @@ export default function MessagesScreen() {
     [openConversation, openThread],
   );
 
-  const addPerson = useCallback(() => {
-    toast.show('Aux cannot add people yet — message them instead', 'info');
-  }, [toast]);
-
   const renderItem = useCallback(
-    ({ item, index }: ListRenderItemInfo<InboxRow>) => (
-      <ConversationRow
-        row={item}
-        index={index}
-        onOpenThread={openThread}
-        onOpenProfile={openProfile}
-      />
+    ({ item }: ListRenderItemInfo<InboxRow>) => (
+      <ThreadRow row={item} onOpenThread={openThread} />
     ),
-    [openProfile, openThread],
+    [openThread],
   );
 
   const empty = useMemo(() => {
@@ -410,95 +392,98 @@ export default function MessagesScreen() {
 
     if (isError) {
       return (
-        <Notice
-          kicker="COULD NOT LOAD YOUR MESSAGES"
-          body="Check your connection and try again — nothing was lost."
-          action={{ label: 'TRY AGAIN', onPress: refetch }}
-        />
+        <View style={styles.group}>
+          <ChatNotice
+            label="Your messages didn't load."
+            action={{ label: 'Retry', onPress: refetch }}
+          />
+        </View>
       );
     }
 
     return (
-      <View style={styles.emptyWrap}>
-        <EmptyState
-          icon={MessageCircle}
-          title="No messages yet"
-          description="Nobody has written to you, and you have not written to anyone. Pick someone below and start."
-        />
+      <View style={styles.group}>
+        <ChatNotice label="No conversations yet. Pick someone below." />
       </View>
     );
   }, [isError, isPending, refetch]);
 
+  const header = useMemo(
+    () => (
+      <>
+        <View style={styles.head}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+            hitSlop={BACK_SLOP}
+            onPress={() => {
+              if (router.canGoBack()) router.back();
+              else router.replace('/(tabs)');
+            }}
+            style={({ pressed }) => [
+              styles.backTile,
+              { backgroundColor: pressed ? C.surface2 : C.surface },
+              raised(C),
+            ]}>
+            <ChevronLeft size={20} strokeWidth={2.4} color={C.ink} />
+          </Pressable>
+          <Text style={[styles.title, { color: C.ink }]}>Messages</Text>
+        </View>
+
+        <Text style={[styles.kicker, { color: C.ink3 }]}>Conversations</Text>
+      </>
+    ),
+    [C, router],
+  );
+
   const footer = useMemo(
     () => (
-      <View style={[styles.section, { borderTopColor: C.rule }]}>
-        <Text style={[styles.kicker, { color: C.ink3 }]}>PEOPLE</Text>
+      <>
+        <Text style={[styles.kicker, { color: C.ink3 }]}>People</Text>
 
         {peoplePending ? <PeopleSkeleton /> : null}
 
         {peopleFailed ? (
-          <Notice
-            kicker="COULD NOT LOAD PEOPLE"
-            body="The list of people from your lounges did not arrive."
-            action={{ label: 'TRY AGAIN', onPress: () => void refetchPeople() }}
-          />
+          <View style={styles.group}>
+            <ChatNotice
+              label="The people list didn't load."
+              action={{ label: 'Retry', onPress: () => void refetchPeople() }}
+            />
+          </View>
         ) : null}
 
         {!peoplePending && !peopleFailed && (peopleRows?.length ?? 0) === 0 ? (
-          <Notice
-            kicker="NOBODY HERE YET"
-            body="People show up once you share a lounge with them. Join one and this fills itself."
-          />
+          <View style={styles.group}>
+            <ChatNotice
+              label="Join a lounge and this fills itself."
+              action={{ label: 'Find a lounge', onPress: () => router.push('/lounges') }}
+            />
+          </View>
         ) : null}
 
-        {(peopleRows ?? []).map((person) => (
-          <PersonRow
-            key={person.id}
-            person={person}
-            busy={messagingId === person.id}
-            onOpenProfile={openProfile}
-            onMessage={messagePerson}
-            onAdd={addPerson}
-          />
-        ))}
-      </View>
+        <View style={styles.rows}>
+          {(peopleRows ?? []).map((person) => (
+            <PersonRow
+              key={person.id}
+              person={person}
+              busy={messagingId === person.id}
+              onMessage={messagePerson}
+            />
+          ))}
+        </View>
+      </>
     ),
-    [
-      C.ink3,
-      C.rule,
-      addPerson,
-      messagePerson,
-      messagingId,
-      openProfile,
-      peopleFailed,
-      peoplePending,
-      peopleRows,
-      refetchPeople,
-    ],
+    [C.ink3, messagePerson, messagingId, peopleFailed, peoplePending, peopleRows, refetchPeople, router],
   );
 
   return (
-    <Screen padded={false}>
-      <Animated.View style={[styles.flex, moduleStyle]}>
-        {/* Header, cut off from the rows by the 2px major rule. */}
-        <View style={[styles.head, { borderBottomColor: C.rule }]}>
-          <Text style={[styles.title, { color: C.ink }]}>Messages</Text>
-          {/*
-            The unread readout is the badge in words: same fact, same accent.
-            At zero it drops to ink3 — "0 UNREAD" in red would be the accent
-            reporting the absence of the thing it exists to report.
-          */}
-          <Text
-            accessibilityRole="text"
-            style={[styles.unread, { color: unreadTotal > 0 ? C.liveText : C.ink3 }]}>
-            {`${unreadTotal} UNREAD`}
-          </Text>
-        </View>
-
+    <SafeAreaView edges={['top', 'left', 'right']} style={[styles.root, { backgroundColor: C.bg }]}>
+      <Animated.View style={[styles.flex, enterStyle]}>
         <FlatList
           data={isPending || isError ? [] : rows}
           keyExtractor={keyExtractor}
           renderItem={renderItem}
+          ListHeaderComponent={header}
           ListEmptyComponent={empty}
           ListFooterComponent={footer}
           contentContainerStyle={styles.content}
@@ -514,172 +499,146 @@ export default function MessagesScreen() {
           }
         />
       </Animated.View>
-    </Screen>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
   flex: {
     flex: 1,
   },
   content: {
-    paddingBottom: LIST_TAIL,
+    width: '100%',
+    maxWidth: 720,
+    alignSelf: 'center',
+    paddingTop: Space.md,
+    paddingBottom: Space.huge,
     flexGrow: 1,
   },
 
   head: {
-    paddingHorizontal: GUTTER,
-    paddingTop: 13,
-    paddingBottom: 12,
-    borderBottomWidth: Rule.major,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingHorizontal: TEXT_GUTTER,
+  },
+  backTile: {
+    width: BACK_TILE,
+    height: BACK_TILE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radii.sm,
   },
   title: {
-    ...Type.display(22),
-  },
-  unread: {
-    ...readout(11),
-    letterSpacing: tracking(11, 0.12),
-    marginTop: 3,
+    ...Type.display(24),
+    letterSpacing: tracking(24, -0.03),
   },
 
-  section: {
-    borderTopWidth: Rule.major,
-  },
   kicker: {
-    ...Type.label(10),
-    paddingHorizontal: GUTTER,
-    paddingTop: Space.lg,
-    paddingBottom: Space.sm,
+    ...Type.label(10.5),
+    letterSpacing: tracking(10.5, 0.15),
+    paddingHorizontal: TEXT_GUTTER,
+    paddingTop: Space.xxxl,
+    paddingBottom: Space.md,
+  },
+  group: {
+    paddingHorizontal: Space.xl,
+  },
+  rows: {
+    paddingHorizontal: CARD_GUTTER,
   },
 
-  personRow: {
+  thread: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Space.sm,
-    paddingLeft: GUTTER,
-    paddingRight: Space.sm,
-    paddingVertical: Space.sm,
-    borderBottomWidth: Rule.hair,
-  },
-  personMain: {
-    flex: 1,
-    minWidth: 0,
+    gap: 14,
     minHeight: TOUCH_TARGET,
+    marginHorizontal: CARD_GUTTER,
+    marginBottom: 9,
+    padding: Space.md,
+    borderRadius: Radii.lg,
+  },
+  person: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Space.sm + 2,
+    gap: 14,
+    minHeight: TOUCH_TARGET,
+    marginBottom: 9,
+    padding: Space.md,
+    borderRadius: Radii.lg,
   },
-  personAvatar: {
+  blocked: {
+    opacity: 0.55,
+  },
+  avatarWell: {
     flexShrink: 0,
+  },
+  dot: {
+    position: 'absolute',
+    right: -2,
+    bottom: -2,
+    width: DOT,
+    height: DOT,
+    borderRadius: Radii.pill,
+    borderWidth: 2.5,
   },
   personDot: {
     position: 'absolute',
-    right: -3,
-    bottom: -3,
-    width: PERSON_DOT,
-    height: PERSON_DOT,
-    borderWidth: Rule.major,
+    right: -2,
+    bottom: -2,
+    width: 11,
+    height: 11,
+    borderRadius: Radii.pill,
+    borderWidth: 2.5,
   },
-  personIdentity: {
+  threadText: {
     flex: 1,
     minWidth: 0,
-    gap: 1,
   },
-  personNameLine: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  threadName: {
+    fontFamily: Fonts.semibold,
+    fontSize: 14.5,
+    lineHeight: 19,
+  },
+  threadPreview: {
+    ...Type.body(12.5),
+    marginTop: 2,
+  },
+  threadMeta: {
+    flexShrink: 0,
+    alignItems: 'flex-end',
     gap: 6,
   },
-  personName: {
-    ...Type.body(14),
+  stamp: {
+    ...readout(11),
     fontFamily: Fonts.semibold,
+  },
+  badge: {
+    minWidth: 19,
+    height: 19,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+  },
+  badgeLabel: {
+    ...readout(10.5),
     lineHeight: 19,
-    flexShrink: 1,
-  },
-  personMeta: {
-    ...Type.body(11),
-    lineHeight: 15,
-  },
-  premium: {
-    flexShrink: 0,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-  },
-  premiumLabel: {
-    // The floor is 10px for anything readable; the artboard's 9px sits under it.
-    ...Type.heading(10),
-    letterSpacing: tracking(10, 0.09),
-  },
-  iconCell: {
-    width: TOUCH_TARGET,
-    height: TOUCH_TARGET,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  addCell: {
-    minWidth: TOUCH_TARGET,
-    minHeight: TOUCH_TARGET,
-    paddingHorizontal: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: Rule.hair,
-    flexShrink: 0,
-  },
-  addLabel: {
-    ...Type.heading(10),
-    letterSpacing: tracking(10, 0.1),
-  },
-  pressed: {
-    opacity: 0.72,
   },
 
-  emptyWrap: {
-    padding: GUTTER,
+  skeletonGroup: {
+    paddingHorizontal: CARD_GUTTER,
   },
-  notice: {
-    paddingHorizontal: GUTTER,
-    paddingVertical: Space.xl,
-  },
-  noticeKicker: {
-    ...Type.label(10),
-    marginBottom: Space.sm,
-  },
-  noticeBody: {
-    ...Type.body(14),
-    lineHeight: 21,
-  },
-  noticeAction: {
-    marginTop: Space.md,
-    alignSelf: 'flex-start',
-    minHeight: 46,
-    justifyContent: 'center',
-    paddingHorizontal: Space.lg,
-    borderWidth: Rule.hair,
-  },
-  noticeActionLabel: {
-    ...Type.heading(11),
-    letterSpacing: tracking(11, 0.1),
-  },
-
   skeletonRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Space.sm + 2,
-    height: CONVERSATION_ROW_HEIGHT,
-    paddingHorizontal: GUTTER,
-    borderBottomWidth: Rule.hair,
+    gap: 14,
+    padding: Space.md,
   },
-  skeletonPerson: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space.sm + 2,
-    paddingHorizontal: GUTTER,
-    paddingVertical: Space.sm,
-    minHeight: TOUCH_TARGET + Space.lg,
-    borderBottomWidth: Rule.hair,
-  },
-  skeletonIdentity: {
+  skeletonText: {
     flex: 1,
     gap: Space.sm,
   },

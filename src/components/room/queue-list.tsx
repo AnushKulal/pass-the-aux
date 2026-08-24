@@ -1,34 +1,57 @@
 /**
  * What is playing next, and whose fault it is.
  *
+ * Built from design/v2/aux-v2.dc.html, the Session's queue sheet: one raised
+ * card per track, 9px apart, position · art · title · who added it · remove.
+ * Rows are cards rather than ruled lines because this list lives inside a
+ * sheet, and a sheet full of hairlines reads as a table rather than as a stack
+ * of things you can pick up.
+ *
  * "@anush added this" is not decoration — attribution is the social texture of
  * a shared queue. It is what turns a playlist into a Session. The artboard
  * folds it into the subtitle rather than giving it its own line, so a row stays
- * one glance deep: position, art, what it is, how long it runs, who put it on.
+ * one glance deep.
  *
- * The artboard also draws a 44px BUMP control beside each row's remove. There
- * is no reorder RPC — `queue_items.position` is written by `queue_append` and
- * read by `room_advance`, and nothing in `supabase/migrations/` can move a row
- * — so the control is not drawn rather than drawn dead. See the handoff note.
+ * The artboard also draws a BUMP control beside each row's remove. There is no
+ * reorder RPC — `queue_items.position` is written by `queue_append` and read by
+ * `room_advance`, and nothing in `supabase/migrations/` can move a row — so the
+ * control is not drawn rather than drawn dead. See the handoff note.
+ *
+ * Four states: skeleton cards, an empty state that names the one next move, an
+ * error with a retry, and the list itself.
  */
 
 import { Image } from 'expo-image';
-import { ListMusic, X } from 'lucide-react-native';
+import { ListMusic, Plus, RotateCw, X } from 'lucide-react-native';
 import { memo, useCallback, type ReactNode } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View, type ListRenderItemInfo } from 'react-native';
 
-import { BLURHASH_SURFACE, EmptyState, Skeleton } from '@/components/ui';
+import { BLURHASH_SURFACE, Skeleton } from '@/components/ui';
 import { useQueue, useRemoveQueueItem, type QueueEntry } from '@/features/rooms/queries';
-import { Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
+import {
+  Fonts,
+  Radii,
+  Rule,
+  Space,
+  TOUCH_TARGET,
+  Type,
+  raised,
+  tracking,
+} from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
 import { formatClock, initialFor, readout } from './drift';
 
-const GUTTER = Space.md;
-const WELL = 32;
+const GUTTER = Space.lg - 2;
+/** The artboard's art well inside a queue row. */
+const WELL = 44;
+const WELL_RADIUS = 13;
 const SKELETON_ROWS = 4;
 /** Two tabular digits plus air, so 01..99 never reflows the row. */
-const INDEX_WIDTH = 20;
+const INDEX_WIDTH = 22;
+/** Visual size of the remove cell; hit slop takes it the rest of the way to 44. */
+const REMOVE = 32;
+const REMOVE_SLOP = (TOUCH_TARGET - REMOVE) / 2;
 
 export type QueueListProps = {
   roomId: string | null;
@@ -40,8 +63,7 @@ export type QueueListProps = {
 };
 
 export function QueueList({ roomId, isHost, currentUserId, onAddTrack, header }: QueueListProps) {
-  const C = useColors();
-  const { data, isLoading } = useQueue(roomId);
+  const { data, isLoading, error, refetch } = useQueue(roomId);
   // `mutate` is stable; the useMutation result object is not, and depending on
   // it would hand every memoised row a fresh callback on each parent render.
   const { mutate: removeItem } = useRemoveQueueItem(roomId);
@@ -52,6 +74,10 @@ export function QueueList({ roomId, isHost, currentUserId, onAddTrack, header }:
     },
     [removeItem]
   );
+
+  const handleRetry = useCallback(() => {
+    void refetch();
+  }, [refetch]);
 
   const renderItem = useCallback(
     ({ item, index }: ListRenderItemInfo<QueueEntry>) => (
@@ -69,18 +95,26 @@ export function QueueList({ roomId, isHost, currentUserId, onAddTrack, header }:
 
   if (isLoading && !data) {
     return (
-      <View>
+      <View style={styles.list}>
         {header}
         {Array.from({ length: SKELETON_ROWS }, (_, index) => (
-          <View key={index} style={[styles.row, { borderBottomColor: C.ruleSoft }]}>
-            <View style={styles.indexSpacer} />
-            <Skeleton width={WELL} height={WELL} radius={0} />
-            <View style={styles.meta}>
-              <Skeleton width="70%" height={14} radius={0} />
-              <Skeleton width="45%" height={11} radius={0} />
-            </View>
-          </View>
+          <QueueRowSkeleton key={index} />
         ))}
+      </View>
+    );
+  }
+
+  if (error && !data) {
+    return (
+      <View style={styles.list}>
+        {header}
+        <QueueNotice
+          title="The queue did not load"
+          body={error instanceof Error ? error.message : 'The connection dropped.'}
+          actionIcon={RotateCw}
+          actionLabel="Try again"
+          onPress={handleRetry}
+        />
       </View>
     );
   }
@@ -92,32 +126,27 @@ export function QueueList({ roomId, isHost, currentUserId, onAddTrack, header }:
       keyExtractor={keyExtractor}
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
+      contentContainerStyle={styles.list}
       ListHeaderComponent={header ? <>{header}</> : null}
       ListEmptyComponent={
-        <EmptyState
-          icon={ListMusic}
-          title="Nothing queued"
-          description="Whatever anyone adds plays next. Go first."
+        <QueueNotice
+          title="Nothing up next"
+          body="Whatever anyone adds plays after this. Go first."
+          actionIcon={Plus}
+          actionLabel="Add a track"
+          onPress={onAddTrack}
         />
       }
       ListFooterComponent={
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Add a track to the queue"
-          onPress={onAddTrack}
-          style={({ pressed }) => [
-            styles.add,
-            { borderColor: C.live },
-            pressed ? { backgroundColor: C.liveWash } : null,
-          ]}>
-          <Text style={[styles.addLabel, { color: C.liveText }]}>+ Add a track</Text>
-        </Pressable>
+        (data?.length ?? 0) > 0 ? <AddTrackWell onPress={onAddTrack} /> : null
       }
     />
   );
 }
 
 const keyExtractor = (item: QueueEntry) => item.id;
+
+// ------------------------------------------------------------------- rows
 
 type QueueRowProps = {
   entry: QueueEntry;
@@ -131,7 +160,7 @@ const QueueRow = memo(function QueueRow({ entry, index, canRemove, onRemove }: Q
   const { track } = entry;
 
   return (
-    <View style={[styles.row, { borderBottomColor: C.ruleSoft }]}>
+    <View style={[styles.row, { backgroundColor: C.surface }, raised(C)]}>
       {/* A position is a measurement, so it is tabular like every other number. */}
       <Text style={[styles.index, { color: C.ink3 }]}>
         {(index + 1).toString().padStart(2, '0')}
@@ -165,34 +194,126 @@ const QueueRow = memo(function QueueRow({ entry, index, canRemove, onRemove }: Q
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Remove ${track.title} from the queue`}
+          hitSlop={REMOVE_SLOP}
           onPress={() => onRemove(entry.id)}
-          style={({ pressed }) => [
-            styles.control,
-            { borderColor: C.rule },
-            pressed ? { borderColor: C.danger } : null,
-          ]}>
-          <X size={18} strokeWidth={2} color={C.ink2} />
+          style={({ pressed }) => [styles.remove, pressed ? { backgroundColor: C.liveWash } : null]}>
+          <X size={16} strokeWidth={2.2} color={C.ink3} />
         </Pressable>
       ) : null}
     </View>
   );
 });
 
+/** The row's own shape, breathing. Not a spinner — this list is a list. */
+const QueueRowSkeleton = memo(function QueueRowSkeleton() {
+  const C = useColors();
+
+  return (
+    <View style={[styles.row, { backgroundColor: C.surface }, raised(C)]}>
+      <View style={styles.indexSpacer} />
+      <Skeleton width={WELL} height={WELL} style={styles.wellSkeleton} />
+      <View style={styles.meta}>
+        <Skeleton width="72%" height={14} style={styles.lineSkeleton} />
+        <Skeleton width="46%" height={11} style={styles.lineSkeleton} />
+      </View>
+    </View>
+  );
+});
+
+// --------------------------------------------------------------- notices
+
+type QueueNoticeProps = {
+  title: string;
+  body: string;
+  actionIcon: typeof Plus;
+  actionLabel: string;
+  onPress: () => void;
+};
+
+/**
+ * Empty and error wear the same card, because they are the same shape of
+ * moment: one sentence about where you are, and one button out of it.
+ */
+const QueueNotice = memo(function QueueNotice({
+  title,
+  body,
+  actionIcon: Icon,
+  actionLabel,
+  onPress,
+}: QueueNoticeProps) {
+  const C = useColors();
+
+  return (
+    <View style={[styles.notice, { backgroundColor: C.surface }, raised(C)]}>
+      <ListMusic size={20} strokeWidth={2} color={C.ink3} />
+      <Text style={[styles.noticeTitle, { color: C.ink }]}>{title}</Text>
+      <Text style={[styles.noticeBody, { color: C.ink2 }]}>{body}</Text>
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={actionLabel}
+        onPress={onPress}
+        style={({ pressed }) => [
+          styles.noticeAction,
+          { backgroundColor: C.pill },
+          pressed ? styles.dim : null,
+        ]}>
+        <Icon size={15} strokeWidth={2.4} color={C.pillInk} />
+        <Text style={[styles.noticeActionLabel, { color: C.pillInk }]}>{actionLabel}</Text>
+      </Pressable>
+    </View>
+  );
+});
+
+/**
+ * The artboard draws this as a recessed well. At 50px it is under the size
+ * where an inset shadow pair reads as depth on a dark ground — the light half
+ * sits at 3.2% alpha and only the dark half survives, which looks like dirt —
+ * so it takes the recessed FILL and a hairline instead. Same reading, no smudge.
+ */
+const AddTrackWell = memo(function AddTrackWell({ onPress }: { onPress: () => void }) {
+  const C = useColors();
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Add a track to the queue"
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.add,
+        { backgroundColor: C.bgRecessed, borderColor: pressed ? C.rule3 : C.rule },
+      ]}>
+      <Plus size={16} strokeWidth={2.4} color={C.ink2} />
+      <Text style={[styles.addLabel, { color: C.ink2 }]}>Add a track</Text>
+    </Pressable>
+  );
+});
+
 const styles = StyleSheet.create({
+  list: {
+    paddingHorizontal: GUTTER,
+    paddingBottom: Space.xxl + 2,
+    gap: Space.sm + 1,
+  },
+  dim: {
+    opacity: 0.7,
+  },
+
+  // -------------------------------------------------------------- the row
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Space.sm + 1,
-    minHeight: TOUCH_TARGET + Space.md,
-    paddingHorizontal: GUTTER,
-    paddingVertical: Space.sm + 1,
-    borderBottomWidth: Rule.hair,
+    gap: Space.md + 2,
+    minHeight: TOUCH_TARGET + Space.sm,
+    padding: Space.md - 1,
+    borderRadius: Radii.button,
   },
   index: {
-    ...readout(11),
+    ...readout(12.5),
     width: INDEX_WIDTH,
     flexGrow: 0,
     flexShrink: 0,
+    textAlign: 'center',
   },
   /** Holds the index column open in the loading state without a text style. */
   indexSpacer: {
@@ -208,42 +329,85 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
+    borderRadius: WELL_RADIUS,
     borderWidth: Rule.hair,
   },
+  wellSkeleton: {
+    borderRadius: WELL_RADIUS,
+  },
+  lineSkeleton: {
+    borderRadius: Radii.xs,
+  },
   wellInitial: {
-    ...readout(13),
+    ...readout(15),
   },
   meta: {
     flex: 1,
     minWidth: 0,
+    gap: 2,
   },
   title: {
-    ...Type.heading(14),
-    letterSpacing: tracking(14, 0.01),
+    fontFamily: Fonts.semibold,
+    fontSize: 14,
+    letterSpacing: tracking(14, -0.01),
   },
   subtitle: {
-    ...Type.body(13),
+    ...Type.body(12),
   },
-  control: {
-    width: TOUCH_TARGET,
-    height: TOUCH_TARGET,
+  remove: {
+    width: REMOVE,
+    height: REMOVE,
     flexGrow: 0,
     flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: Rule.hair,
+    borderRadius: Radii.sm - 2,
   },
+
+  // ------------------------------------------------------------- notices
+  notice: {
+    alignItems: 'flex-start',
+    gap: Space.sm,
+    marginTop: Space.xs,
+    padding: Space.lg,
+    borderRadius: Radii.lg,
+  },
+  noticeTitle: {
+    ...Type.heading(15),
+  },
+  noticeBody: {
+    ...Type.body(13),
+    maxWidth: 380,
+  },
+  noticeAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.sm - 2,
+    marginTop: Space.xs,
+    minHeight: TOUCH_TARGET,
+    paddingHorizontal: Space.lg,
+    borderRadius: Radii.sm,
+  },
+  noticeActionLabel: {
+    fontFamily: Fonts.semibold,
+    fontSize: 13,
+    letterSpacing: tracking(13, 0.02),
+  },
+
+  // ----------------------------------------------------------- add a track
   add: {
-    margin: Space.lg - 2,
-    marginBottom: Space.xl,
-    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: Space.lg - 2,
+    gap: Space.sm + 1,
+    marginTop: Space.xs,
+    minHeight: 50,
+    borderRadius: Radii.md + 1,
     borderWidth: Rule.hair,
   },
   addLabel: {
-    ...Type.heading(11),
-    letterSpacing: tracking(11, 0.1),
-    textTransform: 'uppercase',
+    fontFamily: Fonts.semibold,
+    fontSize: 14,
+    letterSpacing: tracking(14, 0.01),
   },
 });

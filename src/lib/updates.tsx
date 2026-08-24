@@ -100,7 +100,9 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   /** Set once the sheet has been dismissed, so it is not re-shown this launch. */
   const dismissed = useRef(false);
 
-  const currentPatch = useMemo(readCurrentPatch, []);
+  // Wrapped rather than passed by reference: the compiler's memo rule needs to
+  // see an inline function expression to know what the dependency array covers.
+  const currentPatch = useMemo(() => readCurrentPatch(), []);
 
   const check = useCallback(
     async (manual = false) => {

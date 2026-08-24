@@ -1,7 +1,13 @@
 import { router } from 'expo-router';
 import { ArrowLeft } from 'lucide-react-native';
+import { useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeInDown, useReducedMotion } from 'react-native-reanimated';
+import Animated, {
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Duration, Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
@@ -19,18 +25,26 @@ export default function NotFoundScreen() {
   const C = useColors();
   const reduced = useReducedMotion();
 
+  /*
+    Driven by a shared value from an effect, NOT `entering={FadeInDown…}`.
+    Reanimated marks an entering view `visibility: hidden` until its animation
+    runs, and on react-native-web it never runs — which would leave the whole
+    404 screen blank on the one route whose entire job is explaining a dead end.
+  */
+  const enter = useSharedValue(0);
+
+  useEffect(() => {
+    enter.value = reduced ? 1 : withTiming(1, { duration: Duration.enter });
+  }, [reduced, enter]);
+
+  const enterStyle = useAnimatedStyle(() => ({
+    opacity: enter.value,
+    transform: [{ translateY: (1 - enter.value) * 8 }],
+  }));
+
   return (
     <SafeAreaView edges={['top', 'bottom', 'left', 'right']} style={[styles.root, { backgroundColor: C.bg }]}>
-      <Animated.View
-        style={styles.center}
-        entering={
-          reduced
-            ? undefined
-            : FadeInDown.duration(Duration.enter).withInitialValues({
-                opacity: 0,
-                transform: [{ translateY: 8 }],
-              })
-        }>
+      <Animated.View style={[styles.center, enterStyle]}>
         {/* 72px/800 in accent, sitting on its own 2px accent rule. */}
         <Text style={[styles.code, { color: C.live }]}>404</Text>
         <View style={[styles.rule, { backgroundColor: C.live }]} />

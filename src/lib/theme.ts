@@ -1,22 +1,21 @@
 /**
- * Aux design tokens — "Apex".
+ * Aux design tokens — soft UI, from `design/v2/aux-v2.dc.html`.
  *
- * Deep near-black ground, generous corner radius, and one signature device: a
- * heat gradient running black → crimson → amber that sits behind the content
- * and gives every screen its atmosphere. Depth comes from that light and from
- * translucent surfaces floating on it, not from hard rules.
+ * A cool grey ground with every surface RAISED off it: one dark shadow down and
+ * right, one light shadow up and left, as though lit from the top-left corner.
+ * Pressed and recessed things use the same pair inverted. Separation is done
+ * with light, not with rules and not with flat colour steps — which is why the
+ * border tokens survive but should keep shrinking as components are rebuilt.
  *
- * Red is still reserved — live, playing, joinable, in sync, on aux — but it now
- * has a second register: `ember`, the amber end of the gradient, which carries
- * heat and energy without claiming "this is live".
+ * Archivo throughout, at 400/600/800 only.
  *
- * Type is Archivo throughout, leaning hard on 800 for the big readouts: a
- * number is the loudest thing on a screen, with a small uppercase label above
- * it. That pairing is the other half of the identity.
+ * Red is reserved: live, playing, joinable, in sync, on aux, unread, selected.
+ * It is also now the ONLY alarm colour — destructive actions are a red outline
+ * rather than a second hue.
  *
- * REPLACES "Patchbay" (flat, zero-radius, hard-ruled). Every token NAME from
- * that system survives, so all 66 consumers pick this up without edits; only
- * the values changed, plus the gradient and glow tokens added at the end.
+ * This replaces two earlier directions ("Patchbay", flat and zero-radius, then
+ * "Apex", a heat gradient). Every token NAME from both survives, so all 72
+ * consumers pick this up with no edits of their own — only the values moved.
  *
  * `Colors` is the DARK palette and is what a module gets by importing directly.
  * Anything that must follow the user's Dark / Light / System choice reads
@@ -26,98 +25,123 @@
 
 import { Platform } from 'react-native';
 
+/*
+ * ---------------------------------------------------------------------------
+ * SOURCE OF TRUTH: design/v2/aux-v2.dc.html
+ *
+ * Two deliberate deviations from that file, both worth knowing about:
+ *
+ * 1. `ink3` is lightened. The design ships #757B85 / #868C96, which measure
+ *    3.52:1 and 3.15:1 against the card — below WCAG AA — and it is the most
+ *    used colour in the app (176 sites), including 9.5px tab labels. The values
+ *    here clear 4.5:1. Raise with the designer rather than silently reverting.
+ *
+ * 2. `danger` no longer has its own hue. The design has ONE alarm colour, and
+ *    destructive actions are drawn as a `live` outline with `liveText` on top.
+ *    The token survives so its 25 call sites keep compiling.
+ * ---------------------------------------------------------------------------
+ */
 export const DarkPalette = {
-  /** App ground. Near-black with a faint cool cast, so the warm gradient reads
-   *  as heat against it rather than as a brown wash. */
-  bg: '#0a0910',
-  /** Recessed — artwork wells, composer fields. Deeper than the ground. */
-  bgRecessed: '#07060c',
-  /** Raised card. Sits ON the gradient, so it is a lifted neutral, not black. */
-  surface: '#16141e',
-  surface2: '#1f1c2a',
-  /** Pressed, inactive toggle track. */
-  surface3: '#2a2636',
-  /** Avatar fill. */
-  avatar: '#35303f',
-  /** Artwork stand-in glyph. */
-  artwork: '#423c4d',
+  /** App ground — the gradient's middle stop. */
+  bg: '#1e2128',
+  /** Recessed: wells, inputs, the inside of a pressed control. */
+  bgRecessed: '#1a1d23',
+  /** The card. The most common surface in the design. */
+  surface: '#23272e',
+  surface2: '#262a31',
+  /** Top of the ladder: recess < nav < card < card2 < surface3. */
+  surface3: '#2c313a',
+  avatar: '#2c313a',
+  /**
+   * INVERTS between themes — near-WHITE on dark, near-black on light.
+   * Artwork is a bright tile here, not a dark well, so anything drawn on it
+   * must use `artInk` rather than `ink`, or it disappears.
+   */
+  artwork: '#edeff2',
+  /** The only ink that reads on `artwork`. */
+  artInk: 'rgba(30,34,41,.42)',
 
-  /** Primary text. */
-  ink: '#fbfafc',
-  /** Secondary text. */
-  ink2: '#a9a4b4',
-  /** Tertiary labels. */
-  ink3: '#7c7688',
+  ink: '#edeff2',
+  ink2: '#8e949e',
+  /** Lightened from the design's #757b85 for contrast — see the note above. */
+  ink3: '#8a9099',
 
-  /** RESERVED. Accent fills. Unchanged from Patchbay — it was already the
-   *  right red, and keeping it means the brand survives the redesign. */
+  /** RESERVED: live, playing, joinable, in sync, on aux, unread, selected. */
   live: '#ec3013',
-  /** RESERVED. Accent text on dark — the fill colour fails as small text. */
-  liveText: '#ff6a4a',
-  /** Text sitting on an accent fill. */
-  onLive: '#0a0910',
-  danger: '#ff5c7a',
+  /** The accent as small text — the fill fails at label sizes. */
+  liveText: '#ff563c',
+  /** WHITE, in both themes: the design sets #fff on every accent fill. */
+  onLive: '#ffffff',
+  /** One alarm colour. Destructive = a `live` outline with `liveText` on it. */
+  danger: '#ec3013',
 
-  /** Hairline between list rows. Softer than Patchbay: rules are no longer
-   *  doing the separating, so they should whisper. */
-  ruleSoft: 'rgba(251,250,252,.07)',
-  /** Standard rule. */
-  rule: 'rgba(251,250,252,.12)',
-  /** Control border. */
-  rule2: 'rgba(251,250,252,.20)',
-  /** Strong border. */
-  rule3: 'rgba(251,250,252,.28)',
-  /** Progress track. */
-  track: 'rgba(251,250,252,.10)',
-  /** Faint lattice, where it is still wanted. */
-  grid: 'rgba(251,250,252,.035)',
-
-  liveWash: 'rgba(236,48,19,.16)',
-  liveMid: 'rgba(236,48,19,.34)',
-  dangerBorder: 'rgba(255,92,122,.45)',
-  dangerWash: 'rgba(255,92,122,.12)',
-  scrim: 'rgba(7,6,12,.88)',
-
-  /* ------------------------------------------------------ Apex additions */
-
-  /** The amber end of the heat. Energy WITHOUT the "live" claim, so it can be
-   *  spent freely where `live` cannot — chart bars, glow, gradient stops. */
-  ember: '#ff8a3d',
-  /** Ember as small text. */
-  emberText: '#ffa463',
-
-  /** Ambient bloom behind artwork and under the accent. */
-  glow: 'rgba(236,48,19,.32)',
-  glowSoft: 'rgba(236,48,19,.14)',
-
+  ruleSoft: 'rgba(237,239,242,.06)',
+  rule: 'rgba(237,239,242,.1)',
   /**
-   * The signature gradient, as four stops: ground → deep crimson → accent →
-   * amber. Kept as individual tokens rather than an array because `Palette`
-   * maps every key to `string`; compose them with `gradientStops()` below.
+   * Controls in this design carry shadows, not borders. These two survive for
+   * the call sites that still draw a border, and should fall away as each
+   * component is rebuilt on the shadow recipes.
    */
-  grad0: '#0a0910',
-  grad1: '#3d0a08',
-  grad2: '#b4200e',
-  grad3: '#ff8a3d',
+  rule2: 'rgba(237,239,242,.14)',
+  rule3: 'rgba(237,239,242,.20)',
+  /** Unplayed waveform bar. Not text, so it takes the design's raw value. */
+  track: '#757b85',
+  grid: 'rgba(237,239,242,.03)',
+
+  liveWash: 'rgba(236,48,19,.14)',
+  liveMid: 'rgba(236,48,19,.30)',
+  dangerBorder: '#ec3013',
+  dangerWash: 'rgba(236,48,19,.10)',
+  /** Behind sheets. The one colour the design keeps identical across themes. */
+  scrim: 'rgba(0,0,0,.5)',
+
+  /* ------------------------------------------------------- the two shadows */
 
   /**
-   * The inverted card.
+   * THE MOST IMPORTANT PAIR IN THIS FILE.
    *
-   * A warm off-white panel dropped into the dark — the device the references
-   * use to make ONE card on a screen unmissable without spending the accent on
-   * it. Reserve it for a single element per screen; two competing cream cards
-   * cancel each other out.
+   * Every raised surface is one dark shadow down-right and one light shadow
+   * up-left, as if lit from the top-left. Note the ~30x alpha asymmetry against
+   * the light theme: on a dark ground the highlight is almost subliminal
+   * (.032), because a bright edge on dark reads as a glow rather than a lit
+   * surface. Copying the light theme's .95 here would look like neon piping.
    */
-  cream: '#f2efe9',
-  /** Text on cream. Not pure black — that reads as a rendering error on warm white. */
-  onCream: '#17161c',
-  /** Secondary text on cream. */
-  onCream2: '#5d5a63',
+  shadowDark: 'rgba(0,0,0,.46)',
+  shadowLight: 'rgba(255,255,255,.032)',
+  /** Ordinary drop shadow, for things genuinely floating above the page. */
+  shadowDrop: 'rgba(0,0,0,.42)',
 
-  /** The dock capsule and other floating chrome, over content. */
-  dock: 'rgba(28,26,36,.82)',
-  /** An unselected pill chip. */
-  chip: 'rgba(251,250,252,.08)',
+  /* ------------------------------------------------------- inverted button */
+
+  /** Primary action fill — near-white on dark, near-black on light. */
+  pill: '#f1f3f6',
+  pillInk: '#1e2229',
+  /** Kept as the older name for the same device. */
+  cream: '#f1f3f6',
+  onCream: '#1e2229',
+  onCream2: 'rgba(30,34,41,.65)',
+
+  /** The tab bar. Darker than a card, so the bar reads as behind the content. */
+  nav: '#1b1e24',
+  dock: '#1b1e24',
+  /** An unselected chip — the recessed value. */
+  chip: '#1a1d23',
+
+  /* ------------------------------------------------------------- gradient */
+
+  /** The ground is a three-stop vertical wash, not a flat fill. */
+  bgTop: '#272c34',
+  bgBot: '#191c21',
+
+  /**
+   * Deprecated with the Apex direction, which had a second amber accent. Held
+   * as aliases of `live` so nothing breaks and nothing drifts off-palette.
+   */
+  ember: '#ec3013',
+  emberText: '#ff563c',
+  /** INVERTS: a LIGHT bloom on dark, a dark one on light. */
+  glow: 'rgba(237,239,242,.15)',
+  glowSoft: 'rgba(237,239,242,.08)',
 } as const;
 
 /**
@@ -136,69 +160,67 @@ export type ColorToken = keyof Palette;
  * on small labels; #ae1800 reaches 6.5:1 and reads stronger on a light ground.
  */
 export const LightPalette: Palette = {
-  bg: '#faf9fb',
-  bgRecessed: '#f1eff4',
-  /** Cards go pure white and float ON the gradient — the inverse of dark,
-   *  where they are a lifted neutral against black. */
-  surface: '#ffffff',
-  surface2: '#f4f2f7',
-  surface3: '#e9e5ee',
-  avatar: '#ddd8e4',
-  artwork: '#c9c3d1',
+  bg: '#f3f5f8',
+  bgRecessed: '#e6e9ef',
+  surface: '#f5f7fa',
+  surface2: '#f8fafc',
+  surface3: '#dce1e8',
+  avatar: '#dce1e8',
+  /** Inverts with the theme: a DARK tile on a light ground. */
+  artwork: '#242830',
+  artInk: 'rgba(241,243,246,.5)',
 
-  ink: '#14121a',
-  ink2: '#4c4757',
-  ink3: '#6e6879',
+  ink: '#1b1e24',
+  ink2: '#5d636d',
+  /** Lightened from the design's #868c96 for contrast. */
+  ink3: '#6f757f',
 
-  live: '#cc2510',
-  liveText: '#a81800',
-  onLive: '#fffdfc',
-  danger: '#b01430',
+  /** Darker on light: #ec3013 under white text reaches only 3.9:1. */
+  live: '#c41f08',
+  liveText: '#ae1800',
+  onLive: '#ffffff',
+  danger: '#c41f08',
 
-  ruleSoft: 'rgba(20,18,26,.06)',
-  rule: 'rgba(20,18,26,.10)',
-  rule2: 'rgba(20,18,26,.16)',
-  rule3: 'rgba(20,18,26,.24)',
-  track: 'rgba(20,18,26,.10)',
-  grid: 'rgba(20,18,26,.04)',
+  ruleSoft: 'rgba(27,30,36,.07)',
+  rule: 'rgba(27,30,36,.12)',
+  rule2: 'rgba(27,30,36,.16)',
+  rule3: 'rgba(27,30,36,.22)',
+  track: '#868c96',
+  grid: 'rgba(27,30,36,.03)',
 
-  liveWash: 'rgba(236,48,19,.10)',
-  liveMid: 'rgba(236,48,19,.22)',
-  dangerBorder: 'rgba(176,20,48,.40)',
-  dangerWash: 'rgba(176,20,48,.09)',
-  scrim: 'rgba(20,18,26,.45)',
-
-  /* ------------------------------------------------------ Apex additions */
-
-  /** Darkened so ember still reads as a colour rather than washing out. */
-  ember: '#e8621a',
-  emberText: '#b8460f',
-
-  glow: 'rgba(236,48,19,.18)',
-  glowSoft: 'rgba(236,48,19,.08)',
+  liveWash: 'rgba(196,31,8,.10)',
+  liveMid: 'rgba(196,31,8,.24)',
+  dangerBorder: '#c41f08',
+  dangerWash: 'rgba(196,31,8,.08)',
+  scrim: 'rgba(0,0,0,.5)',
 
   /**
-   * The same heat, running the other way: a light ground warming INTO the
-   * accent, rather than black igniting into amber. This is what "the dark
-   * pixels go light, in the same gradient flow" means in practice — the
-   * gradient is the constant, the ground is what inverts.
+   * The highlight is nearly opaque here (.95) against .032 on dark. On a light
+   * ground the raised look comes from the WHITE edge; on a dark one it comes
+   * almost entirely from the shadow. Swapping these is the classic way to make
+   * neumorphism look wrong in one theme.
    */
-  grad0: '#faf9fb',
-  grad1: '#ffe0cc',
-  grad2: '#ff8a5c',
-  grad3: '#ec3013',
+  shadowDark: 'rgba(30,34,41,.13)',
+  shadowLight: 'rgba(255,255,255,.95)',
+  shadowDrop: 'rgba(30,34,41,.15)',
 
-  /**
-   * On light, the inverted card inverts again — it goes DARK. The device is
-   * "one card that breaks the ground", not "one card that is cream", so on a
-   * light ground the same job needs the opposite value.
-   */
-  cream: '#17161c',
-  onCream: '#f6f4f1',
-  onCream2: '#b3aeb8',
+  pill: '#1e2229',
+  pillInk: '#f1f3f6',
+  cream: '#1e2229',
+  onCream: '#f1f3f6',
+  onCream2: 'rgba(241,243,246,.65)',
 
-  dock: 'rgba(255,255,255,.86)',
-  chip: 'rgba(20,18,26,.06)',
+  nav: '#edf0f4',
+  dock: '#edf0f4',
+  chip: '#e6e9ef',
+
+  bgTop: '#ffffff',
+  bgBot: '#e9ecf1',
+
+  ember: '#c41f08',
+  emberText: '#ae1800',
+  glow: 'rgba(30,34,41,.13)',
+  glowSoft: 'rgba(30,34,41,.07)',
 };
 
 export const Palettes = { dark: DarkPalette, light: LightPalette } as const;
@@ -273,8 +295,8 @@ export const Space = {
   lg: 16,
   xl: 20,
   xxl: 24,
-  xxxl: 32,
-  huge: 44,
+  xxxl: 28,
+  huge: 40,
 } as const;
 
 /**
@@ -289,7 +311,7 @@ export const Space = {
  * in one edit when Patchbay (radius 0) became Apex. Reach for `Radii` below
  * when a specific step is wanted.
  */
-export const Radius = 24;
+export const Radius = 18;
 
 /**
  * The radius scale.
@@ -299,15 +321,21 @@ export const Radius = 24;
  * suddenly look like a rounded rectangle.
  */
 export const Radii = {
+  /** Tab tiles, the smallest raised things. */
+  xs: 11,
   /** Inline badges, small tags. */
   sm: 12,
-  /** Compact rows, inputs. */
-  md: 18,
-  /** The default: cards, list rows, artwork tiles. */
-  lg: 24,
-  /** Hero cards, the Session artwork, sheets. */
-  xl: 32,
-  /** Buttons, chips, the nav dock, circular icon buttons. */
+  /** Compact rows. */
+  md: 14,
+  /** The house corner: cards, list rows, artwork tiles. */
+  lg: 18,
+  /** Larger cards. */
+  xl: 22,
+  /** The top of a sheet. */
+  xxl: 28,
+  /** Primary buttons — squarer than a full pill in this design. */
+  button: 16,
+  /** Avatars, the live dot, anything genuinely circular. */
   pill: 999,
 } as const;
 
@@ -318,26 +346,48 @@ export const Radii = {
  * either side and beneath it, which is what makes it read as a control that
  * belongs to the app rather than a border on the screen.
  */
+/**
+ * The bottom navigation.
+ *
+ * NOTE THE SHAPE CHANGE: this design's nav is a full-width 88px bar carrying a
+ * labelled tile per destination, not the floating capsule the previous
+ * direction used. `cell` / `gap` / `padding` / `lift` are kept alive so the
+ * current dock keeps compiling until it is rebuilt; `height` and below are the
+ * design's real numbers.
+ */
 export const Dock = {
-  /** Diameter of each circular cell. */
-  cell: 52,
-  /** Gap between cells inside the dock. */
+  /** Tile size in the bar, and the metrics the old floating dock used. */
+  cell: 34,
   gap: 6,
-  /** Inner padding of the dock capsule. */
-  padding: 8,
-  /** How far the dock floats above the safe-area bottom. */
-  lift: 14,
+  padding: 0,
+  lift: 0,
+
+  /** Full bar height, before the safe-area inset. */
+  height: 88,
+  bottomPad: 12,
+  /** Corner on each destination tile. */
+  tileRadius: 11,
+  labelSize: 9.5,
 } as const;
 
-/** Horizontal pill filters — the `All / Cardio / Muscle` row in the reference. */
+/** Horizontal filter chips. */
 export const Chip = {
-  height: 40,
+  height: 44,
   paddingX: 18,
-  gap: 8,
+  gap: 6,
+} as const;
+
+/** Bottom sheets — the queue, the chat, the attach picker. */
+export const Sheet = {
+  radius: 28,
+  grabberW: 40,
+  grabberH: 4,
+  /** Fraction of screen height a sheet may occupy. */
+  maxHeight: 0.74,
 } as const;
 
 /** 1px hairline within a group, 2px between major sections. */
-export const Rule = { hair: 1, major: 2 } as const;
+export const Rule = { hair: 1, thick: 1.5, major: 2 } as const;
 
 /** The modular grid overlay pitch. */
 export const GRID = 25;
@@ -390,60 +440,108 @@ export const noShadow = Platform.select({
   default: { shadowOpacity: 0 },
 }) as object;
 
-/* ------------------------------------------------------------- the gradient */
+/* ------------------------------------------------------------ soft UI depth */
 
 /**
- * The signature heat, ready for `<LinearGradient colors={...} />`.
+ * The raised and pressed surfaces this design is built from.
  *
- * Four stops rather than two: a straight black-to-amber ramp goes muddy through
- * the browns in the middle. The deep crimson at `grad1` holds the shadow end
- * dark for longer, so the accent arrives late and reads as ignition.
+ * WHY THIS WORKS AT ALL: React Native's legacy shadow props allow exactly one
+ * shadow, and Android's `elevation` cannot be tinted or offset — so the paired
+ * light-and-dark shadow that defines soft UI was impossible until RN 0.76 added
+ * the CSS-like `boxShadow` prop, which takes an ARRAY and supports `inset`.
+ * This project is on the New Architecture, which is that prop's requirement.
  *
- * Pass the palette from `useColors()` so it follows the active theme.
+ * THE FLOOR: outset shadows need Android 9+, inset shadows Android 10+. This
+ * app's minSdk is 24 (Android 7), so on 7–9 these degrade to nothing and the
+ * surfaces render flat. That is acceptable — flat is the old design, and it is
+ * legible — but it means the look is not universal and should not be the only
+ * thing distinguishing two states. Pair any raised/pressed distinction that
+ * carries MEANING with a colour or position change as well.
+ *
+ * Light comes from the top-left in every recipe. Keep it that way: mixed light
+ * sources are what make soft UI look like a mistake rather than a surface.
  */
-export function gradientStops(c: Palette): readonly [string, string, string, string] {
-  return [c.grad0, c.grad1, c.grad2, c.grad3];
+
+/** The standard raised surface — cards, controls, tiles. Used ~34× in the design. */
+export function raised(c: Palette): object {
+  return {
+    boxShadow: [
+      { offsetX: 5, offsetY: 5, blurRadius: 12, color: c.shadowDark },
+      { offsetX: -4, offsetY: -4, blurRadius: 10, color: c.shadowLight },
+    ],
+  };
+}
+
+/** A heavier lift, for the few surfaces that sit above the rest. */
+export function raisedLarge(c: Palette): object {
+  return {
+    boxShadow: [
+      { offsetX: 6, offsetY: 6, blurRadius: 16, color: c.shadowDark },
+      { offsetX: -5, offsetY: -5, blurRadius: 13, color: c.shadowLight },
+    ],
+  };
 }
 
 /**
- * Where the heat comes from.
+ * Recessed — wells, inputs, an unselected segment, a pressed control.
  *
- * `corner` is the default and matches the direction's reference: light entering
- * from one corner and falling away across the screen, like a light source just
- * off-frame. `vertical` is for wide surfaces where a diagonal would band.
+ * The same pair as `raised`, inverted. Reuse it for the pressed STATE of a
+ * raised control: the surface appearing to sink under a finger is the whole
+ * idiom, and it costs no extra tokens.
  */
-export const GradientDirection = {
-  corner: { start: { x: 0.1, y: 0 }, end: { x: 0.9, y: 1 } },
-  vertical: { start: { x: 0.5, y: 0 }, end: { x: 0.5, y: 1 } },
-  horizontal: { start: { x: 0, y: 0.5 }, end: { x: 1, y: 0.5 } },
-} as const;
+export function pressed(c: Palette): object {
+  return {
+    boxShadow: [
+      { offsetX: 4, offsetY: 4, blurRadius: 10, color: c.shadowDark, inset: true },
+      { offsetX: -3, offsetY: -3, blurRadius: 8, color: c.shadowLight, inset: true },
+    ],
+  };
+}
+
+/** A shallower recess, for smaller wells where the deep one swallows content. */
+export function pressedSoft(c: Palette): object {
+  return {
+    boxShadow: [
+      { offsetX: 3, offsetY: 3, blurRadius: 8, color: c.shadowDark, inset: true },
+      { offsetX: -2, offsetY: -2, blurRadius: 6, color: c.shadowLight, inset: true },
+    ],
+  };
+}
 
 /**
- * How far up the screen the gradient is allowed to reach.
- *
- * The reference keeps roughly the top third lit and lets the rest fall to
- * ground, which is what stops the effect becoming a wallpaper. Content sits on
- * the dark part; the heat is behind the header.
+ * An ordinary drop shadow, for things genuinely floating ABOVE the page —
+ * sheets, the mini player, a toast. Not a raised surface: no light edge, because
+ * a floating object is lit by the same source as everything under it.
  */
-export const GradientLocations = [0, 0.28, 0.62, 1] as const;
+export function dropped(c: Palette, size: 'sm' | 'md' | 'lg' = 'md'): object {
+  const spec = { sm: [3, 8], md: [10, 24], lg: [12, 32] }[size];
+  return {
+    boxShadow: [
+      { offsetX: 0, offsetY: spec[0], blurRadius: spec[1], color: c.shadowDrop },
+    ],
+  };
+}
 
 /**
- * The ambient bloom under artwork and accent surfaces.
+ * The ambient bloom under artwork, the play circle and the intro mark.
  *
- * A COLOURED shadow, not a grey one — it reads as light coming off the thing
- * rather than the thing casting onto a surface below it. Android only honours
- * `elevation`, which cannot be tinted, so it gets a slightly stronger elevation
- * as the nearest equivalent.
+ * A COLOURED shadow, not a grey one: it reads as light coming off the thing
+ * rather than the thing casting onto a surface below it. That is the whole
+ * difference from `dropped`, which is why the colour is a parameter here and a
+ * palette lookup there — pass `C.glow` unless you have a specific reason.
+ *
+ * This replaces the old `glowShadow()`, which belonged to the abandoned heat
+ * direction and, worse, silently swapped the tint for an untinted
+ * `elevation: 8` on Android. The `boxShadow` array is honoured on every target
+ * this app ships to, so the bloom is now the same light everywhere.
+ *
+ * Sizes are the artboard's own: `md` is the play circle and the lounge hero
+ * tile, `lg` is the Session artwork and the intro mark, `sm` is for anything
+ * small enough that the large blur would read as fog.
  */
-export function glowShadow(color: string, radius = 24): object {
-  return Platform.select({
-    web: { boxShadow: `0 8px ${radius}px ${color}` },
-    android: { elevation: 8 },
-    default: {
-      shadowColor: color,
-      shadowOpacity: 1,
-      shadowRadius: radius,
-      shadowOffset: { width: 0, height: 8 },
-    },
-  }) as object;
+export function bloom(color: string, size: 'sm' | 'md' | 'lg' = 'md'): object {
+  const spec = { sm: [8, 24], md: [16, 42], lg: [26, 70] }[size];
+  return {
+    boxShadow: [{ offsetX: 0, offsetY: spec[0], blurRadius: spec[1], color }],
+  };
 }

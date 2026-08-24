@@ -1,10 +1,28 @@
+/**
+ * Connections — the Spotify link and the playback source.
+ *
+ * The canvas has no artboard for this screen, so it is built entirely out of
+ * the Settings vocabulary: back tile, kicker, raised card, recessed well with
+ * raised segments. One state line per state, no paragraphs.
+ *
+ * FOUR STATES, on the Spotify card:
+ *   loading   a card-shaped skeleton while the profile read settles
+ *   error     the link attempt failed; the reason stays on the card, and the
+ *             button under it becomes the retry
+ *   empty     not linked — the one action that links it
+ *   ready     linked, with the line that says where audio is coming from
+ *
+ * The playback source below reads a local store and cannot fail, so it has no
+ * states of its own; blanking it while the network settles would only hide a
+ * control that already works.
+ */
+
 import { Redirect, router } from 'expo-router';
-import { ArrowLeft } from 'lucide-react-native';
-import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ChevronLeft } from 'lucide-react-native';
+import { useEffect, useState, type ReactNode } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View, type TextStyle } from 'react-native';
 import Animated, {
   Easing,
-  FadeInDown,
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
@@ -13,52 +31,61 @@ import Animated, {
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useToast } from '@/components/ui';
+import { Skeleton } from '@/components/ui';
 import { useSpotifyLink } from '@/features/spotify/use-spotify-link';
 import { useAuth } from '@/lib/auth';
-import { Duration, Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
+import {
+  Duration,
+  Fonts,
+  Radii,
+  Space,
+  TOUCH_TARGET,
+  Type,
+  dropped,
+  pressed as pressedWell,
+  raised,
+  tracking,
+} from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 import { usePlayback, type SourcePreference } from '@/playback/store';
 
-const GUTTER = 12;
-const CELL = 46;
+const CARD_GUTTER = 20;
+const TEXT_GUTTER = 24;
+
+const BACK_TILE = 38;
+const BACK_SLOP = { top: 3, bottom: 3, left: 6, right: 6 };
+/** 17 pad + 20 head + 3 + 19 line + 16 + 46 button + 17 pad. */
+const CARD_HEIGHT = 138;
 
 /** Resolved link state. "free" is a normal, supported way to use Aux. */
 type LinkState = 'unlinked' | 'free' | 'premium';
 
-const SOURCE_OPTIONS: { value: SourcePreference; label: string; detail: string }[] = [
-  {
-    value: 'auto',
-    label: 'AUTO',
-    detail:
-      'Plays through Spotify when your account is linked and Premium, YouTube for everyone else.',
-  },
-  {
-    value: 'youtube',
-    label: 'ALWAYS YOUTUBE',
-    detail:
-      'Ignores Spotify even on Premium. Useful if Spotify keeps handing playback to another device.',
-  },
+const SOURCES: { value: SourcePreference; label: string; caption: string }[] = [
+  { value: 'auto', label: 'AUTO', caption: 'Spotify on Premium, YouTube otherwise.' },
+  { value: 'youtube', label: 'YOUTUBE', caption: 'Ignores Spotify on every account.' },
 ];
 
-const BADGE: Record<LinkState, string> = {
-  unlinked: 'NOT CONNECTED',
-  free: 'CONNECTED · FREE',
-  premium: 'CONNECTED · PREMIUM',
+const VALUE: Record<LinkState, string> = {
+  unlinked: 'Not linked',
+  free: 'Free · linked',
+  premium: 'Premium · linked',
 };
 
-const EXPLANATION: Record<LinkState, string> = {
-  unlinked:
-    'Aux does not need Spotify. Everything plays through YouTube unless you link a Spotify Premium account here.',
-  free: 'Your Spotify account is linked, but Spotify only lets apps control playback on Premium accounts. Aux will play your Sessions through YouTube instead.',
-  premium:
-    'Sessions play through the Spotify app on this device. Keep Spotify installed and signed in, and leave it open when you take the aux.',
+const STATE_LINE: Record<LinkState, string> = {
+  unlinked: 'Playing through YouTube.',
+  free: 'Premium required — playing through YouTube.',
+  premium: 'Playing through Spotify on this device.',
 };
+
+/** `Type.readout()` hands back a readonly tuple; `TextStyle` wants a mutable one. */
+const readout = (size: number): TextStyle => ({
+  ...Type.readout(size),
+  fontVariant: ['tabular-nums'],
+});
 
 export default function ConnectionsScreen() {
   const C = useColors();
   const reduced = useReducedMotion();
-  const toast = useToast();
   const { session, profile, loading } = useAuth();
   const { link, unlink, linking, error } = useSpotifyLink();
   // The playback store is the only reader of this preference, so this screen
@@ -66,11 +93,11 @@ export default function ConnectionsScreen() {
   // wired to nothing.
   const source = usePlayback((state) => state.sourcePreference);
 
-  // The hook keeps its own error string; the toast layer is where the user
-  // actually looks, so mirror it there instead of adding a second banner.
+  const enter = useSharedValue(0);
   useEffect(() => {
-    if (error) toast.show(error, 'error');
-  }, [error, toast]);
+    enter.value = reduced ? 1 : withTiming(1, { duration: Duration.enter });
+  }, [reduced, enter]);
+  const enterStyle = useAnimatedStyle(() => ({ opacity: enter.value }));
 
   const state: LinkState = !profile?.spotify_linked
     ? 'unlinked'
@@ -79,98 +106,88 @@ export default function ConnectionsScreen() {
       : 'free';
 
   const overridden = state === 'premium' && source === 'youtube';
-  const sourceDetail = SOURCE_OPTIONS.find((option) => option.value === source)?.detail ?? '';
+  const caption = SOURCES.find((option) => option.value === source)?.caption ?? '';
+
+  /*
+    The failure used to live in a toast, which is the wrong surface for it: it
+    slides away while the card underneath still says "Not linked" and offers no
+    account of why. `link()` clears the string on its next run, so the block
+    below disappears exactly when the user retries.
+  */
+  const failed = Boolean(error) && !linking;
 
   // This screen sits outside both guarded groups, so a deep link can land here
-  // signed out. Without this it would render "Not connected" to a stranger.
+  // signed out. Without this it would render "Not linked" to a stranger.
   if (!loading && !session) return <Redirect href="/(auth)/sign-in" />;
 
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={[styles.root, { backgroundColor: C.bg }]}>
-      <Animated.View
-        style={styles.flex}
-        entering={
-          reduced
-            ? undefined
-            : FadeInDown.duration(Duration.enter).withInitialValues({
-                opacity: 0,
-                transform: [{ translateY: 8 }],
-              })
-        }>
+      <Animated.View style={[styles.flex, enterStyle]}>
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Back to you"
-            onPress={() => {
-              if (router.canGoBack()) router.back();
-              else router.replace('/(tabs)/profile');
-            }}
-            style={({ pressed }) => [styles.back, pressed && { opacity: 0.6 }]}>
-            <ArrowLeft size={15} strokeWidth={2} color={C.ink2} />
-            <Text style={[styles.backLabel, { color: C.ink2 }]}>YOU</Text>
-          </Pressable>
+          <View style={styles.head}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Back"
+              hitSlop={BACK_SLOP}
+              onPress={() => {
+                if (router.canGoBack()) router.back();
+                else router.replace('/(tabs)/profile');
+              }}
+              style={({ pressed }) => [
+                styles.backTile,
+                { backgroundColor: pressed ? C.surface2 : C.surface },
+                raised(C),
+              ]}>
+              <ChevronLeft size={20} strokeWidth={2.4} color={C.ink} />
+            </Pressable>
+            <Text style={[styles.title, { color: C.ink }]}>Connections</Text>
+          </View>
 
-          <Text style={[styles.screenTitle, { color: C.ink }]}>Connections</Text>
-
-          {/* --------------------------------------------------- spotify card */}
-          <View style={[styles.card, { borderColor: C.rule2 }]}>
-            <View style={styles.cardHead}>
-              <Text style={[styles.cardTitle, { color: C.ink }]}>Spotify</Text>
-              {loading ? (
-                <View style={[styles.chip, { borderColor: C.rule3 }]}>
-                  <Text style={[styles.chipLabel, { color: C.ink3 }]}>CHECKING…</Text>
-                </View>
-              ) : state === 'premium' ? (
-                /* The one accent on this screen: Premium is the state in which
-                   Aux can actually drive Spotify. */
-                <View style={[styles.chipFilled, { backgroundColor: C.live }]}>
-                  <Text style={[styles.chipLabel, { color: C.onLive }]}>{BADGE.premium}</Text>
-                </View>
-              ) : (
-                /* Free is a bordered, mono chip — deliberately NOT danger. A
-                   linked free account is a supported configuration, and paint-
-                   ing it red would tell the user to go fix something that is
-                   not broken. */
-                <View style={[styles.chip, { borderColor: C.rule3 }]}>
-                  <Text style={[styles.chipLabel, { color: C.ink2 }]}>{BADGE[state]}</Text>
-                </View>
-              )}
-            </View>
-
+          {/* ---------------------------------------------------- spotify card */}
+          <Kicker>Spotify</Kicker>
+          <View style={styles.block}>
             {loading ? (
-              <Text style={[styles.cardBody, { color: C.ink2 }]}>
-                Checking your Spotify connection…
-              </Text>
+              <View accessibilityRole="progressbar" accessibilityLabel="Loading your Spotify link">
+                <Skeleton width="100%" height={CARD_HEIGHT} style={styles.skeletonCard} />
+              </View>
             ) : (
-              <>
-                <Text style={[styles.cardBody, { color: C.ink2 }]}>{EXPLANATION[state]}</Text>
+              <View style={[styles.card, { backgroundColor: C.surface }, raised(C)]}>
+                <View style={styles.cardHead}>
+                  <Text style={[styles.cardTitle, { color: C.ink }]}>Spotify</Text>
+                  {/*
+                    Ink, not accent. A Premium plan is a fact about the account,
+                    not something live, playing or selected — the accent here
+                    would have been the loudest thing on a settings screen for
+                    a value the user cannot act on.
+                  */}
+                  <Text
+                    style={[
+                      styles.cardValue,
+                      { color: state === 'premium' ? C.ink : C.ink2 },
+                    ]}>
+                    {VALUE[state]}
+                  </Text>
+                </View>
 
-                {state === 'free' ? (
-                  <View style={[styles.inset, { borderColor: C.rule }]}>
-                    <Text style={[styles.insetText, { color: C.ink2 }]}>
-                      <Text style={{ color: C.ink }}>
-                        Nothing is broken and nothing is missing.
-                      </Text>{' '}
-                      Search, queueing, chat and sync all work exactly the same — only the audio
-                      comes from YouTube.
-                    </Text>
-                  </View>
-                ) : null}
-
-                {overridden ? (
-                  <View style={[styles.inset, { borderColor: C.rule }]}>
-                    <Text style={[styles.insetText, { color: C.ink2 }]}>
-                      Playback source is set to Always YouTube below, so Sessions are not using
-                      Spotify right now.
-                    </Text>
-                  </View>
-                ) : null}
+                {/*
+                  One line, and only one. On a failure it is the reason — in the
+                  alarm colour, which this palette deliberately shares with
+                  `live` rather than carrying a second hue.
+                */}
+                <Text
+                  style={[styles.cardLine, { color: failed ? C.liveText : C.ink2 }]}>
+                  {failed
+                    ? error
+                    : overridden
+                      ? 'Overridden by the YouTube source below.'
+                      : STATE_LINE[state]}
+                </Text>
 
                 <View style={styles.actions}>
                   {state === 'unlinked' ? (
                     <Action
-                      label="CONNECT SPOTIFY"
-                      accent
+                      label={failed ? 'Try again' : 'Connect Spotify'}
+                      primary
                       disabled={linking}
                       onPress={() => {
                         void link();
@@ -178,10 +195,10 @@ export default function ConnectionsScreen() {
                     />
                   ) : (
                     <>
-                      {state === 'free' ? (
+                      {state === 'free' || failed ? (
                         <Action
-                          label="RECHECK PREMIUM"
-                          accent
+                          label={failed ? 'Try again' : 'Recheck Premium'}
+                          primary
                           disabled={linking}
                           onPress={() => {
                             void link();
@@ -189,7 +206,7 @@ export default function ConnectionsScreen() {
                         />
                       ) : null}
                       <Action
-                        label="UNLINK"
+                        label="Unlink"
                         disabled={linking}
                         onPress={() => {
                           void unlink();
@@ -198,51 +215,44 @@ export default function ConnectionsScreen() {
                     </>
                   )}
                 </View>
-              </>
+              </View>
             )}
+
+            {linking ? <Handshake reduced={reduced} /> : null}
           </View>
 
           {/* ------------------------------------------------- playback source */}
-          <Text style={[styles.kicker, { color: C.ink3 }]}>PLAYBACK SOURCE</Text>
-          <View accessibilityRole="radiogroup" style={[styles.segment, { borderColor: C.rule3 }]}>
-            {SOURCE_OPTIONS.map((option, index) => {
-              const selected = source === option.value;
-              return (
-                <Pressable
-                  key={option.value}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected }}
-                  accessibilityLabel={option.label}
-                  onPress={() => usePlayback.getState().setSourcePreference(option.value)}
-                  style={({ pressed }) => [
-                    styles.segmentCell,
-                    index > 0 && { borderLeftWidth: Rule.hair, borderLeftColor: C.rule3 },
-                    {
-                      backgroundColor: selected ? C.live : pressed ? C.surface : 'transparent',
-                    },
-                  ]}>
-                  <Text
-                    numberOfLines={1}
-                    style={[
-                      selected ? styles.segmentLabelOn : styles.segmentLabelOff,
-                      { color: selected ? C.onLive : C.ink2 },
+          <Kicker>Playback source</Kicker>
+          <View style={styles.block}>
+            <View
+              accessibilityRole="radiogroup"
+              style={[styles.well, { backgroundColor: C.bgRecessed }, pressedWell(C)]}>
+              {SOURCES.map((option) => {
+                const selected = source === option.value;
+                return (
+                  <Pressable
+                    key={option.value}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={option.label}
+                    onPress={() => usePlayback.getState().setSourcePreference(option.value)}
+                    style={({ pressed }) => [
+                      styles.segment,
+                      selected
+                        ? [{ backgroundColor: C.surface }, raised(C)]
+                        : pressed
+                          ? { backgroundColor: C.surface2 }
+                          : null,
                     ]}>
-                    {option.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
+                    <Text style={[styles.segmentLabel, { color: selected ? C.ink : C.ink2 }]}>
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text style={[styles.caption, { color: C.ink3 }]}>{caption}</Text>
           </View>
-          <Text style={[styles.caption, { color: C.ink3 }]}>{sourceDetail}</Text>
-
-          {/* ------------------------------------------------------ handshake */}
-          {linking ? <Handshake reduced={reduced} /> : null}
-
-          <View style={[styles.footnoteRule, { backgroundColor: C.rule }]} />
-          <Text style={[styles.footnote, { color: C.ink3 }]}>
-            Your choice is stored on this device only, so each phone you sign in on can play from a
-            different source.
-          </Text>
         </ScrollView>
       </Animated.View>
     </SafeAreaView>
@@ -251,19 +261,29 @@ export default function ConnectionsScreen() {
 
 /* ------------------------------------------------------------------- parts */
 
+function Kicker({ children }: { children: ReactNode }) {
+  const C = useColors();
+  return <Text style={[styles.kicker, { color: C.ink3 }]}>{children}</Text>;
+}
+
 function Action({
   label,
-  accent = false,
+  primary = false,
   disabled = false,
   onPress,
 }: {
   label: string;
-  accent?: boolean;
+  primary?: boolean;
   disabled?: boolean;
   onPress: () => void;
 }) {
   const C = useColors();
 
+  /*
+    The secondary is a RAISED tile on the card, not a recessed one. At 46px an
+    inset pair shows only its dark half on a dark ground and reads as a smudge;
+    `surface3` sitting one step above the card says the same thing with light.
+  */
   return (
     <Pressable
       accessibilityRole="button"
@@ -273,16 +293,12 @@ function Action({
       onPress={onPress}
       style={({ pressed }) => [
         styles.action,
-        {
-          borderColor: accent ? C.live : C.rule2,
-          backgroundColor: pressed ? (accent ? C.liveWash : C.surface) : 'transparent',
-          opacity: disabled ? 0.55 : 1,
-        },
+        primary
+          ? [{ backgroundColor: pressed ? C.cream : C.pill }, dropped(C, 'md')]
+          : [{ backgroundColor: pressed ? C.surface2 : C.surface3 }, raised(C)],
+        disabled && styles.blocked,
       ]}>
-      <Text
-        style={[accent ? styles.actionLabelAccent : styles.actionLabel, { color: accent ? C.liveText : C.ink2 }]}>
-        {label}
-      </Text>
+      <Text style={[styles.actionLabel, { color: primary ? C.pillInk : C.ink2 }]}>{label}</Text>
     </Pressable>
   );
 }
@@ -301,7 +317,7 @@ function Handshake({ reduced }: { reduced: boolean }) {
     pulse.value = withRepeat(
       withTiming(0.25, { duration: 1000, easing: Easing.inOut(Easing.quad) }),
       -1,
-      true
+      true,
     );
   }, [pulse, reduced]);
 
@@ -314,17 +330,20 @@ function Handshake({ reduced }: { reduced: boolean }) {
   const minutes = Math.floor(elapsed / 60);
   const seconds = elapsed % 60;
 
+  /*
+    `ink2`, not the accent. A handshake in flight is not live, playing,
+    joinable, in sync, on aux, unread or selected — the pulse is what says
+    "still working", and the colour is not available to say it twice.
+  */
   return (
-    <View style={styles.handshake}>
-      <View style={[styles.handshakeRule, { backgroundColor: C.rule }]} />
-      <Text style={[styles.kicker, styles.handshakeKicker, { color: C.ink3 }]}>CONNECTING…</Text>
-      <View style={[styles.handshakeRow, { borderColor: C.rule }]}>
-        <Animated.View style={[styles.mark, { backgroundColor: C.live }, animated]} />
-        <Text style={[styles.handshakeText, { color: C.ink2 }]}>Returning from Spotify…</Text>
-        <Text style={[styles.readout, { color: C.ink3 }]}>
-          {minutes}:{String(seconds).padStart(2, '0')}
-        </Text>
-      </View>
+    <View
+      accessibilityLiveRegion="polite"
+      style={[styles.handshake, { backgroundColor: C.surface }, raised(C)]}>
+      <Animated.View style={[styles.dot, { backgroundColor: C.ink2 }, animated]} />
+      <Text style={[styles.handshakeText, { color: C.ink2 }]}>Connecting…</Text>
+      <Text style={[styles.readout, { color: C.ink3 }]}>
+        {minutes}:{String(seconds).padStart(2, '0')}
+      </Text>
     </View>
   );
 }
@@ -342,156 +361,138 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 720,
     alignSelf: 'center',
-    paddingBottom: Space.xxxl,
+    paddingTop: Space.md,
+    paddingBottom: Space.huge,
   },
-  back: {
+
+  head: {
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-start',
-    gap: 7,
-    minHeight: TOUCH_TARGET,
-    paddingHorizontal: GUTTER,
+    gap: 14,
+    paddingHorizontal: TEXT_GUTTER,
   },
-  backLabel: {
-    ...Type.label(11),
-    letterSpacing: tracking(11, 0.1),
+  backTile: {
+    width: BACK_TILE,
+    height: BACK_TILE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radii.sm,
   },
-  screenTitle: {
-    ...Type.display(26),
-    letterSpacing: tracking(26, -0.025),
-    paddingHorizontal: GUTTER,
-    marginBottom: Space.lg,
+  title: {
+    ...Type.display(24),
+    letterSpacing: tracking(24, -0.03),
+    flex: 1,
+    minWidth: 0,
   },
+
+  kicker: {
+    ...Type.label(10.5),
+    letterSpacing: tracking(10.5, 0.15),
+    paddingHorizontal: TEXT_GUTTER,
+    paddingTop: Space.xxxl,
+    paddingBottom: Space.md,
+  },
+  block: {
+    paddingHorizontal: CARD_GUTTER,
+    gap: 10,
+  },
+
   card: {
-    marginHorizontal: GUTTER,
-    padding: 14,
-    borderWidth: Rule.hair,
+    padding: 17,
+    borderRadius: Radii.xl,
   },
   cardHead: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Space.sm,
+    gap: Space.md,
   },
   cardTitle: {
-    ...Type.heading(15),
-    letterSpacing: tracking(15, 0.01),
     flex: 1,
+    minWidth: 0,
+    fontFamily: Fonts.semibold,
+    fontSize: 15,
+    lineHeight: 20,
+    letterSpacing: tracking(15, -0.01),
   },
-  chip: {
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderWidth: Rule.hair,
+  cardValue: {
+    ...readout(13),
+    fontFamily: Fonts.semibold,
   },
-  chipFilled: {
-    paddingHorizontal: 7,
-    paddingVertical: 3,
+  cardLine: {
+    ...Type.body(12.5),
+    marginTop: 3,
   },
-  chipLabel: {
-    ...Type.heading(11),
-    letterSpacing: tracking(11, 0.1),
-  },
-  cardBody: {
-    ...Type.body(16),
-    marginTop: 10,
-  },
-  /** A quieter nested note. Bordered, never washed in danger. */
-  inset: {
-    marginTop: Space.md,
-    padding: Space.md,
-    borderWidth: Rule.hair,
-  },
-  insetText: {
-    ...Type.body(14),
+  skeletonCard: {
+    borderRadius: Radii.xl,
   },
   actions: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Space.sm,
-    marginTop: 14,
+    gap: 10,
+    marginTop: Space.lg,
   },
   action: {
-    minHeight: TOUCH_TARGET,
+    flex: 1,
+    minHeight: 46,
+    alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 14,
-    borderWidth: Rule.hair,
-  },
-  actionLabelAccent: {
-    ...Type.heading(11),
-    letterSpacing: tracking(11, 0.09),
+    paddingHorizontal: Space.md,
+    borderRadius: Radii.sm + 1,
   },
   actionLabel: {
-    ...Type.label(11),
-    letterSpacing: tracking(11, 0.09),
+    fontFamily: Fonts.semibold,
+    fontSize: 13.5,
+    lineHeight: 18,
   },
-  kicker: {
-    ...Type.label(11),
-    letterSpacing: tracking(11, 0.12),
-    paddingHorizontal: GUTTER,
-    marginTop: Space.xl,
-    marginBottom: Space.sm,
+  blocked: {
+    opacity: 0.55,
+  },
+
+  well: {
+    flexDirection: 'row',
+    gap: 6,
+    padding: 6,
+    borderRadius: Radii.lg,
   },
   segment: {
-    flexDirection: 'row',
-    marginHorizontal: GUTTER,
-    borderWidth: Rule.hair,
-  },
-  segmentCell: {
     flex: 1,
-    minHeight: CELL,
+    minHeight: TOUCH_TARGET,
+    alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 14,
+    borderRadius: Radii.sm + 1,
   },
-  segmentLabelOn: {
-    ...Type.heading(11),
-    letterSpacing: tracking(11, 0.08),
-  },
-  segmentLabelOff: {
-    ...Type.label(11),
-    letterSpacing: tracking(11, 0.08),
+  segmentLabel: {
+    fontFamily: Fonts.semibold,
+    fontSize: 12.5,
+    lineHeight: 16,
+    letterSpacing: tracking(12.5, 0.06),
   },
   caption: {
-    ...Type.body(14),
-    paddingHorizontal: GUTTER,
-    marginTop: Space.sm,
+    ...Type.body(12.5),
+    marginTop: 1,
   },
+
   handshake: {
-    marginTop: 22,
-  },
-  handshakeRule: {
-    height: Rule.major,
-    marginHorizontal: GUTTER,
-  },
-  handshakeKicker: {
-    marginTop: 14,
-  },
-  handshakeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    marginHorizontal: GUTTER,
-    padding: Space.md,
-    borderWidth: Rule.hair,
+    gap: Space.md,
+    minHeight: TOUCH_TARGET + Space.xs,
+    padding: 15,
+    borderRadius: Radii.lg,
   },
-  mark: {
-    width: 8,
-    height: 8,
+  dot: {
+    width: 9,
+    height: 9,
+    borderRadius: Radii.pill,
   },
   handshakeText: {
-    ...Type.body(14),
     flex: 1,
+    minWidth: 0,
+    fontFamily: Fonts.semibold,
+    fontSize: 14.5,
+    lineHeight: 19,
   },
   readout: {
-    ...Type.readout(12),
-    fontVariant: ['tabular-nums' as const],
-  },
-  footnoteRule: {
-    height: Rule.major,
-    marginHorizontal: GUTTER,
-    marginTop: 22,
-  },
-  footnote: {
-    ...Type.body(14),
-    paddingHorizontal: GUTTER,
-    marginTop: 14,
+    ...readout(13),
+    fontFamily: Fonts.semibold,
   },
 });
