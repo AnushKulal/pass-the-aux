@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "aux",
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "automatic",
     "backgroundColor": "#1e2128",
     "ios": {
       "icon": "./assets/expo.icon",
@@ -21,7 +21,9 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "permissions": ["android.permission.REQUEST_INSTALL_PACKAGES"]
+      "permissions": [
+        "android.permission.REQUEST_INSTALL_PACKAGES"
+      ]
     },
     "web": {
       "output": "static",
@@ -32,9 +34,13 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#1e2128",
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 140
+          "image": "./assets/images/splash-icon-light.png",
+          "imageWidth": 180,
+          "backgroundColor": "#f3f5f8",
+          "dark": {
+            "image": "./assets/images/splash-icon.png",
+            "backgroundColor": "#1e2128"
+          }
         }
       ],
       "expo-secure-store",
@@ -87,7 +93,9 @@
         },
         {
           "patch": 1,
-          "notes": ["Direct messages: inbox, threads and composer"]
+          "notes": [
+            "Direct messages: inbox, threads and composer"
+          ]
         }
       ]
     },

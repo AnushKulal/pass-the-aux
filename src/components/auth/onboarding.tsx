@@ -45,7 +45,7 @@ import {
 } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
-/** The field. A hairline at rest, an accent ring while you are in it. */
+/** The field. A hairline at rest, a neutral ring while you are in it. */
 const FIELD_HEIGHT = 52;
 /** The multiline variant: the bio well on Profile setup. */
 const AREA_MIN_HEIGHT = 46;
@@ -155,8 +155,6 @@ export function OnboardingField({
    */
   const [focused, setFocused] = useState(false);
 
-  const active = focused || Boolean(error);
-
   /**
    * Focus and failure must not paint the same edge.
    *
@@ -198,14 +196,18 @@ export function OnboardingField({
           multiline ? styles.area : styles.field,
           { backgroundColor: C.bgRecessed, color: C.ink, borderColor: edge },
           /*
-            A soft ring while focused — the one moment this screen answers back.
-            Nothing at rest, so a quiet form stays quiet.
-
-            The CSS string form, not the array: `TextStyle` types `boxShadow` as
-            a string, and only `ViewStyle` accepts the structured array. Same
-            renderer either way.
+            The ring is NEUTRAL on focus and red only on failure.
+            It used to spend the accent on both, so an empty field you had
+            simply tapped into looked exactly like a field that had been
+            rejected — alarming, and on the very first screen of the app. Red
+            is reserved here as everywhere else: it means something is wrong,
+            not that the cursor is present.
           */
-          active ? { boxShadow: `0 0 0 3px ${C.liveWash}` } : null,
+          error
+            ? { boxShadow: `0 0 0 3px ${C.liveWash}` }
+            : focused
+              ? { boxShadow: `0 0 0 3px ${C.ruleSoft}` }
+              : null,
         ]}
       />
 
