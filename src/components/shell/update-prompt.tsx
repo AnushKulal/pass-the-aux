@@ -83,7 +83,26 @@ export function UpdatePrompt() {
 
   return (
     <View
-      style={[styles.layer, { paddingBottom: insets.bottom + Space.lg }, PointerEvents.boxNone]}>
+      style={[
+        styles.layer,
+        { paddingBottom: insets.bottom + Space.lg },
+        PointerEvents.boxNone,
+        /*
+          `display: none` when there is nothing to show, and it is load-bearing.
+          This card is PARKED rather than unmounted — always in the tree, moved
+          off-screen by transform — so while parked it still occupies its 254px
+          at the bottom of the window and still hit-tests. `pointerEvents` in the
+          style prop does NOT reliably reach react-native-web here, so the parked
+          card silently swallowed every tap in the bottom quarter of the screen:
+          the intro's "Get started", and the whole navigation bar.
+
+          `display: none` removes it from hit-testing outright, which no styling
+          discrepancy between platforms can undo. It costs the last frames of the
+          exit animation, and that is a trade worth making for a control surface
+          that cannot eat input.
+        */
+        promptVisible ? null : styles.parked,
+      ]}>
       {/*
         Parked rather than unmounted, so it must be inert while it is parked:
         off-screen is not the same as gone. Without these three the dismissed
@@ -194,6 +213,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: Space.lg,
     zIndex: ZIndex.toast,
     ...Platform.select({ android: { elevation: ZIndex.toast }, default: {} }),
+  },
+  /**
+   * Taken out of hit-testing entirely while there is no update to offer.
+   *
+   * Not belt-and-braces — this is the only thing that actually worked. The card
+   * is parked off-screen rather than unmounted, so without this it still holds
+   * its ~250px at the bottom of the window and still receives every tap that
+   * lands there. `pointerEvents` on the style does not reach react-native-web
+   * reliably, and the parked card ate the intro's primary button and the whole
+   * navigation bar.
+   */
+  parked: {
+    display: 'none',
   },
   card: {
     // Radius 0 and a hard border: no shadow, no glass. Separation is the rule.
