@@ -34,6 +34,7 @@ import {
   tracking,
   Type,
 } from '@/lib/theme';
+import { Wordmark } from '@/components/shell/wordmark';
 import { useColors } from '@/lib/theme-context';
 
 const SEEN_KEY = 'aux:intro-seen';
@@ -115,7 +116,13 @@ export default function IntroScreen() {
             // meant to look lit from within, not sitting on the page.
             bloom(C.glow, 'lg'),
           ]}>
-          <Text style={[styles.logoMark, { color: C.artInk }]}>aux</Text>
+          {/*
+            The same mark the launcher icon is cut from — so the tile someone
+            taps on their home screen and the tile they land on are one design.
+            `artInk` because this sits on the bright `artwork` plate, where
+            normal ink would be invisible.
+          */}
+          <Wordmark size={52} color={C.artInk} />
         </Animated.View>
 
         <Animated.View
@@ -167,11 +174,6 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  logoMark: {
-    fontFamily: Fonts.extrabold,
-    fontSize: 52,
-    letterSpacing: tracking(52, -0.06),
   },
   copy: {
     alignItems: 'center',
