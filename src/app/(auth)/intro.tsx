@@ -1,20 +1,26 @@
 /**
  * The first screen.
  *
- * One screen, not a carousel. The previous version walked through four pitch
- * pages before letting anyone in; this states the idea once and offers the door.
+ * The gradient wordmark, a tracked kicker, a short accent rule, one paragraph,
+ * and the door. Nothing else.
  *
- * Shown ONCE. A flag in AsyncStorage means a returning user is forwarded
- * straight to sign-in and never sees it again — which is why nothing here is
- * load-bearing for understanding the app.
+ * Built from design/nocturne/aux-nocturne.dc.html, screen "intro1" (L47-52).
  *
- * Built from design/v2/aux-v2.dc.html, screen "Intro".
+ * ONE SCREEN, NOT FOUR — a deliberate departure from the design, which restores
+ * a four-page carousel (intro1 through intro4, with a progress rail and a Next
+ * button). This app collapsed that to a single screen on purpose after the
+ * feedback that it was "so descriptive in so many places", and four pages of
+ * pitch before anyone can sign in is the most descriptive thing in the app.
+ * The visual treatment here is entirely Nocturne's; only the page count is not.
+ *
+ * Shown ONCE. A flag in AsyncStorage forwards a returning user straight to
+ * sign-in, which is why nothing here is load-bearing for understanding the app.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useReducedMotion,
@@ -23,24 +29,28 @@ import Animated, {
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import {
-  bloom,
-  dropped,
-  Duration,
-  Fonts,
-  Radii,
-  Space,
-  TOUCH_TARGET,
-  tracking,
-  Type,
-} from '@/lib/theme';
+import { BrandRule, PrimaryCta, SecondaryLink } from '@/components/auth/onboarding';
 import { Wordmark } from '@/components/shell/wordmark';
+import { Duration, Fonts, Space, tracking, Type } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
 const SEEN_KEY = 'aux:intro-seen';
 
-/** The mark. Square, generously rounded, and the brightest thing on the screen. */
-const LOGO = 172;
+/**
+ * The screen gutter, and this screen used to say 30.
+ *
+ * Intro, Sign in, Claim handle and Profile setup are walked in sequence on a
+ * first launch, and they were drawn at 30, 24, 22 and 18 — four content columns
+ * in four taps, stepping inward at every one. 18 is the house value
+ * (`src/components/ui/screen.tsx` and all eleven tab screens), so it is the one
+ * the other three moved to.
+ */
+const GUTTER = 18;
+
+/** The mark, at the design's Intro size. */
+const LOGO = 62;
+/** The brand rule under the kicker — 64 wide here, 52 on Sign in. */
+const RULE_W = 64;
 
 export default function IntroScreen() {
   const C = useColors();
@@ -81,7 +91,7 @@ export default function IntroScreen() {
    * `entering={FadeIn}` was the obvious way to write this and it is WRONG here:
    * Reanimated marks the view `visibility: hidden` until the entering animation
    * runs, and on react-native-web that animation never fired — leaving the
-   * headline and the logo permanently invisible while reporting correct colour,
+   * headline and the mark permanently invisible while reporting correct colour,
    * size and layout. A shared value driven from an effect cannot fail that way,
    * because the effect always runs.
    *
@@ -94,7 +104,7 @@ export default function IntroScreen() {
     enter.value = reduced ? 1 : withTiming(1, { duration: Duration.enter });
   }, [status, reduced, enter]);
 
-  const logoIn = useAnimatedStyle(() => ({ opacity: enter.value }));
+  const markIn = useAnimatedStyle(() => ({ opacity: enter.value }));
 
   const copyIn = useAnimatedStyle(() => ({
     opacity: enter.value,
@@ -107,51 +117,40 @@ export default function IntroScreen() {
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: C.bg }]}>
       <View style={styles.body}>
-        <Animated.View
-          style={[
-            styles.logo,
-            logoIn,
-            { backgroundColor: C.artwork },
-            // A wide, soft bloom rather than a raised edge — this one object is
-            // meant to look lit from within, not sitting on the page.
-            bloom(C.glow, 'lg'),
-          ]}>
-          {/*
-            The same mark the launcher icon is cut from — so the tile someone
-            taps on their home screen and the tile they land on are one design.
-            `artInk` because this sits on the bright `artwork` plate, where
-            normal ink would be invisible.
-          */}
-          <Wordmark size={52} color={C.artInk} />
+        {/*
+          No tile behind the mark, deliberately.
+
+          The previous version set it on a 172px `artwork` plate, which worked
+          when `artwork` was a near-white tile. In this direction that token is a
+          dark WELL and `artInk` is 22% white, so the same code renders a barely
+          visible mark on a barely visible square. The design's answer is not a
+          brighter plate: it is no plate, with the gradient carrying the mark.
+        */}
+        <Animated.View style={markIn}>
+          <Wordmark size={LOGO} />
         </Animated.View>
 
-        <Animated.View
-          style={[styles.copy, copyIn]}>
-          <Text style={[styles.headline, { color: C.ink }]}>
-            {'Listen together,\nto the same second.'}
-          </Text>
+        <Animated.View style={[styles.copy, copyIn]}>
+          <Text style={[styles.kicker, { color: C.ink3 }]}>PASS THE AUX</Text>
+
+          {/*
+            Was an inline `LinearGradient` here and a second, near-identical one
+            on Sign in, each declaring itself the only element in the app that
+            paints both accents. Neither was — see `BrandRule`, which now owns
+            the gradient, the height and the reasoning for all of it.
+          */}
+          <BrandRule width={RULE_W} style={styles.rule} />
+
           <Text style={[styles.sub, { color: C.ink2 }]}>
-            See what your people are playing right now, and drop into the room. Spotify or
-            YouTube — everyone hears the same song at the same moment.
+            You join a <Text style={{ color: C.ink, fontFamily: Fonts.semibold }}>Lounge</Text>, see
+            who is listening to what right now, and tap in to hear the same chorus at the same
+            moment.
           </Text>
         </Animated.View>
       </View>
 
-      <Pressable
-        accessibilityRole="button"
-        onPress={leave}
-        style={({ pressed }) => [
-          styles.cta,
-          { backgroundColor: C.pill },
-          dropped(C, 'lg'),
-          pressed ? { opacity: 0.9 } : null,
-        ]}>
-        <Text style={[styles.ctaLabel, { color: C.pillInk }]}>Get started</Text>
-      </Pressable>
-
-      <Pressable accessibilityRole="button" onPress={leave} style={styles.secondary}>
-        <Text style={[styles.secondaryLabel, { color: C.ink2 }]}>I already have an account</Text>
-      </Pressable>
+      <PrimaryCta label="Get started" onPress={leave} />
+      <SecondaryLink label="I already have an account" onPress={leave} />
     </SafeAreaView>
   );
 }
@@ -159,56 +158,37 @@ export default function IntroScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    paddingHorizontal: 30,
+    paddingHorizontal: GUTTER,
     paddingBottom: Space.huge,
   },
   body: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 38,
-  },
-  logo: {
-    width: LOGO,
-    height: LOGO,
-    borderRadius: 30,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   copy: {
     alignItems: 'center',
   },
-  headline: {
-    ...Type.display(34),
-    lineHeight: 37,
-    letterSpacing: tracking(34, -0.035),
-    textAlign: 'center',
+  kicker: {
+    fontFamily: Fonts.extrabold,
+    fontSize: 9,
+    letterSpacing: tracking(9, 0.26),
+    marginTop: 22,
+    // The design's own 0.85 on an already-quiet ink. It is the least important
+    // thing on the screen and is set to say so.
+    opacity: 0.85,
+  },
+  /** Spacing only — `BrandRule` carries the width, height and radius. */
+  rule: {
+    marginTop: 16,
   },
   sub: {
-    ...Type.body(14.5),
-    lineHeight: 22,
-    marginTop: Space.lg,
+    ...Type.body(16),
+    lineHeight: 26,
+    marginTop: 20,
     textAlign: 'center',
-  },
-  cta: {
-    height: 56,
-    borderRadius: Radii.button,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ctaLabel: {
-    fontFamily: Fonts.semibold,
-    fontSize: 15,
-    letterSpacing: tracking(15, -0.005),
-  },
-  secondary: {
-    minHeight: TOUCH_TARGET,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 6,
-  },
-  secondaryLabel: {
-    fontFamily: Fonts.semibold,
-    fontSize: 13.5,
+    // 290 in the design. Caps the measure at roughly 45 characters so the
+    // paragraph breaks into four even lines instead of one long ragged block.
+    maxWidth: 290,
   },
 });

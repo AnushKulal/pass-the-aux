@@ -1,19 +1,38 @@
 /**
  * The @-mention picker.
  *
- * Typing `@` opens a scoped list docked directly above the composer: a kicker
- * naming the scope, a count of the FULL filtered set, and the matches. The
- * count and the scroll are the point — §13 is explicit that the list must never
- * truncate silently, so this renders every match and lets the list scroll
- * rather than slicing to a "top 5" and lying about it in the header.
+ * Typing `@` opens a scoped list above the composer: a kicker naming the scope,
+ * a count of the FULL filtered set, and the matches. The count and the scroll
+ * are the point — §13 is explicit that the list must never truncate silently,
+ * so this renders every match and lets the list scroll rather than slicing to a
+ * "top 5" and lying about it in the header.
+ *
+ * IT FLOATS, IT NO LONGER DOCKS. It used to be a full-width panel welded to the
+ * top of the composer bar: square outer corners, a hairline along its top edge,
+ * `dropped()` for depth. Nocturne has no bars left to dock onto — the composer
+ * below it is a floating capsule — so this is an object too: inset to the same
+ * 14px gutter, rounded on all four corners, edged in `chromeBorder` the whole
+ * way around, and lifted on `dropped()`.
+ *
+ * `chromeBorder` rather than `rule` is the load-bearing half of that. It is
+ * roughly twice as bright, and that delta is precisely what separates a piece
+ * of glass hovering over the page from a card sitting on it; with `rule` this
+ * reads as another surface in the stack.
+ *
+ * The gap between this and the capsule is the composer frame's own top padding
+ * — the picker is a layout sibling of the bar rather than an overlay, so the
+ * thread gives up the room instead of having a panel land on top of it.
  *
  * Filtering is prefix-based on the handle OR the display name, from the first
  * character, matching the prototype's `startsWith` on both fields.
  *
- * On the accent: the scope kicker and the handle column are drawn in
- * `liveText`. That is not decoration — §13 says mentions render in accent, and
- * these two are the mention itself (the scope you are mentioning into, and the
- * handle about to be inserted). Everything else here is ink.
+ * ON THE ACCENT: THERE ISN'T ONE, AND THAT IS DELIBERATE. §13's "mentions
+ * render in accent" is about a mention already sitting in a message body, where
+ * coral says "this one concerns you" — a state. Nothing in this list is a
+ * mention yet; it is a menu of people, and painting the handle column coral
+ * would spend the state accent on a decoration. The whole panel is ink.
+ * (An earlier header here claimed the opposite while the code did this. The
+ * code was right.)
  *
  * The three exported helpers are pure and independently testable; the composer
  * uses them to find and complete the token, and nothing else in the file has
@@ -63,6 +82,15 @@ const MENTION_PATTERN = /(?:^|\s)@([A-Za-z0-9_]*)$/;
 const MAX_HEIGHT = 196;
 const ROW_HEIGHT = 48;
 const AVATAR = 28;
+
+/** The composer capsule's gutter (L788, `margin:0 14px`). Kept in step by hand. */
+const GUTTER = 14;
+/**
+ * Under the capsule's 28. That radius is half of a 56px pill and reads as a
+ * pill; on a panel four times as tall the same corner reads as a lozenge, so
+ * this takes the house card corner instead.
+ */
+const PANEL_RADIUS = Radii.xl;
 
 /**
  * Finds the mention token the caret is currently sitting inside, or null.
@@ -188,45 +216,54 @@ export function MentionPicker({
   );
 
   return (
-    <View
-      style={[
-        styles.dock,
-        { backgroundColor: C.surface, borderTopColor: C.rule },
-        dropped(C, 'md'),
-      ]}>
-      <View style={styles.head}>
-        <Text style={[styles.scope, { color: C.ink3 }]}>{scopeLabel}</Text>
-        <Text accessibilityLiveRegion="polite" style={[styles.count, { color: C.ink3 }]}>
-          {matches.length} {matches.length === 1 ? 'match' : 'matches'}
-        </Text>
-      </View>
+    /*
+      THE SHADOW HAS TO LIVE ON AN OUTER VIEW. The panel below clips its rows to
+      the rounded corner, and Android throws away a view's own boxShadow along
+      with whatever `overflow: 'hidden'` clips — the picker would silently lose
+      its lift on one platform only. Same split `GlassCard` makes for its bleed.
+    */
+    <View style={[styles.shell, dropped(C)]}>
+      <View style={[styles.panel, { backgroundColor: C.surface, borderColor: C.chromeBorder }]}>
+        <View style={styles.head}>
+          <Text style={[styles.scope, { color: C.ink3 }]}>{scopeLabel}</Text>
+          <Text accessibilityLiveRegion="polite" style={[styles.count, { color: C.ink3 }]}>
+            {matches.length} {matches.length === 1 ? 'match' : 'matches'}
+          </Text>
+        </View>
 
-      <FlatList
-        data={matches}
-        keyExtractor={(item) => item.id}
-        renderItem={renderItem}
-        style={{ maxHeight }}
-        // The keyboard is open by definition here; without this the first tap
-        // is eaten dismissing it and the pick needs a second tap.
-        keyboardShouldPersistTaps="always"
-        keyboardDismissMode="none"
-        getItemLayout={(_, index) => ({
-          length: ROW_HEIGHT,
-          offset: ROW_HEIGHT * index,
-          index,
-        })}
-      />
+        <FlatList
+          data={matches}
+          keyExtractor={(item) => item.id}
+          renderItem={renderItem}
+          style={{ maxHeight }}
+          // The keyboard is open by definition here; without this the first tap
+          // is eaten dismissing it and the pick needs a second tap.
+          keyboardShouldPersistTaps="always"
+          keyboardDismissMode="none"
+          getItemLayout={(_, index) => ({
+            length: ROW_HEIGHT,
+            offset: ROW_HEIGHT * index,
+            index,
+          })}
+        />
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  dock: {
+  /** Carries the placement and the lift. The panel below carries the skin. */
+  shell: {
     flexGrow: 0,
     flexShrink: 0,
-    borderTopWidth: Rule.hair,
-    borderTopLeftRadius: Radii.lg,
-    borderTopRightRadius: Radii.lg,
+    // The composer's own gutter, so the two edges line up as one column.
+    marginHorizontal: GUTTER,
+    borderRadius: PANEL_RADIUS,
+  },
+  panel: {
+    borderRadius: PANEL_RADIUS,
+    borderWidth: Rule.hair,
+    // Clips the row press-fill to the corner; the shell above holds the shadow.
     overflow: 'hidden',
   },
   head: {

@@ -18,6 +18,7 @@ import { Redirect } from 'expo-router';
 import { Tabs, type BottomTabBarProps } from 'expo-router/js-tabs';
 import { StyleSheet, View } from 'react-native';
 
+import { AmbientGround } from '@/components/shell/ambient-ground';
 import { NavBar } from '@/components/shell/nav-bar';
 import { UpdateBanner } from '@/components/shell/update-banner';
 import { useAuth } from '@/lib/auth';
@@ -43,6 +44,12 @@ export default function TabsLayout() {
 
   return (
     <View style={[styles.shell, { backgroundColor: C.bg }]}>
+      {/*
+        Behind everything, drawn once for the whole shell rather than per
+        screen, so the blobs stay put across navigation instead of restarting
+        their drift on every transition.
+      */}
+      <AmbientGround />
       {/* Above the navigator so it survives every navigation rather than
           re-entering on each screen. */}
       <UpdateBanner />
@@ -51,7 +58,13 @@ export default function TabsLayout() {
         screenOptions={{
           // Each screen renders its own header.
           headerShown: false,
-          sceneStyle: { backgroundColor: C.bg },
+          /*
+            TRANSPARENT, not `C.bg`. The ambient ground is painted once behind
+            this navigator, and an opaque scene would cover it on every screen —
+            leaving the blobs visible only in the gaps, which is nowhere.
+            The ground colour is on the shell View above instead.
+          */
+          sceneStyle: { backgroundColor: 'transparent' },
           /*
             Every screen in this group animates the same way, and that includes
             the ones with no cell in the bar — lounge/[id], settings/*, messages/*

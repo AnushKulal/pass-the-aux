@@ -13,20 +13,37 @@
  * from: a Spotify hit will be cross-linked to YouTube by the resolver, so
  * everyone can play it; a YouTube hit may have no Spotify equivalent at all.
  *
- * Drawn as the Session's other sheets are drawn (design/v2/aux-v2.dc.html):
- * 28px top corners, a grabber, a raised close tile, and one raised card per
- * result. The search field is a RECESSED FILL with a hairline rather than an
- * inset shadow pair — at 50px the light half of that pair sits at 3.2% alpha on
- * a dark ground and only the dark half survives, which reads as dirt on the
- * field rather than as depth. This was already fixed once on the auth fields.
+ * Drawn from design/nocturne/aux-nocturne.dc.html L1163-L1243, and the shape
+ * changed: nocturne's sheet FLOATS. It is inset from both sides, lifted clear
+ * of the bottom edge, rounded on all four corners, blurred, and bordered the
+ * whole way around — an object resting on the app rather than a panel welded to
+ * the frame. That is the same argument the nav capsule won; a surface pinned to
+ * three edges reads as part of the window.
+ *
+ * Two things follow from the float and both are load-bearing:
+ *
+ *   `sheetShadow()`, NOT `dropped()`. A sheet is lit by the page it covers, so
+ *   its shadow falls upward onto that page. `dropped()` would throw the shadow
+ *   down past the bottom of the screen and the sheet would lose its edge.
+ *
+ *   EVERY SURFACE INSIDE IT IS OPAQUE. `surface` is 5.5% white; laid over a
+ *   BlurView it has nothing solid to sit on and the row dissolves into the
+ *   blur. `surfaceSolid` is the resolved composite of the same colour, so the
+ *   rows look identical and survive the glass.
+ *
+ * The search field is a RECESSED PILL with a hairline rather than an inset
+ * shadow pair — at 50px the light half of that pair sits at 3.2% alpha on a
+ * dark ground and only the dark half survives, which reads as dirt on the field
+ * rather than as depth. This was already fixed once on the auth fields.
  *
  * Four states, all present: skeleton cards while a query is in flight, an idle
  * prompt before anyone types, "nothing matched" for a query with no hits, and
  * an error card carrying the retry.
  */
 
+import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
-import { Music, Plus, RotateCw, Search, X } from 'lucide-react-native';
+import { Music, Plus, Search, SearchX, WifiOff, X } from 'lucide-react-native';
 import { memo, useCallback, useState } from 'react';
 import {
   ActivityIndicator,
@@ -35,6 +52,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -43,7 +61,15 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { BLURHASH_SURFACE, Skeleton, useToast } from '@/components/ui';
+import {
+  AuxButton,
+  BLURHASH_SURFACE,
+  CircleIconButton,
+  EmptyState,
+  GlassCard,
+  Skeleton,
+  useToast,
+} from '@/components/ui';
 import { useAddToQueue } from '@/features/rooms/queries';
 import {
   confirmMatch,
@@ -60,23 +86,26 @@ import {
   Space,
   TOUCH_TARGET,
   Type,
-  dropped,
-  raised,
+  sheetShadow,
   tracking,
 } from '@/lib/theme';
-import { useColors } from '@/lib/theme-context';
+import { useColors, useTheme } from '@/lib/theme-context';
 
 import { TABULAR, formatClock, initialFor, readout } from './drift';
 
 const GUTTER = Space.lg - 2;
-const WELL = 44;
-const WELL_RADIUS = 13;
+/** L1229's art well, and the largest thing in a result row. */
+const WELL = 42;
+const WELL_RADIUS = 14;
 const SKELETON_ROWS = 5;
 /** More than three alternatives is a research task, not a choice. */
 const MAX_CANDIDATES = 3;
+/** L1225: `min-height:50px`, fully rounded. */
 const FIELD_HEIGHT = 50;
-/** Drawn at 36 like every other sheet's close tile; hit slop makes it 44. */
-const CLOSE_TILE = 36;
+/** L1231's add affordance. Not a control — the whole row is the button. */
+const ADD_DISC = 36;
+/** The clear tile inside the field. Hit slop takes its target to 44. */
+const CLEAR_TILE = 28;
 
 export type AddTrackSheetProps = {
   roomId: string | null;
@@ -91,6 +120,7 @@ function providerLine(provider: TrackSearchResult['provider']): string {
 
 export function AddTrackSheet({ roomId, visible, onClose }: AddTrackSheetProps) {
   const C = useColors();
+  const { scheme } = useTheme();
   const insets = useSafeAreaInsets();
   const toast = useToast();
   const addToQueue = useAddToQueue(roomId);
@@ -183,6 +213,13 @@ export function AddTrackSheet({ roomId, visible, onClose }: AddTrackSheetProps) 
     handleClose();
   }, [pending, handleClose]);
 
+  /**
+   * Clearing is its own affordance rather than "select all and delete". The
+   * search is debounced and cached, so an empty field costs nothing and returns
+   * the sheet to its idle prompt — which is the fastest way to start over.
+   */
+  const handleClearQuery = useCallback(() => setQuery(''), []);
+
   // `refetch` is a fresh closure each render, so the row is captured by value
   // rather than depended on — the notice is not memoised on it either way.
   const { refetch: refetchSearch } = search;
@@ -197,9 +234,23 @@ export function AddTrackSheet({ roomId, visible, onClose }: AddTrackSheetProps) 
     [busyId, handlePick]
   );
 
-  const subtitle = pending
-    ? 'Two uploads share this title. Pick the recording.'
-    : 'Anything you add plays for the whole Session.';
+  const kicker = pending
+    ? 'Pick the recording everyone will hear'
+    : 'One search across every provider';
+
+  /*
+    The design floats the sheet 40px clear of the frame (L1166). On a device
+    with a home indicator the inset already supplies most of that, so the float
+    is the inset plus a constant rather than a flat 40 stacked on top of it.
+  */
+  const lift = Math.max(insets.bottom, Space.md) + Space.md;
+
+  /*
+    `keepPreviousData` holds the last results on screen while the next query
+    flies, so a spinner in the field is the only honest way to say "still
+    looking" without flashing the list back to skeletons on every keystroke.
+  */
+  const searchingOverResults = search.isSearching && search.results.length > 0;
 
   return (
     <Modal
@@ -219,109 +270,136 @@ export function AddTrackSheet({ roomId, visible, onClose }: AddTrackSheetProps) 
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.keyboard}>
-          <View
-            style={[
-              styles.sheet,
-              { backgroundColor: C.bg, paddingBottom: insets.bottom },
-              dropped(C, 'lg'),
-            ]}>
-            <View style={styles.grabberSlot}>
-              <View style={[styles.grabber, { backgroundColor: C.ink3 }]} />
-            </View>
+          {/*
+            THE SHADOW HAS TO LIVE ON AN OUTER VIEW. The glass below clips its
+            children to the rounded corner, and Android throws away a view's own
+            boxShadow along with whatever `overflow: 'hidden'` clips — the sheet
+            would silently lose its lift on one platform only.
+          */}
+          <View style={[styles.shell, { marginBottom: lift }, sheetShadow(C)]}>
+            <BlurView
+              intensity={scheme === 'dark' ? 40 : 60}
+              tint={scheme === 'dark' ? 'dark' : 'light'}
+              // Android does not blur at all without this; the tint alone would
+              // leave a flat translucent slab with nothing happening behind it.
+              experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined}
+              style={[styles.glass, { borderColor: C.chromeBorder }]}>
+              {/*
+                The tint rides ON TOP of the blur rather than being handed to
+                BlurView as a background: underneath, the tint becomes the thing
+                being blurred and the whole sheet reads as fog. It is also the
+                sheet's safety net — a Modal is its own window, so if a platform
+                declines to blur what is behind it, this layer is still a
+                near-opaque `nav` fill and the sheet stays a legible panel.
+              */}
+              <View style={[StyleSheet.absoluteFill, { backgroundColor: C.nav }]} />
 
-            <View style={styles.head}>
-              <View style={styles.headMeta}>
-                <Text numberOfLines={1} style={[styles.headTitle, { color: C.ink }]}>
-                  {pending ? 'Confirm the match' : 'Add a track'}
-                </Text>
-                <Text numberOfLines={1} style={[styles.headSubtitle, { color: C.ink2 }]}>
-                  {subtitle}
-                </Text>
+              <View style={styles.grabberSlot}>
+                <View style={[styles.grabber, { backgroundColor: C.rule3 }]} />
               </View>
 
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Close"
-                onPress={handleRequestClose}
-                hitSlop={(TOUCH_TARGET - CLOSE_TILE) / 2}
-                style={({ pressed }) => [
-                  styles.closeTile,
-                  { backgroundColor: C.surface },
-                  raised(C),
-                  pressed ? styles.dim : null,
-                ]}>
-                <X size={16} strokeWidth={2.2} color={C.ink2} />
-              </Pressable>
-            </View>
-
-            {pending ? null : (
-              <View style={styles.fieldSlot}>
-                <View
-                  style={[styles.field, { backgroundColor: C.bgRecessed, borderColor: C.rule }]}>
-                  <Search size={17} strokeWidth={2} color={C.ink3} />
-                  <TextInput
-                    value={query}
-                    onChangeText={setQuery}
-                    placeholder="Song, artist, anything"
-                    placeholderTextColor={C.ink3}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    returnKeyType="search"
-                    accessibilityLabel="Search for a track"
-                    style={[styles.fieldInput, { color: C.ink }]}
-                  />
+              <View style={styles.head}>
+                <View style={styles.headMeta}>
+                  <Text numberOfLines={1} style={[styles.headTitle, { color: C.ink }]}>
+                    {pending ? 'Confirm the match' : 'Add a track'}
+                  </Text>
+                  <Text numberOfLines={1} style={[styles.headKicker, { color: C.ink3 }]}>
+                    {kicker}
+                  </Text>
                 </View>
-              </View>
-            )}
 
-            {pending ? (
-              <CandidatePicker
-                resolution={pending}
-                onConfirm={handleConfirm}
-                onSkip={handleSkipConfirmation}
-              />
-            ) : search.isSearching && search.results.length === 0 ? (
-              <View style={styles.list}>
-                {Array.from({ length: SKELETON_ROWS }, (_, index) => (
-                  <ResultSkeleton key={index} />
-                ))}
+                <CircleIconButton
+                  icon={X}
+                  onPress={handleRequestClose}
+                  accessibilityLabel="Close"
+                  size={TOUCH_TARGET}
+                  tone="surface"
+                />
               </View>
-            ) : (
-              <FlatList
-                data={search.results}
-                renderItem={renderItem}
-                keyExtractor={searchKeyExtractor}
-                keyboardShouldPersistTaps="handled"
-                showsVerticalScrollIndicator={false}
-                contentContainerStyle={styles.list}
-                ListEmptyComponent={
-                  search.error ? (
-                    <SearchNotice
-                      icon={Search}
-                      title="Search is having a moment"
-                      body={search.error.message}
-                      actionIcon={RotateCw}
-                      actionLabel="Try again"
-                      onPress={handleRetry}
+
+              {pending ? null : (
+                <View style={styles.fieldSlot}>
+                  <View
+                    style={[styles.field, { backgroundColor: C.bgRecessed, borderColor: C.rule }]}>
+                    <Search size={17} strokeWidth={2} color={C.ink3} />
+                    <TextInput
+                      value={query}
+                      onChangeText={setQuery}
+                      placeholder="Song, artist, anything"
+                      placeholderTextColor={C.ink3}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      returnKeyType="search"
+                      accessibilityLabel="Search for a track"
+                      style={[styles.fieldInput, { color: C.ink }]}
                     />
-                  ) : search.isIdle ? (
-                    <SearchNotice
-                      icon={Music}
-                      title="What are we listening to?"
-                      body={`Searching ${
-                        search.provider === 'spotify' ? 'Spotify' : 'YouTube'
-                      }. Type a song or an artist.`}
-                    />
-                  ) : search.isEmpty ? (
-                    <SearchNotice
-                      icon={Search}
-                      title="Nothing matched"
-                      body="Try the artist name, or fewer words."
-                    />
-                  ) : null
-                }
-              />
-            )}
+
+                    {searchingOverResults ? (
+                      <ActivityIndicator size="small" color={C.ink3} />
+                    ) : query.length > 0 ? (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Clear the search"
+                        hitSlop={(TOUCH_TARGET - CLEAR_TILE) / 2}
+                        onPress={handleClearQuery}
+                        style={({ pressed }) => [
+                          styles.clear,
+                          { backgroundColor: pressed ? C.surface3 : C.surface2 },
+                        ]}>
+                        <X size={14} strokeWidth={2.4} color={C.ink2} />
+                      </Pressable>
+                    ) : null}
+                  </View>
+                </View>
+              )}
+
+              {pending ? (
+                <CandidatePicker
+                  resolution={pending}
+                  onConfirm={handleConfirm}
+                  onSkip={handleSkipConfirmation}
+                />
+              ) : search.isSearching && search.results.length === 0 ? (
+                <View style={styles.list}>
+                  {Array.from({ length: SKELETON_ROWS }, (_, index) => (
+                    <ResultSkeleton key={index} />
+                  ))}
+                </View>
+              ) : (
+                <FlatList
+                  data={search.results}
+                  renderItem={renderItem}
+                  keyExtractor={searchKeyExtractor}
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}
+                  contentContainerStyle={styles.list}
+                  ListEmptyComponent={
+                    search.error ? (
+                      <EmptyState
+                        icon={WifiOff}
+                        title="Search is having a moment"
+                        description={search.error.message}
+                        primary={{ label: 'Try again', onPress: handleRetry }}
+                      />
+                    ) : search.isIdle ? (
+                      <EmptyState
+                        icon={Music}
+                        title="What are we listening to?"
+                        description={`Searching ${
+                          search.provider === 'spotify' ? 'Spotify' : 'YouTube'
+                        }. Type a song or an artist.`}
+                      />
+                    ) : search.isEmpty ? (
+                      <EmptyState
+                        icon={SearchX}
+                        title="Nothing matched"
+                        description="Try the artist name, or fewer words."
+                      />
+                    ) : null
+                  }
+                />
+              )}
+            </BlurView>
           </View>
         </KeyboardAvoidingView>
       </View>
@@ -342,6 +420,8 @@ type SearchRowProps = {
 const SearchRow = memo(function SearchRow({ result, busy, onPick }: SearchRowProps) {
   const C = useColors();
 
+  const handlePress = useCallback(() => onPick(result), [onPick, result]);
+
   return (
     <Pressable
       accessibilityRole="button"
@@ -349,106 +429,80 @@ const SearchRow = memo(function SearchRow({ result, busy, onPick }: SearchRowPro
       accessibilityHint={providerLine(result.provider)}
       accessibilityState={{ busy }}
       disabled={busy}
-      onPress={() => onPick(result)}
-      style={({ pressed }) => [
-        styles.row,
-        { backgroundColor: pressed ? C.surface2 : C.surface },
-        raised(C),
-      ]}>
-      <View style={[styles.well, { backgroundColor: C.bgRecessed, borderColor: C.rule }]}>
-        {result.artworkUrl ? (
-          <Image
-            source={{ uri: result.artworkUrl }}
-            style={StyleSheet.absoluteFill}
-            contentFit="cover"
-            cachePolicy="memory-disk"
-            placeholder={{ blurhash: BLURHASH_SURFACE }}
-            accessibilityIgnoresInvertColors
-          />
-        ) : (
-          <Text style={[styles.wellInitial, { color: C.ink3 }]}>{initialFor(result.title)}</Text>
-        )}
-      </View>
+      onPress={handlePress}>
+      {({ pressed }) => (
+        // `solid` because this row is inside the sheet's BlurView — see the
+        // header. `row` is the design's radius-18, shadowless list card.
+        <GlassCard variant="row" solid style={[styles.row, pressed && styles.rowHeld]}>
+          {/*
+            A dark WELL with a faint monogram. Artwork inverted in this
+            direction, so nothing here may assume a bright tile: the monogram is
+            `artInk` on `artwork`, not dark ink on a light plate.
+          */}
+          <View style={[styles.well, { backgroundColor: C.artwork, borderColor: C.rule }]}>
+            {result.artworkUrl ? (
+              <Image
+                source={{ uri: result.artworkUrl }}
+                style={StyleSheet.absoluteFill}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                placeholder={{ blurhash: BLURHASH_SURFACE }}
+                accessibilityIgnoresInvertColors
+              />
+            ) : (
+              <Text style={[styles.wellInitial, { color: C.artInk }]}>
+                {initialFor(result.title)}
+              </Text>
+            )}
+          </View>
 
-      <View style={styles.meta}>
-        <Text numberOfLines={1} style={[styles.title, { color: C.ink }]}>
-          {result.title}
-        </Text>
-        <Text numberOfLines={1} style={[styles.artist, { color: C.ink2 }]}>
-          {result.artist}
-        </Text>
-        <Text numberOfLines={1} style={[styles.provider, { color: C.ink3 }]}>
-          {providerLine(result.provider)}
-        </Text>
-      </View>
+          <View style={styles.meta}>
+            <Text numberOfLines={1} style={[styles.title, { color: C.ink }]}>
+              {result.title}
+            </Text>
+            <Text numberOfLines={1} style={[styles.artist, { color: C.ink2 }]}>
+              {result.artist}
+            </Text>
+            {/*
+              The duration joins the provider line rather than getting a column
+              of its own: it is what catches the hour-long upload of a
+              three-minute song before it lands in someone else's Session.
+            */}
+            <Text numberOfLines={1} style={[styles.provider, { color: C.ink3 }]}>
+              {`${providerLine(result.provider)} · ${formatClock(result.durationMs)}`}
+            </Text>
+          </View>
 
-      <View style={[styles.addWell, { backgroundColor: C.bgRecessed, borderColor: C.rule }]}>
-        {busy ? (
-          <ActivityIndicator size="small" color={C.ink2} />
-        ) : (
-          <Plus size={17} strokeWidth={2.4} color={C.ink2} />
-        )}
-      </View>
+          {/*
+            BLUE, because adding is an ACTION — the artboard's coral wash here
+            (L1231) predates the two-accent split and would have said "this
+            result is live", which is not a thing a search result can be.
+
+            Not a `CircleIconButton`: the whole row is the button, and a second
+            pressable inside it would split one 64px target into two.
+          */}
+          <View style={[styles.addDisc, { backgroundColor: C.pill }]}>
+            {busy ? (
+              <ActivityIndicator size="small" color={C.pillInk} />
+            ) : (
+              <Plus size={17} strokeWidth={2.4} color={C.pillInk} />
+            )}
+          </View>
+        </GlassCard>
+      )}
     </Pressable>
   );
 });
 
 const ResultSkeleton = memo(function ResultSkeleton() {
-  const C = useColors();
-
   return (
-    <View style={[styles.row, { backgroundColor: C.surface }, raised(C)]}>
-      <Skeleton width={WELL} height={WELL} style={styles.wellSkeleton} />
-      <View style={styles.meta}>
-        <Skeleton width="70%" height={14} style={styles.lineSkeleton} />
-        <Skeleton width="45%" height={11} style={styles.lineSkeleton} />
+    <GlassCard variant="row" solid style={styles.row}>
+      <Skeleton width={WELL} height={WELL} radius={WELL_RADIUS} />
+      <View style={styles.metaSkeleton}>
+        <Skeleton width="70%" height={14} radius={Radii.xs} />
+        <Skeleton width="45%" height={11} radius={Radii.xs} />
       </View>
-    </View>
-  );
-});
-
-// ------------------------------------------------------------- notices
-
-type SearchNoticeProps = {
-  icon: typeof Music;
-  title: string;
-  body: string;
-  actionIcon?: typeof RotateCw;
-  actionLabel?: string;
-  onPress?: () => void;
-};
-
-const SearchNotice = memo(function SearchNotice({
-  icon: Icon,
-  title,
-  body,
-  actionIcon: ActionIcon,
-  actionLabel,
-  onPress,
-}: SearchNoticeProps) {
-  const C = useColors();
-
-  return (
-    <View style={[styles.notice, { backgroundColor: C.surface }, raised(C)]}>
-      <Icon size={20} strokeWidth={2} color={C.ink3} />
-      <Text style={[styles.noticeTitle, { color: C.ink }]}>{title}</Text>
-      <Text style={[styles.noticeBody, { color: C.ink2 }]}>{body}</Text>
-
-      {onPress && actionLabel ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={actionLabel}
-          onPress={onPress}
-          style={({ pressed }) => [
-            styles.noticeAction,
-            { backgroundColor: C.pill },
-            pressed ? styles.dim : null,
-          ]}>
-          {ActionIcon ? <ActionIcon size={15} strokeWidth={2.4} color={C.pillInk} /> : null}
-          <Text style={[styles.noticeActionLabel, { color: C.pillInk }]}>{actionLabel}</Text>
-        </Pressable>
-      ) : null}
-    </View>
+    </GlassCard>
   );
 });
 
@@ -460,57 +514,102 @@ type CandidatePickerProps = {
   onSkip: () => void;
 };
 
+/**
+ * The one screen in the app where a human is asked to do the resolver's job.
+ *
+ * The kicker is `ink3`, not coral (L1234 agrees). Coral in this direction means
+ * live, playing, in sync — a state of the world, not a warning — and there is
+ * no warn colour in the palette on purpose. A low-confidence match is a
+ * measurement, and it is printed as one: the scorer's own percentage, tabular,
+ * beside each option.
+ */
 function CandidatePicker({ resolution, onConfirm, onSkip }: CandidatePickerProps) {
   const C = useColors();
   const candidates = resolution.candidates.slice(0, MAX_CANDIDATES);
 
   return (
-    <View style={styles.picker}>
-      <Text style={[styles.pickerKicker, { color: C.liveText }]}>Low-confidence match</Text>
-      <Text style={[styles.pickerBody, { color: C.ink2 }]}>
-        {`Pick the right recording so Spotify and YouTube listeners hear the same "${resolution.track.title}".`}
-      </Text>
+    /*
+      A ScrollView rather than a plain View, and rather than a FlatList: three
+      candidates is not a feed, but a long track title wrapping to two lines
+      inside a short sheet used to push the escape hatch under the bottom edge
+      where nothing could reach it.
+    */
+    <ScrollView
+      style={styles.pickerScroll}
+      contentContainerStyle={styles.picker}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}>
+      <GlassCard solid>
+        <Text style={[styles.pickerKicker, { color: C.ink3 }]}>Low-confidence match</Text>
+        <Text style={[styles.pickerBody, { color: C.ink2 }]}>
+          {`Pick the right recording so Spotify and YouTube listeners hear the same "${resolution.track.title}".`}
+        </Text>
 
-      <View style={styles.candidates}>
-        {candidates.map((candidate) => (
-          <Pressable
-            key={`${candidate.provider}:${candidate.providerId}`}
-            accessibilityRole="button"
-            accessibilityLabel={`Use ${candidate.title} by ${candidate.artist}, ${Math.round(
-              candidate.score * 100
-            )} percent match`}
-            onPress={() => onConfirm(candidate)}
-            style={({ pressed }) => [
-              styles.candidate,
-              { backgroundColor: pressed ? C.surface2 : C.surface },
-              raised(C),
-            ]}>
-            <Text numberOfLines={2} style={[styles.candidateLabel, { color: C.ink }]}>
-              {`${candidate.title} · ${formatClock(candidate.durationMs)} · `}
-              <Text style={[styles.candidateScore, { color: C.ink3 }]}>
-                {`${Math.round(candidate.score * 100)}% match`}
-              </Text>
-            </Text>
-          </Pressable>
-        ))}
+        <View style={styles.candidates}>
+          {candidates.map((candidate) => (
+            <CandidateRow
+              key={`${candidate.provider}:${candidate.providerId}`}
+              candidate={candidate}
+              onConfirm={onConfirm}
+            />
+          ))}
+        </View>
+      </GlassCard>
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="None of these — queue it anyway"
+      {/*
+        The escape hatch sits OUTSIDE the card, because it is not one more
+        candidate — it declines the whole question and queues the track on the
+        provider it already plays on. It used to be a fourth row in the same
+        stack wearing the same shape as the three real options, which is how a
+        decline ends up being read as a choice.
+      */}
+      <View style={styles.skipSlot}>
+        <AuxButton
+          label="None of these — queue it anyway"
           onPress={onSkip}
-          style={({ pressed }) => [
-            styles.candidate,
-            styles.candidateQuiet,
-            { backgroundColor: C.bgRecessed, borderColor: pressed ? C.rule3 : C.rule },
-          ]}>
-          <Text style={[styles.candidateLabel, { color: C.ink2 }]}>
-            None of these — queue it anyway
-          </Text>
-        </Pressable>
+          variant="bordered"
+          size="md"
+          align="center"
+          fullWidth
+        />
       </View>
-    </View>
+    </ScrollView>
   );
 }
+
+type CandidateRowProps = {
+  candidate: TrackMatchCandidate;
+  onConfirm: (candidate: TrackMatchCandidate) => void;
+};
+
+const CandidateRow = memo(function CandidateRow({ candidate, onConfirm }: CandidateRowProps) {
+  const C = useColors();
+  const percent = Math.round(candidate.score * 100);
+
+  const handlePress = useCallback(() => onConfirm(candidate), [onConfirm, candidate]);
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Use ${candidate.title} by ${candidate.artist}, ${percent} percent match`}
+      onPress={handlePress}
+      style={({ pressed }) => [
+        styles.candidate,
+        {
+          backgroundColor: pressed ? C.surface2 : C.bgRecessed,
+          // Choosing one is an action, so the edge that answers the finger is
+          // the action colour. The artboard lights it coral (L1238), which
+          // would say "this candidate is playing".
+          borderColor: pressed ? C.pill : C.rule,
+        },
+      ]}>
+      <Text numberOfLines={2} style={[styles.candidateLabel, { color: C.ink }]}>
+        {`${candidate.title} · ${formatClock(candidate.durationMs)} · `}
+        <Text style={[styles.candidateScore, { color: C.ink3 }]}>{`${percent}% match`}</Text>
+      </Text>
+    </Pressable>
+  );
+});
 
 const styles = StyleSheet.create({
   scrim: {
@@ -521,22 +620,31 @@ const styles = StyleSheet.create({
     // 82% rather than full height: the strip of scrim above is the affordance
     // that says "this is a sheet you can dismiss".
     maxHeight: '82%',
+    /* L1166's `margin:0 10px`. It lives on the PARENT rather than as a margin
+       on the sheet, because the sheet is `width:'100%'` and a margin would put
+       it 20px wider than the screen. */
+    paddingHorizontal: Space.sm + 2,
   },
-  sheet: {
+  /** Carries the shadow and the placement. The glass below carries the skin. */
+  shell: {
     flex: 1,
     width: '100%',
     maxWidth: 480,
     alignSelf: 'center',
-    borderTopLeftRadius: SheetMetrics.radius,
-    borderTopRightRadius: SheetMetrics.radius,
+    borderRadius: SheetMetrics.radius,
   },
-  dim: {
-    opacity: 0.7,
+  glass: {
+    flex: 1,
+    minHeight: 0,
+    overflow: 'hidden',
+    borderRadius: SheetMetrics.radius,
+    borderWidth: Rule.hair,
   },
 
   // ----------------------------------------------------------------- head
   grabberSlot: {
-    paddingTop: Space.md + 2,
+    paddingTop: Space.md - 2,
+    paddingBottom: Space.sm,
     alignItems: 'center',
   },
   grabber: {
@@ -548,8 +656,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Space.md,
-    paddingHorizontal: Space.xxl - 2,
-    paddingTop: Space.lg + 2,
+    paddingHorizontal: Space.xl,
+    paddingTop: Space.xs,
     paddingBottom: Space.md,
   },
   headMeta: {
@@ -557,21 +665,14 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   headTitle: {
-    ...Type.display(20),
-    letterSpacing: tracking(20, -0.025),
+    ...Type.display(18),
+    letterSpacing: tracking(18, -0.015),
   },
-  headSubtitle: {
-    ...Type.body(12.5),
+  /** L1220: the kicker under a sheet title is uppercase, not a sentence. */
+  headKicker: {
+    ...Type.label(10),
+    letterSpacing: tracking(10, 0.08),
     marginTop: 3,
-  },
-  closeTile: {
-    width: CLOSE_TILE,
-    height: CLOSE_TILE,
-    flexGrow: 0,
-    flexShrink: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: Radii.sm,
   },
 
   // ---------------------------------------------------------------- field
@@ -584,8 +685,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Space.sm + 2,
     height: FIELD_HEIGHT,
-    paddingHorizontal: Space.md + 2,
-    borderRadius: Radii.md + 1,
+    paddingHorizontal: Space.lg,
+    borderRadius: Radii.pill,
     borderWidth: Rule.hair,
   },
   fieldInput: {
@@ -594,6 +695,15 @@ const styles = StyleSheet.create({
     minWidth: 0,
     padding: 0,
   },
+  clear: {
+    width: CLEAR_TILE,
+    height: CLEAR_TILE,
+    flexGrow: 0,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radii.pill,
+  },
 
   // ------------------------------------------------------------- results
   list: {
@@ -601,13 +711,24 @@ const styles = StyleSheet.create({
     paddingBottom: Space.xxl,
     gap: Space.sm + 1,
   },
+  /**
+   * Layout only — fill, edge and corner belong to `GlassCard`. `minHeight` is
+   * the row's touch target: the whole card is one press.
+   */
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Space.md + 2,
+    gap: Space.md,
     minHeight: TOUCH_TARGET + Space.md,
-    padding: Space.md - 1,
-    borderRadius: Radii.button,
+  },
+  /**
+   * `GlassCard` owns its own fill, so a press cannot step the surface up the
+   * way the hand-rolled row this replaced did. Dimming is the feedback the
+   * kit's gradient buttons already give, and it keeps the skin in one place.
+   * A touch deeper than their 0.9 — a full-width card barely reads at that.
+   */
+  rowHeld: {
+    opacity: 0.85,
   },
   well: {
     width: WELL,
@@ -620,74 +741,54 @@ const styles = StyleSheet.create({
     borderRadius: WELL_RADIUS,
     borderWidth: Rule.hair,
   },
-  wellSkeleton: {
-    borderRadius: WELL_RADIUS,
-  },
-  lineSkeleton: {
-    borderRadius: Radii.xs,
-  },
   wellInitial: {
-    ...readout(15),
+    ...readout(17),
   },
   meta: {
     flex: 1,
     minWidth: 0,
-    gap: 2,
+    gap: 1,
+  },
+  /**
+   * A `Skeleton` is exactly as tall as its `height`, where the text it stands
+   * in for carries a line box. At the row's own 1px gap the two blocks touch
+   * and read as one bar, so the placeholder takes the optical gap instead.
+   */
+  metaSkeleton: {
+    flex: 1,
+    minWidth: 0,
+    gap: Space.sm,
   },
   title: {
     fontFamily: Fonts.semibold,
-    fontSize: 14,
-    letterSpacing: tracking(14, -0.01),
+    fontSize: 15,
+    letterSpacing: tracking(15, -0.01),
   },
   artist: {
-    ...Type.body(12),
+    ...Type.body(11.5),
   },
   provider: {
-    ...Type.label(9.5),
-    letterSpacing: tracking(9.5, 0.11),
-    marginTop: 1,
+    ...Type.label(9),
+    letterSpacing: tracking(9, 0.09),
+    marginTop: 3,
   },
-  addWell: {
-    width: 36,
-    height: 36,
+  addDisc: {
+    width: ADD_DISC,
+    height: ADD_DISC,
     flexGrow: 0,
     flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: Radii.sm,
-    borderWidth: Rule.hair,
-  },
-
-  // ------------------------------------------------------------- notices
-  notice: {
-    alignItems: 'flex-start',
-    gap: Space.sm,
-    padding: Space.lg,
-    borderRadius: Radii.lg,
-  },
-  noticeTitle: {
-    ...Type.heading(15),
-  },
-  noticeBody: {
-    ...Type.body(13),
-    maxWidth: 380,
-  },
-  noticeAction: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space.sm - 2,
-    marginTop: Space.xs,
-    minHeight: TOUCH_TARGET,
-    paddingHorizontal: Space.lg,
-    borderRadius: Radii.sm,
-  },
-  noticeActionLabel: {
-    fontFamily: Fonts.semibold,
-    fontSize: 13,
-    letterSpacing: tracking(13, 0.02),
+    // Computed rather than `Radii.pill`: Android clips a 999 radius unevenly on
+    // some diameters, which shows as a flat spot on a small circle.
+    borderRadius: ADD_DISC / 2,
   },
 
   // ----------------------------------------------------------- candidates
+  pickerScroll: {
+    flex: 1,
+    minHeight: 0,
+  },
   picker: {
     paddingHorizontal: GUTTER,
     paddingBottom: Space.xxl,
@@ -702,22 +803,23 @@ const styles = StyleSheet.create({
   },
   candidates: {
     marginTop: Space.md,
-    gap: Space.sm + 1,
+    gap: Space.sm,
   },
   candidate: {
-    minHeight: TOUCH_TARGET + Space.sm,
+    minHeight: TOUCH_TARGET,
     justifyContent: 'center',
     paddingHorizontal: Space.md + 2,
-    paddingVertical: Space.md - 2,
-    borderRadius: Radii.button,
-  },
-  candidateQuiet: {
+    paddingVertical: Space.sm + 2,
+    borderRadius: Radii.md,
     borderWidth: Rule.hair,
   },
   candidateLabel: {
-    ...Type.body(13),
+    ...Type.body(12.5),
   },
   candidateScore: {
     ...TABULAR,
+  },
+  skipSlot: {
+    marginTop: Space.md,
   },
 });

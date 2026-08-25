@@ -1,12 +1,38 @@
 /**
- * A direct-message thread. Design canvas: `data-screen-label="Thread"`.
+ * A direct-message thread. Design: `design/nocturne/aux-nocturne.dc.html`
+ * L720-793 (`isDm`).
  *
- * Header: back tile, avatar, name, and a live dot with the status under it.
- * The log below is an `inverted` FlatList of memoised bubbles with day
- * separators and 5-minute run grouping — the same machinery the lounge chat
- * uses, because a DM is a chat log with two people in it.
+ * Header: a glass back circle, the person (avatar with its punched presence
+ * dot, name, and a tracked status word under it), and the search toggle. The
+ * log below is an `inverted` FlatList of memoised bubbles with day separators
+ * and 5-minute run grouping — the same machinery the lounge chat uses, because
+ * a DM is a chat log with two people in it.
  *
- * Three things worth knowing before changing this:
+ * THE COMPOSER VERSUS THE NAV CAPSULE, WHICH IS THE ONE REAL LAYOUT PROBLEM ON
+ * THIS SCREEN.
+ *
+ * The artboard sits its composer flush against the bottom of the frame and
+ * shows no navigation at all — its thread hides the dock. Ours cannot: the nav
+ * capsule belongs to the `(tabs)` navigator, it is rendered ABOVE every scene
+ * in the group, and this route is a sibling of the four destinations rather
+ * than a screen in its own stack. Nothing a screen can draw goes over it, and
+ * the custom `NavBar` reads neither `tabBarStyle` nor the descriptors, so there
+ * is no per-screen switch to throw from here either.
+ *
+ * So THE COMPOSER CLEARS IT, exactly as the lounge's chat segment does — the
+ * same problem, and two screens in the group answering it two different ways
+ * would be worse than either answer. The bar is lifted by `useDockReserveLess`,
+ * which puts its content 16px clear of the capsule's top edge and leaves the
+ * capsule floating over live ground it can actually blur. The lift collapses the
+ * moment the keyboard opens, because the keyboard covers the capsule anyway and
+ * a composer still holding that clearance would float in the middle of the
+ * screen.
+ *
+ * (The alternative — hiding the capsule on this route — is the better end state
+ * and it is a one-line change, but it lives in `nav-bar.tsx`, which this screen
+ * does not own. It is written up in the report.)
+ *
+ * Three other things worth knowing before changing this:
  *
  *  1. **Inverted means "older is the NEXT index."** Runs and day boundaries are
  *     measured against `messages[index + 1]`. Getting it backwards is the
@@ -21,7 +47,9 @@
  *     the cache rather than querying.
  *
  * The bubbles and the composer are `@/components/dm` components and are styled
- * there, not here.
+ * there, not here. The artboard's call and video buttons are deliberately not
+ * drawn: there is no call feature behind them, and chrome for a feature that
+ * does not exist is worse than an incomplete header.
  */
 
 import { router, useLocalSearchParams } from 'expo-router';
@@ -30,6 +58,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Keyboard,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -40,21 +70,17 @@ import {
   type NativeSyntheticEvent,
   type TextStyle,
 } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useEnterStyle } from '@/components/auth/onboarding';
 import { ChatNotice, LogStart, styles as kit } from '@/components/chat/bubble-kit';
 import { DmAttachSheet, type AttachOption } from '@/components/dm/attach-sheet';
 import { DmComposer } from '@/components/dm/composer';
 import { MessageBubble } from '@/components/dm/message-bubble';
 import { type MentionCandidate } from '@/components/dm/mention-picker';
 import { DmRecordSheet, type VoiceNoteDraft } from '@/components/dm/record-sheet';
-import { Avatar, Skeleton, useToast } from '@/components/ui';
+import { Avatar, CircleIconButton, Skeleton, useToast } from '@/components/ui';
 import {
   useDmSubscription,
   useInbox,
@@ -65,15 +91,14 @@ import {
   type DmAuthor,
   type DmMessage,
 } from '@/features/dm';
+import { useDockReserveLess } from '@/lib/dock';
 import {
-  Duration,
   Fonts,
   Radii,
   Rule,
   Space,
   TOUCH_TARGET,
   Type,
-  raised,
   tracking,
 } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
@@ -89,14 +114,28 @@ const IDLE_MS = 15 * 60_000;
 /** Inverted: offset 0 is the newest message. This much slack still counts. */
 const AT_BOTTOM_PX = 24;
 
-const HEADER_AVATAR = 40;
-const TILE = 38;
-const TILE_SLOP = { top: 3, bottom: 3, left: 6, right: 6 };
+/** The body gutter, shared with the inbox and with the bubble rows. */
+const GUTTER = 18;
+
+/** L725: the header avatar is one step down from the inbox's. */
+const HEADER_AVATAR = 36;
+/** L722 / L730: every circle in this header is the 44px glass chip. */
+const CHIP = 44;
 
 /** `Type.readout` hands back a readonly fontVariant tuple; TextStyle wants a mutable one. */
 const readout = (size: number): TextStyle => ({
   ...Type.readout(size),
   fontVariant: ['tabular-nums'],
+});
+
+/**
+ * The badge voice — 800, uppercase, widely tracked (L728). `Type.label` has the
+ * case and the tracking at 600, which goes soft under a 15px name.
+ */
+const badge = (size: number, em: number): TextStyle => ({
+  ...Type.heading(size),
+  letterSpacing: tracking(size, em),
+  textTransform: 'uppercase',
 });
 
 type Decorated = {
@@ -204,6 +243,43 @@ function presenceOf(author: DmAuthor | null): Presence {
   return { label: 'Offline', live: false };
 }
 
+/**
+ * Is the soft keyboard up?
+ *
+ * The composer's clearance over the floating nav capsule has to collapse while
+ * the keyboard covers that capsule — see the note at the top of the file. This
+ * is that condition.
+ *
+ * `will*` on iOS so the lift collapses in step with the keyboard's own
+ * animation rather than a frame behind it; Android only emits `did*`. On
+ * react-native-web neither fires, which is correct — there is no overlay
+ * keyboard there and the lift should simply stay.
+ *
+ * A near-copy of the same hook in `lounge/[id].tsx`. Two chat surfaces in the
+ * tab group now need it; the third one that does should promote it to a shared
+ * module rather than making a third copy.
+ */
+function useKeyboardUp(): boolean {
+  const [up, setUp] = useState(false);
+
+  useEffect(() => {
+    const ios = Platform.OS === 'ios';
+    const show = Keyboard.addListener(ios ? 'keyboardWillShow' : 'keyboardDidShow', () =>
+      setUp(true),
+    );
+    const hide = Keyboard.addListener(ios ? 'keyboardWillHide' : 'keyboardDidHide', () =>
+      setUp(false),
+    );
+
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+
+  return up;
+}
+
 /** Everything in a message a conversation search should look at. */
 function haystack(message: DmMessage): string {
   return [
@@ -220,7 +296,6 @@ function haystack(message: DmMessage): string {
 export default function DmThreadScreen() {
   const C = useColors();
   const toast = useToast();
-  const reduced = useReducedMotion();
 
   const params = useLocalSearchParams<{ id: string }>();
   const conversationId = typeof params.id === 'string' && params.id ? params.id : null;
@@ -391,19 +466,29 @@ export default function DmThreadScreen() {
 
   // ---------------------------------------------------------------- entrance
 
-  const enter = useSharedValue(0);
-  useEffect(() => {
-    enter.value = reduced ? 1 : withTiming(1, { duration: Duration.enter });
-  }, [reduced, enter]);
-  const enterStyle = useAnimatedStyle(() => ({ opacity: enter.value }));
+  const enter = useEnterStyle();
+
+  /*
+    `DmComposer` adds `Space.md` of its own under whatever it is handed, so the
+    reservation goes in minus that step — the bar's content then ends exactly
+    one dock reserve off the bottom, 16px clear of the capsule's top edge. Zero
+    while the keyboard is up, which is when the capsule is behind it.
+
+    This was `insets.bottom + Dock.reserve - Space.md`, which was arithmetically
+    RIGHT and is only being rewritten because it was the lone caller that
+    remembered the inset. `useDockReserveLess` is that same sum with no way to
+    forget the addition, so the nine screens that got it wrong and this one that
+    got it right now share a single definition.
+  */
+  const keyboardUp = useKeyboardUp();
+  const dockLift = useDockReserveLess(Space.md);
+  const composerLift = keyboardUp ? 0 : dockLift;
 
   // ---------------------------------------------------------------- render
 
   if (!conversationId) {
     return (
-      <SafeAreaView
-        edges={['top', 'left', 'right']}
-        style={[styles.root, { backgroundColor: C.bg }]}>
+      <SafeAreaView edges={['top', 'left', 'right']} style={styles.root}>
         <View style={kit.noticeDock}>
           <ChatNotice
             label="That conversation is gone."
@@ -415,88 +500,94 @@ export default function DmThreadScreen() {
   }
 
   return (
-    <SafeAreaView edges={['top', 'left', 'right']} style={[styles.root, { backgroundColor: C.bg }]}>
-      <Animated.View style={[styles.flex, enterStyle]}>
+    /*
+      No ground colour on the root. The ambient blobs are painted once behind
+      the whole tab group and an opaque scene would cover them, leaving every
+      translucent surface on this screen with nothing to show through it.
+    */
+    <SafeAreaView edges={['top', 'left', 'right']} style={styles.root}>
+      <Animated.View style={[styles.flex, enter]}>
         <View style={styles.constrain}>
-          <View style={[styles.header, { borderBottomColor: C.rule }]}>
-            <Pressable
-              accessibilityRole="button"
+          {/*
+            No hairline under this header, which is a change. Nocturne separates
+            with light and glass rather than with rules, and the artboard's
+            header (L721) carries no border — the log cannot scroll under it
+            anyway, because the header is a flex sibling and not an overlay.
+          */}
+          <View style={styles.header}>
+            <CircleIconButton
+              icon={ChevronLeft}
+              size={CHIP}
+              tone="surface"
               accessibilityLabel="Back to messages"
-              hitSlop={TILE_SLOP}
               onPress={router.back}
-              style={({ pressed }) => [
-                styles.tile,
-                { backgroundColor: pressed ? C.surface2 : C.surface },
-                raised(C),
-              ]}>
-              <ChevronLeft size={20} strokeWidth={2.4} color={C.ink} />
-            </Pressable>
+            />
 
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`${name}${presence.label ? `, ${presence.label}` : ''}. Open profile`}
               onPress={openProfile}
-              style={({ pressed }) => [styles.identity, pressed && styles.dim]}>
-              <Avatar uri={other?.avatar_url} name={name} size={HEADER_AVATAR} />
+              style={({ pressed }) => [
+                styles.identity,
+                pressed && { backgroundColor: C.surface },
+              ]}>
+              {/* The dot is the avatar's own punched hole (L726), not a second
+                  mark beside the status word. */}
+              <Avatar
+                uri={other?.avatar_url}
+                name={name}
+                size={HEADER_AVATAR}
+                presence={presence.live}
+              />
 
               <View style={styles.identityText}>
                 <Text numberOfLines={1} style={[styles.name, { color: C.ink }]}>
                   {name}
                 </Text>
                 {presence.label ? (
-                  <View style={styles.statusLine}>
-                    {presence.live ? (
-                      <View style={[styles.statusDot, { backgroundColor: C.live }]} />
-                    ) : null}
-                    <Text
-                      numberOfLines={1}
-                      style={[styles.status, { color: presence.live ? C.liveText : C.ink3 }]}>
-                      {presence.label}
-                    </Text>
-                  </View>
+                  <Text
+                    numberOfLines={1}
+                    style={[styles.status, { color: presence.live ? C.liveText : C.ink3 }]}>
+                    {presence.label}
+                  </Text>
                 ) : handle ? (
-                  <Text numberOfLines={1} style={[styles.status, { color: C.ink3 }]}>
+                  <Text numberOfLines={1} style={[styles.handle, { color: C.ink3 }]}>
                     {handle}
                   </Text>
                 ) : null}
               </View>
             </Pressable>
 
-            <Pressable
-              accessibilityRole="button"
+            <CircleIconButton
+              icon={Search}
+              size={CHIP}
+              tone="surface"
               accessibilityLabel="Search this conversation"
-              accessibilityState={{ expanded: searchOpen }}
-              hitSlop={TILE_SLOP}
               onPress={toggleSearch}
-              style={({ pressed }) => [
-                styles.tile,
-                { backgroundColor: pressed || searchOpen ? C.surface2 : C.surface },
-                raised(C),
-              ]}>
-              <Search size={18} strokeWidth={2.2} color={searchOpen ? C.ink : C.ink2} />
-            </Pressable>
+            />
           </View>
 
           {searchOpen ? (
             <View style={styles.searchBar}>
               {/*
-                A 44px field gets `bgRecessed` and a hairline, NOT `pressed()`.
-                On a dark ground the light half of the inset pair is 3.2% alpha,
-                so at this size only the dark half lands and it reads as dirt.
-                This was already fixed once on the auth fields.
+                L738 makes this the glass pill — `surface` behind a `rule`
+                hairline at a full radius — where it used to be a recessed well.
+                Either way it is NOT `pressed()`: at 48px only the dark half of
+                the inset pair lands on a dark ground and it reads as dirt. That
+                was fixed once on the auth fields and must not come back.
               */}
-              <View
-                style={[
-                  styles.searchWell,
-                  { backgroundColor: C.bgRecessed, borderColor: C.rule },
-                ]}>
+              <View style={[styles.searchPill, { backgroundColor: C.surface, borderColor: C.rule }]}>
+                <Search size={17} strokeWidth={2} color={C.ink3} />
+
                 <TextInput
                   autoFocus
                   value={query}
                   onChangeText={setQuery}
-                  placeholder="Search"
+                  placeholder="Search this conversation"
                   placeholderTextColor={C.ink3}
-                  selectionColor={C.live}
+                  // The caret and the selection band are UI, not a live state —
+                  // blue, matching the rebuilt chat composer.
+                  selectionColor={C.pill}
                   accessibilityLabel="Search this conversation"
                   returnKeyType="search"
                   style={[styles.searchInput, { color: C.ink }]}
@@ -509,20 +600,20 @@ export default function DmThreadScreen() {
                     {visible.length}
                   </Text>
                 ) : null}
-              </View>
 
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Close search"
-                hitSlop={TILE_SLOP}
-                onPress={toggleSearch}
-                style={({ pressed }) => [
-                  styles.tile,
-                  { backgroundColor: pressed ? C.surface2 : C.surface },
-                  raised(C),
-                ]}>
-                <X size={17} strokeWidth={2.2} color={C.ink2} />
-              </Pressable>
+                {/*
+                  Inside the pill, as the artboard has it. A 44px target on a
+                  36px-tall glyph box, pulled 6px into the pill's own padding so
+                  the circle it makes stays centred in the cap.
+                */}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Close search"
+                  onPress={toggleSearch}
+                  style={({ pressed }) => [styles.searchClose, pressed && styles.dim]}>
+                  <X size={16} strokeWidth={2} color={C.ink2} />
+                </Pressable>
+              </View>
             </View>
           ) : null}
         </View>
@@ -595,10 +686,11 @@ export default function DmThreadScreen() {
             onSend={onSend}
             onAttach={openAttach}
             onRecord={openRecord}
-            placeholder="Message"
+            placeholder={handle ? `Message ${handle}` : 'Message'}
             sending={send.isPending}
             mentionPeople={mentionPeople}
             mentionScopeLabel="In this conversation"
+            bottomInset={composerLift}
           />
         </View>
       </Animated.View>
@@ -634,7 +726,7 @@ function ThreadSkeleton() {
         <View
           key={width}
           style={[styles.skeletonRow, index % 2 === 0 ? styles.alignStart : styles.alignEnd]}>
-          <Skeleton width={`${width}%`} height={44} radius={Radii.lg} />
+          <Skeleton width={`${width}%`} height={44} radius={Radii.xl} />
         </View>
       ))}
     </View>
@@ -661,22 +753,11 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 13,
-    paddingHorizontal: Space.xl,
-    paddingTop: Space.sm,
-    paddingBottom: 14,
-    borderBottomWidth: Rule.hair,
-  },
-  tile: {
-    width: TILE,
-    height: TILE,
-    flexShrink: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: Radii.sm,
-  },
-  dim: {
-    opacity: 0.6,
+    // L721: the header runs tighter than the body gutter, because four 44px
+    // circles across a phone have no width to spare.
+    gap: 9,
+    paddingHorizontal: 14,
+    paddingVertical: Space.md,
   },
   identity: {
     flex: 1,
@@ -684,7 +765,11 @@ const styles = StyleSheet.create({
     minHeight: TOUCH_TARGET,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 13,
+    gap: 10,
+    // L723: a pill-shaped target that fills with `surface` under the finger,
+    // rather than the whole block dimming.
+    paddingHorizontal: 6,
+    borderRadius: Radii.pill,
   },
   identityText: {
     flex: 1,
@@ -692,55 +777,58 @@ const styles = StyleSheet.create({
   },
   name: {
     fontFamily: Fonts.semibold,
-    fontSize: 15.5,
+    fontSize: 15,
     lineHeight: 20,
-    letterSpacing: tracking(15.5, -0.01),
-  },
-  statusLine: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    marginTop: 2,
-  },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: Radii.pill,
+    letterSpacing: tracking(15, -0.01),
   },
   status: {
-    fontFamily: Fonts.semibold,
-    fontSize: 11.5,
+    ...badge(9, 0.08),
+    marginTop: 2,
+  },
+  handle: {
+    ...Type.body(11.5),
     lineHeight: 15,
+    marginTop: 1,
+  },
+  dim: {
+    opacity: 0.6,
   },
 
   searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 11,
-    paddingHorizontal: Space.lg,
-    paddingVertical: Space.md,
+    paddingHorizontal: GUTTER,
+    paddingBottom: 10,
   },
-  searchWell: {
-    flex: 1,
-    minWidth: 0,
+  searchPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    height: TOUCH_TARGET,
-    borderRadius: Radii.md,
+    gap: 10,
+    minHeight: 48,
+    paddingLeft: 16,
+    // The close target hangs off the right end, so the pill's own padding
+    // stops early and the 44px box supplies the rest.
+    paddingRight: 2,
+    borderRadius: Radii.pill,
     borderWidth: Rule.hair,
   },
   searchInput: {
+    ...Type.body(15),
     flex: 1,
     minWidth: 0,
-    height: TOUCH_TARGET,
-    paddingHorizontal: 15,
-    fontFamily: Fonts.regular,
-    fontSize: 14.5,
+    alignSelf: 'stretch',
+    // Vertical padding rather than a fixed height: the pill's `minHeight` sets
+    // the shape and a stretched field keeps the caret centred inside it.
+    paddingVertical: Space.sm,
   },
   matchCount: {
     // A match count measures. Tabular figures.
     ...readout(12),
-    paddingRight: Space.md,
+  },
+  searchClose: {
+    width: TOUCH_TARGET,
+    height: TOUCH_TARGET,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   listContent: {

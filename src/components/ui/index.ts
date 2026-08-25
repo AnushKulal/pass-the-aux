@@ -45,10 +45,17 @@ export {
 export {
   GlassCard,
   Panel,
+  type GlassCardGlow,
   type GlassCardProps,
+  type GlassCardTone,
+  type GlassCardVariant,
   type PanelProps,
 } from '@/components/ui/glass-card';
-export { LivePulse, type LivePulseProps } from '@/components/ui/live-pulse';
+export {
+  LivePulse,
+  type LivePulseProps,
+  type LivePulseTempo,
+} from '@/components/ui/live-pulse';
 export { ProgressBar, type ProgressBarProps } from '@/components/ui/progress-bar';
 /*
   `Rule` is also the name of the weight table in '@/lib/theme'. A file that wants

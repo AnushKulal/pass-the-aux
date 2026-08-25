@@ -1,13 +1,20 @@
 /**
  * The circular icon button.
  *
- * One control, seven skins. It is the most-used piece of chrome in Apex: the
- * back chip in a header, the search toggle beside it, the play button sitting
- * on a piece of artwork, the 72px centre of a transport row. All of those were
- * hand-rolled square Pressables in Patchbay, each with its own padding and its
- * own idea of what "pressed" looks like.
+ * One control, eight skins. It is the most-used piece of chrome in the app: the
+ * back chip in a header, the search toggle beside it, the send button on a
+ * composer, the play button in a transport row, the centre of the nav dock.
  *
- * Two things are load-bearing here.
+ * Built from design/nocturne/aux-nocturne.dc.html — the glass chrome circle at
+ * L241 / L676 / L723, the gradient send at L494 / L789, the 66px play at L938 /
+ * L1022 and the 60px dock FAB at L881.
+ *
+ * THE ACCENT RULE DECIDES THE TONE, NOT THE OTHER WAY AROUND. `pri` is blue and
+ * it is what a play button, a send button and a FAB take, because all three are
+ * actions. `live` is coral and it is for a control that toggles a live STATE —
+ * the record button, going on air. A control is never both.
+ *
+ * Four things are load-bearing here.
  *
  * The SIZE is the diameter, never the touch target. 36 and 40 are legitimate
  * sizes in this design — a back chip beside a title cannot be 44px tall without
@@ -15,11 +22,20 @@
  * target outward with hitSlop instead. Shrinking the target to match the circle
  * is the one thing this component must never do.
  *
- * The TONE decides fill and glyph together, as a pair. They are never separate
- * props, because every legible combination is already in the table below, and a
- * caller picking its own two colours is how an accent ends up on a decoration.
+ * The TONE decides fill, edge and glyph together, as a set. They are never
+ * separate props, because every legible combination is already in the table
+ * below, and a caller picking its own colours is how an accent ends up on a
+ * decoration.
+ *
+ * The `surface` tone MUST keep its border. Its fill is 5.5% white; on the dark
+ * ground that is very nearly nothing, and the 1px `rule` edge is the entire
+ * reason the control has a shape.
+ *
+ * The `overlay` tone must stay near-opaque. It sits on album art, where a glass
+ * fill lets the artwork read straight through the glyph.
  */
 
+import { LinearGradient } from 'expo-linear-gradient';
 import type { LucideIcon } from 'lucide-react-native';
 import { useEffect, useState } from 'react';
 import {
@@ -42,32 +58,34 @@ import {
   DarkPalette,
   Duration,
   Radii,
+  Rule,
   Space,
   TOUCH_TARGET,
   Type,
-  bloom,
   type Palette,
 } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
 /** Diameter of the circle. Not the touch target — see the note on `slop`. */
-export type CircleIconButtonSize = 36 | 40 | 44 | 48 | 52 | 72;
+export type CircleIconButtonSize = 36 | 40 | 44 | 48 | 52 | 60 | 66 | 72;
 
 export type CircleIconButtonTone =
-  /** Raised chrome on the ground — the default. */
+  /** Glass chrome on the ground — the default. Fill plus a `rule` edge. */
   | 'surface'
   /** The quieter fill, for a control sitting inside an already-raised card. */
   | 'chip'
   /** On artwork. */
   | 'overlay'
-  /** RESERVED. Play, join, go live. */
+  /** THE ACTION: play, send, create. The gradient and the blue glow. */
+  | 'pri'
+  /** A live STATE being toggled — recording, going on air. */
   | 'live'
-  /** The inverted card's control. One per screen, same as the card. */
-  | 'cream'
   /** No fill at all, for a row where seven filled circles would be noise. */
   | 'ghost'
   /** Destructive. */
-  | 'danger';
+  | 'danger'
+  /** @deprecated resolves to `pri`; `cream` and `pill` are one colour now. */
+  | 'cream';
 
 export type CircleIconButtonProps = {
   icon: LucideIcon;
@@ -89,9 +107,9 @@ export type CircleIconButtonProps = {
  * Glyph size per diameter, as a table rather than a ratio.
  *
  * A ratio lands on odd numbers (52 * 0.45 = 23.4) and a lucide stroke on a
- * half-pixel grid renders soft. 52 matches the nav dock exactly, because a dock
- * cell and a header button of the same diameter that disagree about glyph size
- * read as a mistake rather than a decision.
+ * half-pixel grid renders soft. 60 matches `Dock.fabIcon` exactly, because a
+ * dock cell and a header button of the same diameter that disagree about glyph
+ * size read as a mistake rather than a decision.
  */
 const GLYPH: Record<CircleIconButtonSize, number> = {
   36: 16,
@@ -99,6 +117,8 @@ const GLYPH: Record<CircleIconButtonSize, number> = {
   44: 20,
   48: 22,
   52: 22,
+  60: 26,
+  66: 28,
   72: 30,
 };
 
@@ -117,12 +137,21 @@ const PRESS_FADE = 0.3;
 /** Matches the two badges already in the app: 15 on tight chrome, 18 elsewhere. */
 const badgeBox = (size: CircleIconButtonSize) => (size >= 48 ? 18 : 15);
 
-type Skin = { bg: string; fg: string; glow: boolean };
+type Skin = {
+  bg: string;
+  fg: string;
+  /** The 1px edge, or null. Only the glass tone has one. */
+  border: string | null;
+  /** Ends of the vertical gradient, drawn under the glyph, or null. */
+  gradient: readonly [string, string] | null;
+  /** Colour of the bloom under the circle, or null for no bloom. */
+  glow: string | null;
+};
 
 function skinFor(tone: CircleIconButtonTone, C: Palette): Skin {
   switch (tone) {
     case 'chip':
-      return { bg: C.chip, fg: C.ink2, glow: false };
+      return { bg: C.chip, fg: C.ink2, border: null, gradient: null, glow: null };
     case 'overlay':
       /*
         Deliberately NOT from `useColors()`. This tone exists to sit ON a
@@ -131,25 +160,51 @@ function skinFor(tone: CircleIconButtonTone, C: Palette): Skin {
         bright image. `DarkPalette` is the theme-invariant read of the same
         tokens, so this is still a token, only a pinned one.
 
-        `dock`, not `scrim`: the token comment calls `dock` "floating chrome,
-        over content", which is this exact job, while `scrim` is the 88% sheet
-        dimmer. `StatusPill`'s overlay tone reads the same token — the two are
-        routinely on the same piece of artwork, and a play button 6% darker
-        than the pill beside it reads as one of them being wrong.
+        `dock`, not `nav`: the two chrome fills look interchangeable and are
+        not. `nav` is translucent because it sits BEHIND a blur; `dock` is
+        near-opaque because it sits on artwork with no blur, which is this
+        exact job. `StatusPill`'s overlay tone reads the same token — the two
+        are routinely on the same piece of artwork, and a play button 20%
+        lighter than the pill beside it reads as one of them being wrong.
       */
-      return { bg: DarkPalette.dock, fg: DarkPalette.ink, glow: false };
-    case 'live':
-      return { bg: C.live, fg: C.onLive, glow: true };
+      return { bg: DarkPalette.dock, fg: DarkPalette.ink, border: null, gradient: null, glow: null };
+    case 'pri':
     case 'cream':
-      return { bg: C.cream, fg: C.onCream, glow: false };
+      return {
+        bg: C.pill,
+        fg: C.pillInk,
+        border: null,
+        gradient: [C.priTint, C.pill],
+        glow: C.glow,
+      };
+    case 'live':
+      /*
+        A CORAL fill takes a CORAL bloom. This used to hand `C.glow` to every
+        glowing tone, which is now the blue primary glow — a coral button
+        sitting in a blue halo, the one combination the accent rule forbids.
+      */
+      return { bg: C.live, fg: C.onLive, border: null, gradient: null, glow: C.glowSoft };
     case 'ghost':
-      return { bg: 'transparent', fg: C.ink2, glow: false };
+      return { bg: 'transparent', fg: C.ink2, border: null, gradient: null, glow: null };
     case 'danger':
-      return { bg: C.dangerWash, fg: C.danger, glow: false };
+      return { bg: C.dangerWash, fg: C.danger, border: C.dangerBorder, gradient: null, glow: null };
     case 'surface':
     default:
-      return { bg: C.surface, fg: C.ink, glow: false };
+      // L241: `background:var(--g);border:1px solid var(--gb)`. Both halves.
+      return { bg: C.surface, fg: C.ink, border: C.rule, gradient: null, glow: null };
   }
+}
+
+/**
+ * The bloom ladder, keyed to the diameter exactly as the artboards key it:
+ * `0 8px 18px` under the 44px send (L494), `0 12px 30px` under the 66px play
+ * (L938) and the 60px FAB (L881). A local ladder rather than `bloom()`, whose
+ * three steps were cut for artwork tiles — its `md` blur is 42px, which under a
+ * 44px button reads as fog rather than as light coming off the control.
+ */
+function glowFor(size: CircleIconButtonSize, color: string): object {
+  const [offsetY, blurRadius] = size >= 60 ? [12, 30] : size >= 48 ? [10, 24] : [8, 18];
+  return { boxShadow: [{ offsetX: 0, offsetY, blurRadius, color }] };
 }
 
 export function CircleIconButton({
@@ -170,7 +225,7 @@ export function CircleIconButton({
     The held flag is React state driving the shared values from an effect,
     rather than a write straight out of the press handler: the compiler treats a
     shared value as immutable outside an effect. Same trade as `AuxButton`,
-    `Chip` and `PhotoCard` — one extra render per press, and the whole kit
+    `Chip` and `SheetTabs` — one extra render per press, and the whole kit
     presses the same way.
 
     (The direct write this replaced lints clean only by accident: the old
@@ -216,12 +271,13 @@ export function CircleIconButton({
   const showBadge = badge !== undefined && badge > 0;
 
   /*
-    The badge INVERTS on the live tone. Everywhere else it is the accent doing
-    one of its reserved jobs, but accent-on-accent is an invisible badge, so on
-    a live fill the two colours simply swap.
+    The badge INVERTS on the two accent fills. Everywhere else it is coral doing
+    one of its reserved jobs, but coral-on-coral is an invisible badge, so on a
+    live fill the two colours simply swap.
   */
-  const badgeBg = tone === 'live' ? C.onLive : C.live;
-  const badgeFg = tone === 'live' ? C.live : C.onLive;
+  const onAccent = tone === 'live';
+  const badgeBg = onAccent ? C.onLive : C.live;
+  const badgeFg = onAccent ? C.live : C.onLive;
 
   return (
     <Pressable
@@ -241,12 +297,29 @@ export function CircleIconButton({
         style={[
           styles.circle,
           animated,
-          { width: size, height: size, backgroundColor: skin.bg },
-          /* The bloom scales with the button: a blur that reads as ambient
-             light at 72 reads as fog at 36. Same helper as the play circle and
-             the Session artwork, so one light lights the whole app. */
-          skin.glow ? bloom(C.glow, size >= 72 ? 'lg' : size >= 48 ? 'md' : 'sm') : null,
+          {
+            width: size,
+            height: size,
+            // Computed, not `Radii.pill`: Android clips a 999 radius unevenly
+            // on odd diameters, which shows as a flat spot on a 66px circle.
+            borderRadius: size / 2,
+            backgroundColor: skin.bg,
+            borderWidth: skin.border ? Rule.hair : 0,
+            borderColor: skin.border ?? 'transparent',
+          },
+          skin.glow ? glowFor(size, skin.glow) : null,
         ]}>
+        {/* Under the glyph. It carries its own radius rather than relying on a
+            clipping parent, which on Android would drop the bloom above. */}
+        {skin.gradient ? (
+          <LinearGradient
+            colors={skin.gradient}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 0, y: 1 }}
+            style={[StyleSheet.absoluteFill, { borderRadius: size / 2 }]}
+          />
+        ) : null}
+
         <Icon size={GLYPH[size]} strokeWidth={2} color={skin.fg} />
       </Animated.View>
 
@@ -256,9 +329,17 @@ export function CircleIconButton({
         can clip it on Android. It is a sibling of the animated circle rather
         than a child: a count that shrinks under the finger is unreadable at the
         exact moment you are most likely to be looking at it.
+
+        The `badgeRing` edge is what the token exists for (L884, `border:2px
+        solid var(--badge-ring)`): the badge often lands on glass or on artwork,
+        and a ring in the ground colour punches it clear of whatever is behind.
       */}
       {showBadge ? (
-        <View style={[styles.badge, { minWidth: box, height: box, backgroundColor: badgeBg }]}>
+        <View
+          style={[
+            styles.badge,
+            { minWidth: box, height: box, backgroundColor: badgeBg, borderColor: C.badgeRing },
+          ]}>
           <Text numberOfLines={1} style={[styles.badgeText, { lineHeight: box, color: badgeFg }]}>
             {badge > 99 ? '99+' : badge}
           </Text>
@@ -270,9 +351,11 @@ export function CircleIconButton({
 
 const styles = StyleSheet.create({
   circle: {
-    borderRadius: Radii.pill,
     alignItems: 'center',
     justifyContent: 'center',
+    // The gradient is an absolutely-positioned child, so the circle has to be
+    // its containing block.
+    position: 'relative',
   },
   badge: {
     position: 'absolute',
@@ -280,6 +363,7 @@ const styles = StyleSheet.create({
     right: 0,
     paddingHorizontal: Space.xs,
     borderRadius: Radii.pill,
+    borderWidth: Rule.major,
     alignItems: 'center',
     justifyContent: 'center',
   },

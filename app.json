@@ -7,7 +7,7 @@
     "icon": "./assets/images/icon.png",
     "scheme": "aux",
     "userInterfaceStyle": "automatic",
-    "backgroundColor": "#1e2128",
+    "backgroundColor": "#0a0d14",
     "ios": {
       "icon": "./assets/expo.icon",
       "supportsTablet": true
@@ -15,7 +15,7 @@
     "android": {
       "package": "com.anushkulal.aux",
       "adaptiveIcon": {
-        "backgroundColor": "#0f1216",
+        "backgroundColor": "#0a0d14",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -36,10 +36,10 @@
         {
           "image": "./assets/images/splash-icon-light.png",
           "imageWidth": 180,
-          "backgroundColor": "#f3f5f8",
+          "backgroundColor": "#eceef5",
           "dark": {
             "image": "./assets/images/splash-icon.png",
-            "backgroundColor": "#1e2128"
+            "backgroundColor": "#0a0d14"
           }
         }
       ],
@@ -55,13 +55,23 @@
       "eas": {
         "projectId": "3c252219-3619-434b-9ab4-f0931d09722a"
       },
-      "patch": 5,
+      "patch": 6,
       "releaseNotes": [
-        "Server moved to Mumbai — roughly six times faster than before",
-        "You will need to sign in again: this is a new database",
-        "Settings can now check for and install a new app build"
+        "A new look throughout: deeper background, glass navigation, and one colour reserved for what is live",
+        "Create a session from the button in the middle of the navigation bar",
+        "Mic, deafen and mute-one-person are on the session screen itself, not buried in a sheet",
+        "Direct messages have their own place in the navigation, with an unread count"
       ],
       "changelog": [
+        {
+          "patch": 6,
+          "notes": [
+            "A new look throughout: deeper background, glass navigation, and one colour reserved for what is live",
+            "Create a session from the button in the middle of the navigation bar",
+            "Mic, deafen and mute-one-person are on the session screen itself, not buried in a sheet",
+            "Direct messages have their own place in the navigation, with an unread count"
+          ]
+        },
         {
           "patch": 5,
           "notes": [

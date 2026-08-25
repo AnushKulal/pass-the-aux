@@ -1,12 +1,23 @@
 /**
- * Who is in the Session, and where each of them actually is.
+ * Who is in the Session, where each of them actually is, and the voice controls
+ * that belong to being in a room with them.
  *
- * Two views of the same fact, both exported from here because both are the
- * roster drawn against the drift ladder:
+ * From `design/nocturne/aux-nocturne.dc.html` — the roster card at L996–L1004
+ * (round avatar, name over metadata, right-aligned drift readout, a mic glyph
+ * at the thumb end), the per-member audio sheet at L1360–L1375, and the mic /
+ * deafen tiles at L1153 and L1294.
+ *
+ * Three things are exported, because all three are the roster:
+ *
+ *   `VoiceControls` — YOUR mic and YOUR deafen, as two tiles the size of a
+ *   thumb. It rides at the top of both lists and is exported on its own so a
+ *   screen can also put it above the fold, which is the point: these controls
+ *   used to live one tap deep inside a lobby sheet that had to be found first,
+ *   and a control nobody finds is a control that does not exist.
  *
  *   `ParticipantStrip` — the drift chart. One raised card per listener: avatar,
  *   name over rung, a ±400ms deviation plot against a centre axis, the drift
- *   readout, and the speaker glyph that says whether you are hearing them.
+ *   readout, and the mute button that says whether you are hearing them.
  *   This is the thing that makes the sync engine visible.
  *
  *   `SyncOrbit` — the same people plotted as distance from a centre. Rings at
@@ -14,16 +25,52 @@
  *   dial, never absolutely positioned inside it: a listener who lands in the
  *   bottom slot sits exactly where an inset legend would be.
  *
- * Both are FlatLists that take the rest of the screen as `header`/`footer`, so
- * the Session has exactly one scroller and the roster stays virtualised. Both
- * carry all four states — skeleton cards, an empty notice, an error with a
- * retry, and the roster itself.
+ * Both lists are FlatLists that take the rest of the screen as `header`/
+ * `footer`, so the Session has exactly one scroller and the roster stays
+ * virtualised. Both carry all four states — skeleton cards, an empty notice, an
+ * error with a retry, and the roster itself.
  *
- * MUTE IS THE ROW. Tapping anyone mutes them for you and nobody else, so the
- * affordance has to be visible before it is used: every row carries a speaker
- * glyph at the thumb end, the list is headed by the sentence that says what a
- * tap does, and a muted row keeps a filled well around that glyph so the state
- * survives a glance.
+ * EVERY CARD FILL IN HERE IS `surfaceSolid`, AND THAT IS A CORRECTION. (The
+ * one `surface` left is the dial core at :977, which is not a card: it sits
+ * in an opaque `bgRecessed` well and takes a `rule` edge for its shape.) The
+ * roster row, the skeleton row and the voice card all shipped on `surface`,
+ * which is 5.5% white. `ParticipantStrip` is mounted inside the Session's sync
+ * `<Sheet>` (src/app/room/[id].tsx:678), and that sheet is a `BlurView` — a
+ * 5.5%-white card laid over a blur has nothing to sit on and loses its edge
+ * completely. `SyncOrbit` sits on the plain Session ground rather than in a
+ * sheet, but its rows take the same fill for a reason that is not laziness:
+ * the roster row is ONE object drawn in two lists, and a row that changes fill
+ * depending on which list rendered it is the drift this pass exists to remove.
+ * `surfaceSolid` is the resolved composite of `surface` over `bg`, so the
+ * plain-ground case looks the same either way and the swap costs nothing.
+ *
+ * The dial core keeps `surface`: it is a disc inside an opaque `bgRecessed`
+ * well, not a card over glass, and its `rule` edge is already what gives it
+ * shape there.
+ *
+ * WHICH ACCENT MEANS WHAT HERE, since this file toggles four audio states and
+ * three of them could plausibly claim the same colour:
+ *
+ *   CORAL is audio FLOWING — your mic is open, someone is on aux, someone is in
+ *   sync. It is the direction's "this is happening right now" and nothing else
+ *   may take it.
+ *   `danger` is audio CUT — you are deafened, or you have muted someone. Both
+ *   are subtractive, both are states a person needs to notice and undo, and
+ *   neither is "happening".
+ *   Neutral (`surface2` + `ink2`) is the resting state — mic off. Muting
+ *   yourself is the ordinary, most common way to sit in a room; painting it
+ *   `danger` would make the default state read as an error and spend the
+ *   destruction colour on nothing.
+ *
+ * BLUE APPEARS EXACTLY ONCE in this file — the retry button on the error
+ * notice, which is the only genuine call to action here. Every other control is
+ * a state being toggled.
+ *
+ * MUTE IS A BUTTON, NOT A GESTURE. Tapping the round speaker at the thumb end
+ * mutes that person for you and nobody else. The row body is still pressable
+ * (it opens per-person controls where a screen provides them), but the mute
+ * affordance is its own 36px control with its own label, because a whole-row
+ * tap is invisible until someone happens to try it.
  *
  * HONESTY RULES, because the backend does not publish per-person milliseconds:
  *
@@ -41,8 +88,18 @@
  * needs to change.
  */
 
-import { Image } from 'expo-image';
-import { RotateCw, Users, Volume2, VolumeX } from 'lucide-react-native';
+import {
+  ChevronRight,
+  HeadphoneOff,
+  Headphones,
+  Mic,
+  MicOff,
+  SlidersHorizontal,
+  Users,
+  Volume2,
+  VolumeX,
+  type LucideIcon,
+} from 'lucide-react-native';
 import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   FlatList,
@@ -55,7 +112,7 @@ import {
   type ListRenderItemInfo,
 } from 'react-native';
 
-import { BLURHASH_SURFACE, Skeleton } from '@/components/ui';
+import { Avatar, CircleIconButton, EmptyState, Skeleton, StatusPill } from '@/components/ui';
 import {
   Fonts,
   PointerEvents,
@@ -97,8 +154,14 @@ const MARK_WIDTH = 3;
 const MARK_HEIGHT = 14;
 const SKELETON_ROWS = 3;
 const TICK_MS = 250;
-/** The speaker glyph's well. Sits inside a 44px row target, at the thumb end. */
-const SPEAKER = 32;
+/**
+ * The per-member mute button. 36 rather than 44 so it does not out-shout the
+ * 34px avatar at the other end of the row — `CircleIconButton` grows the touch
+ * target back to 44 with hitSlop, which costs no layout.
+ */
+const MUTE_BUTTON = 36;
+/** The mic / deafen tiles. Design L1294 runs 86px; 76 is what fits two-up here. */
+const VOICE_TILE = 76;
 
 /** The dial and its rings. */
 const DIAL_HEIGHT = 340;
@@ -170,11 +233,235 @@ function readingFor(isMe: boolean, isSynced: boolean, driftMs: number, C: Palett
   };
 }
 
+// -------------------------------------------------------------- your voice
+
+export type VoiceControlsProps = {
+  /** Your microphone is open and the room can hear you. */
+  micOn: boolean;
+  /** You have stopped hearing the room — which also stops it hearing you. */
+  deafened: boolean;
+  onToggleMic: () => void;
+  onToggleDeafen: () => void;
+  /**
+   * The rest of the lobby: voice settings, chat, the game table, screen share.
+   * The row is only drawn when a screen supplies the handler — a chevron that
+   * goes nowhere is worse than no chevron.
+   *
+   * The two tiles above it are the controls people reach for constantly; this
+   * is the door to everything they reach for once. Keeping that door labelled
+   * with what is behind it is why `moreHint` names the rooms rather than saying
+   * "more options".
+   */
+  onOpenMore?: () => void;
+  moreLabel?: string;
+  moreHint?: string;
+};
+
+/**
+ * Your own mic and deafen, at the top of the roster.
+ *
+ * WHY IT IS HERE AND NOT ONLY IN THE LOBBY SHEET. Mic and deafen were reachable
+ * before this pass, but only after opening a sheet called "Lobby" and finding a
+ * list row inside it — two taps and a guess. They belong beside the people they
+ * apply to, which is this list, so this is where they now live. The lobby rows
+ * stay where they are; nothing was moved, one copy was added at the surface.
+ *
+ * DEAFEN IS `danger`, NOT CORAL. Coral in this direction means audio is
+ * flowing, and deafened is the exact opposite — the room is cut off. Coral
+ * would also put deafen in the same colour as an open mic directly beside it,
+ * two tiles that mean opposite things reading identically.
+ *
+ * IT IS A CARD, AND ITS FILL IS THE OPAQUE ONE. This used to read `surface`
+ * with a note saying the translucent fill was safe "because there is nowhere
+ * it belongs that needs" the opaque one. That was simply untrue: this card is
+ * rendered from the header of both rosters, and `ParticipantStrip` is mounted
+ * inside the Session's sync `<Sheet>` — a `BlurView` — where 5.5% white has
+ * nothing to sit on at all. There is no prop and no branch, because there is
+ * no placement where the translucent fill would be the better answer: over a
+ * plain ground `surfaceSolid` resolves to the same colour.
+ */
+export const VoiceControls = memo(function VoiceControls({
+  micOn,
+  deafened,
+  onToggleMic,
+  onToggleDeafen,
+  onOpenMore,
+  moreLabel = 'Lobby',
+  moreHint = 'Voice settings, chat, game table, screen share',
+}: VoiceControlsProps) {
+  const C = useColors();
+
+  /*
+    DERIVED, not read straight off `micOn`. Deafening is supposed to force the
+    mic off upstream, but if those two flags ever disagree the honest reading is
+    the quieter one: someone who cannot hear the room is not talking to it.
+  */
+  const live = micOn && !deafened;
+
+  return (
+    <View style={[styles.voice, { backgroundColor: C.surfaceSolid, borderColor: C.rule }, raised(C)]}>
+      <View style={styles.voiceHead}>
+        <Text style={[styles.voiceKicker, { color: C.ink3 }]}>Your voice</Text>
+        <StatusPill
+          label={deafened ? 'Deafened' : live ? 'Mic live' : 'Mic off'}
+          tone={live ? 'liveWash' : 'outline'}
+          dot={live}
+          live={live}
+        />
+      </View>
+
+      <View style={styles.voiceTiles}>
+        <VoiceToggle
+          icon={live ? Mic : MicOff}
+          label={live ? 'Mic live' : 'Mic off'}
+          caption={deafened ? 'Undeafen to talk' : live ? 'Tap to mute yourself' : 'Tap to talk'}
+          tone={live ? 'flowing' : 'idle'}
+          checked={live}
+          accessibilityLabel={live ? 'Mute your microphone' : 'Unmute your microphone'}
+          onPress={onToggleMic}
+        />
+        <VoiceToggle
+          icon={deafened ? HeadphoneOff : Headphones}
+          label={deafened ? 'Deafened' : 'Deafen'}
+          caption={deafened ? 'You hear nobody' : 'Silence the whole room'}
+          tone={deafened ? 'cut' : 'idle'}
+          checked={deafened}
+          accessibilityLabel={deafened ? 'Stop being deafened' : 'Deafen yourself'}
+          onPress={onToggleDeafen}
+        />
+      </View>
+
+      {onOpenMore ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={moreLabel}
+          accessibilityHint={moreHint}
+          onPress={onOpenMore}
+          style={({ pressed }) => [
+            styles.voiceMore,
+            { borderTopColor: C.ruleSoft },
+            pressed ? styles.dim : null,
+          ]}>
+          <SlidersHorizontal size={17} strokeWidth={2} color={C.ink2} />
+          <View style={styles.voiceMoreMeta}>
+            <Text numberOfLines={1} style={[styles.voiceMoreLabel, { color: C.ink }]}>
+              {moreLabel}
+            </Text>
+            <Text numberOfLines={1} style={[styles.voiceMoreHint, { color: C.ink3 }]}>
+              {moreHint}
+            </Text>
+          </View>
+          <ChevronRight size={17} strokeWidth={2} color={C.ink3} />
+        </Pressable>
+      ) : null}
+    </View>
+  );
+});
+
+type VoiceToggleTone =
+  /** Audio is flowing: coral. */
+  | 'flowing'
+  /** Audio is cut: `danger`. */
+  | 'cut'
+  /** The resting state. */
+  | 'idle';
+
+type VoiceToggleProps = {
+  icon: LucideIcon;
+  label: string;
+  caption: string;
+  tone: VoiceToggleTone;
+  checked: boolean;
+  accessibilityLabel: string;
+  onPress: () => void;
+};
+
+/**
+ * One tile in the pair. Hand-built rather than an `AuxButton` because a button
+ * carries one label and this carries two — the state on top, what a tap does
+ * underneath — and because the fill IS the state readout, which a button
+ * variant would decide for itself.
+ *
+ * The idle tile takes `surface2`, not `surface`. That was originally because
+ * the card under it was itself 5.5% white and the two composited to an
+ * indistinct ~11%; the card is `surfaceSolid` now, and the conclusion survives
+ * the change of premise — 9% white over the resolved solid is a defined step
+ * up from it, where 5.5% would barely separate from the card at all. Same
+ * reason the kit's chips take `chip`/`surface2` inside a card.
+ */
+const VoiceToggle = memo(function VoiceToggle({
+  icon: Icon,
+  label,
+  caption,
+  tone,
+  checked,
+  accessibilityLabel,
+  onPress,
+}: VoiceToggleProps) {
+  const C = useColors();
+
+  const skin =
+    tone === 'flowing'
+      ? { bg: C.liveWash, border: C.liveMid, fg: C.liveText }
+      : tone === 'cut'
+        ? { bg: C.dangerWash, border: C.dangerBorder, fg: C.danger }
+        : { bg: C.surface2, border: C.rule, fg: C.ink2 };
+
+  return (
+    <Pressable
+      accessibilityRole="switch"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ checked }}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.voiceTile,
+        { backgroundColor: skin.bg, borderColor: skin.border },
+        pressed ? styles.dim : null,
+      ]}>
+      <Icon size={20} strokeWidth={2} color={skin.fg} />
+      <Text numberOfLines={1} style={[styles.voiceTileLabel, { color: skin.fg }]}>
+        {label}
+      </Text>
+      <Text numberOfLines={1} style={[styles.voiceTileCaption, { color: C.ink3 }]}>
+        {caption}
+      </Text>
+    </Pressable>
+  );
+});
+
 // ------------------------------------------------------------ drift chart
 
-export type ParticipantStripProps = {
+/**
+ * The props both lists share. Every one of the new ones is OPTIONAL and every
+ * one of them draws nothing when it is absent, so the Session screen keeps
+ * compiling and rendering exactly as it did while the wiring lands.
+ */
+type RosterProps = {
   /** Ids this listener has muted locally. Never published, never announced. */
   mutedIds?: ReadonlySet<string>;
+  /**
+   * Ids whose mic is open right now, for the coral ring on their avatar.
+   *
+   * Nothing supplies this yet — there is no voice transport in this build — and
+   * an empty set draws no rings, which is the honest default. It exists so the
+   * ring lands with the transport rather than after it.
+   */
+  speakingIds?: ReadonlySet<string>;
+  /** Tapping the speaker button mutes that person, for this listener only. */
+  onSelectPerson?: (userId: string) => void;
+  /**
+   * Per-person controls — their volume for you, pass them the aux, message
+   * them (design L1360). Given one, the ROW BODY opens it and the speaker
+   * button keeps mute; without one the row body is the mute toggle, which is
+   * what it has always been.
+   */
+  onOpenPerson?: (userId: string) => void;
+  /** Your own mic and deafen, drawn above the roster. See `VoiceControls`. */
+  voice?: VoiceControlsProps;
+  contentBottomInset?: number;
+};
+
+export type ParticipantStripProps = RosterProps & {
   roomId: string | null;
   hostId: string | null;
   currentUserId: string | null;
@@ -182,9 +469,6 @@ export type ParticipantStripProps = {
   header?: ReactNode;
   /** Everything below it. */
   footer?: ReactNode;
-  /** Tapping a row mutes that person, for this listener only. */
-  onSelectPerson?: (userId: string) => void;
-  contentBottomInset?: number;
 };
 
 export function ParticipantStrip({
@@ -194,7 +478,10 @@ export function ParticipantStrip({
   header,
   footer,
   onSelectPerson,
+  onOpenPerson,
   mutedIds,
+  speakingIds,
+  voice,
   contentBottomInset = 0,
 }: ParticipantStripProps) {
   const C = useColors();
@@ -221,11 +508,13 @@ export function ParticipantStrip({
           // exactly one row instead of the whole list.
           driftMs={isMe ? driftMs : 0}
           muted={mutedIds?.has(item.userId) ?? false}
+          speaking={speakingIds?.has(item.userId) ?? false}
           onSelect={onSelectPerson}
+          onOpen={onOpenPerson}
         />
       );
     },
-    [hostId, currentUserId, driftMs, mutedIds, onSelectPerson]
+    [hostId, currentUserId, driftMs, mutedIds, speakingIds, onSelectPerson, onOpenPerson]
   );
 
   const participants = data ?? [];
@@ -241,9 +530,19 @@ export function ParticipantStrip({
       ListHeaderComponent={
         <>
           {header}
+          {voice ? <VoiceControls {...voice} /> : null}
           <View style={styles.hintRow}>
+            {/*
+              The sentence tracks what a tap actually does, because the row has
+              two possible jobs and a hint that describes the other one is worse
+              than none at all.
+            */}
             <Text style={[styles.hint, { color: C.ink3 }]}>
-              {onSelectPerson ? 'Tap anyone to mute them, for you only' : 'Who is in the Session'}
+              {onOpenPerson
+                ? 'Tap a name for their controls'
+                : onSelectPerson
+                  ? 'Mute anyone — for you only'
+                  : 'Who is in the Session'}
             </Text>
             <Text style={[styles.scale, { color: C.ink3 }]}>±400ms</Text>
           </View>
@@ -277,15 +576,21 @@ export function ParticipantStrip({
 
 const keyExtractor = (item: ParticipantView) => item.userId;
 
-type DriftRowProps = {
+type RowControlProps = {
+  /** Muted for THIS listener only. Never published, never announced. */
+  muted?: boolean;
+  /** Their mic is open right now. Draws the coral ring, nothing else. */
+  speaking?: boolean;
+  onSelect?: (userId: string) => void;
+  onOpen?: (userId: string) => void;
+};
+
+type DriftRowProps = RowControlProps & {
   participant: ParticipantView;
   isOnAux: boolean;
   isMe: boolean;
   /** The viewer's own measured drift. Only applied to the viewer's own row. */
   driftMs: number;
-  /** Muted for THIS listener only. Never published, never announced. */
-  muted?: boolean;
-  onSelect?: (userId: string) => void;
 };
 
 const DriftRow = memo(function DriftRow({
@@ -294,7 +599,9 @@ const DriftRow = memo(function DriftRow({
   isMe,
   driftMs,
   muted = false,
+  speaking = false,
   onSelect,
+  onOpen,
 }: DriftRowProps) {
   const C = useColors();
 
@@ -308,14 +615,25 @@ const DriftRow = memo(function DriftRow({
     reading.measured ? `off by ${reading.value}, ${reading.rung}` : reading.rung
   }${muted ? ', muted for you' : ''}`;
 
+  const press = rowPress(participant.userId, isMe, onSelect, onOpen);
+
   const body = (
     <>
-      <InitialTile
+      {/*
+        The ring is the VOICE state — on aux, or talking right now. It is
+        deliberately not wired to `reading`: in-sync already has two readouts on
+        this row (the rung word and the mark in the plot), and a third one in
+        the avatar would leave nothing to say that someone is speaking.
+        `identity` is the signed-in user's own gradient, so you can find your
+        row in a list of six without reading a single name.
+      */}
+      <Avatar
         name={participant.displayName}
-        avatarUrl={participant.avatarUrl}
+        uri={participant.avatarUrl}
         size={TILE}
-        onAux={isOnAux}
-        live={reading.color === C.liveText}
+        live={isOnAux}
+        speaking={speaking}
+        identity={isMe}
       />
 
       <View style={styles.rowMeta}>
@@ -347,53 +665,112 @@ const DriftRow = memo(function DriftRow({
       <Text numberOfLines={1} style={[styles.rowValue, { color: reading.color }]}>
         {reading.value}
       </Text>
-
-      {/*
-        Muted, for this listener only. Ink rather than accent: red is reserved
-        for live/playing/in-sync here, and someone you have quietly turned down
-        is the opposite of an event. The well is what makes it read as a state
-        rather than as an icon that happened to change.
-      */}
-      {onSelect ? (
-        <View
-          style={[
-            styles.speaker,
-            muted
-              ? { backgroundColor: C.bgRecessed, borderColor: C.rule2 }
-              : { borderColor: 'transparent' },
-          ]}>
-          {muted ? (
-            <VolumeX size={16} strokeWidth={2} color={C.ink2} />
-          ) : (
-            <Volume2 size={16} strokeWidth={2} color={C.ink3} />
-          )}
-        </View>
-      ) : null}
     </>
   );
 
-  if (!onSelect) {
-    return (
-      <View accessible accessibilityLabel={label} style={[styles.row, { backgroundColor: C.surface }, raised(C)]}>
-        {body}
-      </View>
-    );
+  return (
+    <View style={[styles.row, { backgroundColor: C.surfaceSolid, borderColor: C.rule }, raised(C)]}>
+      {press ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={label}
+          accessibilityState={{ selected: muted }}
+          accessibilityHint={press.hint}
+          onPress={press.onPress}
+          style={({ pressed }) => [styles.rowBody, pressed ? styles.dim : null]}>
+          {body}
+        </Pressable>
+      ) : (
+        <View accessible accessibilityLabel={label} style={styles.rowBody}>
+          {body}
+        </View>
+      )}
+
+      <MemberMuteButton
+        name={participant.displayName}
+        muted={muted}
+        isMe={isMe}
+        onSelect={onSelect}
+        userId={participant.userId}
+      />
+    </View>
+  );
+});
+
+/**
+ * What a tap on the row body does, and what a screen reader is told it does.
+ *
+ * Two rules, and the second is the one that matters: your OWN row never mutes,
+ * because muting yourself locally would silence audio you were never hearing in
+ * the first place. Your mic is in `VoiceControls` at the top of the list, which
+ * is the control that actually exists for you.
+ */
+function rowPress(
+  userId: string,
+  isMe: boolean,
+  onSelect?: (userId: string) => void,
+  onOpen?: (userId: string) => void
+): { onPress: () => void; hint: string } | null {
+  if (onOpen) {
+    return { onPress: () => onOpen(userId), hint: 'Opens their volume, mute and aux controls' };
   }
+  if (onSelect && !isMe) {
+    return { onPress: () => onSelect(userId), hint: 'Mutes this person, for you only' };
+  }
+  return null;
+}
+
+type MemberMuteButtonProps = {
+  userId: string;
+  name: string;
+  muted: boolean;
+  isMe: boolean;
+  onSelect?: (userId: string) => void;
+};
+
+/**
+ * Mute one person, for you only — the control the roster is really for.
+ *
+ * `danger` WHEN MUTED, and this is the one place in the file that colour is
+ * right: you have cut someone's audio, which is subtractive and undoable and
+ * needs to be visible from across the row. Coral would claim the opposite —
+ * that something is live — and the previous ink-in-a-well treatment made the
+ * single most important control on this screen look like a disabled icon.
+ *
+ * Its own control rather than the whole row, and a SIBLING of the row body
+ * rather than a child of it: nested pressables trade taps on react-native-web,
+ * where a tap on the inner one also fires the outer, which here would mute and
+ * immediately unmute.
+ */
+const MemberMuteButton = memo(function MemberMuteButton({
+  userId,
+  name,
+  muted,
+  isMe,
+  onSelect,
+}: MemberMuteButtonProps) {
+  const handlePress = useCallback(() => onSelect?.(userId), [onSelect, userId]);
+
+  /* No mute at all on this list: every row is short by the same amount. */
+  if (!onSelect) return null;
+
+  /*
+    Your own row keeps the SPACE but loses the control. Muting yourself locally
+    would silence audio you were never hearing, and your mic is in
+    `VoiceControls` at the top of the list — but drop the 36px and your drift
+    readout stops lining up with everyone else's, which on the one screen whose
+    job is comparing numbers is worse than a blank.
+  */
+  if (isMe) return <View style={styles.mutePlaceholder} />;
 
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ selected: muted }}
-      accessibilityHint={muted ? 'Unmutes this person for you' : 'Mutes this person, for you only'}
-      onPress={() => onSelect(participant.userId)}
-      style={({ pressed }) => [
-        styles.row,
-        { backgroundColor: pressed ? C.surface2 : C.surface },
-        raised(C),
-      ]}>
-      {body}
-    </Pressable>
+    <CircleIconButton
+      icon={muted ? VolumeX : Volume2}
+      size={MUTE_BUTTON}
+      tone={muted ? 'danger' : 'chip'}
+      accessibilityLabel={muted ? `Unmute ${name}` : `Mute ${name}, for you only`}
+      onPress={handlePress}
+    />
   );
 });
 
@@ -403,14 +780,19 @@ const ChartSkeleton = memo(function ChartSkeleton() {
   return (
     <View style={styles.skeletonStack}>
       {Array.from({ length: SKELETON_ROWS }, (_, index) => (
-        <View key={index} style={[styles.row, { backgroundColor: C.surface }, raised(C)]}>
-          <Skeleton width={TILE} height={TILE} style={styles.tileSkeleton} />
-          <View style={styles.rowMeta}>
-            <Skeleton width={NAME_WIDTH} height={12} style={styles.lineSkeleton} />
-            <Skeleton width={NAME_WIDTH - 14} height={9} style={styles.lineSkeleton} />
-          </View>
-          <View style={styles.plot}>
-            <View style={[styles.axis, { backgroundColor: C.rule3 }]} />
+        <View
+          key={index}
+          style={[styles.row, { backgroundColor: C.surfaceSolid, borderColor: C.rule }, raised(C)]}>
+          <View style={styles.rowBody}>
+            {/* Round, because the avatar it stands in for is round now. */}
+            <Skeleton width={TILE} height={TILE} style={styles.tileSkeleton} />
+            <View style={styles.rowMeta}>
+              <Skeleton width={NAME_WIDTH} height={12} style={styles.lineSkeleton} />
+              <Skeleton width={NAME_WIDTH - 14} height={9} style={styles.lineSkeleton} />
+            </View>
+            <View style={styles.plot}>
+              <View style={[styles.axis, { backgroundColor: C.rule3 }]} />
+            </View>
           </View>
         </View>
       ))}
@@ -429,7 +811,7 @@ const LadderKey = memo(function LadderKey() {
   return (
     <View style={styles.legend}>
       <View style={styles.legendItem}>
-        <View style={[styles.swatch, { backgroundColor: C.live }]} />
+        <View style={[styles.swatch, { backgroundColor: C.live }, dotGlow(C.live)]} />
         <Text style={[styles.legendLabel, { color: C.liveText }]}>Locked ≤40ms</Text>
       </View>
       <View style={styles.legendItem}>
@@ -444,6 +826,18 @@ const LadderKey = memo(function LadderKey() {
   );
 });
 
+/**
+ * The 8px halo the artboards put under the locked dot (L991, L623).
+ *
+ * Written out rather than routed through `bloom()`, for the same reason
+ * `GlassCard`'s bleed is: every recipe in the theme offsets its shadow
+ * downward, and on a 9px dot a 16px drop is a smear under the legend rather
+ * than light coming off the swatch.
+ */
+function dotGlow(color: string): object {
+  return { boxShadow: [{ offsetX: 0, offsetY: 0, blurRadius: 8, color }] };
+}
+
 // -------------------------------------------------------------- notices
 
 type RosterNoticeProps = {
@@ -452,35 +846,28 @@ type RosterNoticeProps = {
   onPress: () => void;
 };
 
-/** Empty and error, one shape: where you are, and the button out of it. */
+/**
+ * Empty and error, one shape: where you are, and the button out of it.
+ *
+ * `EmptyState` rather than the hand-rolled card this used to be. The card it
+ * replaced was a `surface` fill with a shadow and NO border, which was legible
+ * when `surface` was opaque grey and reads as flat now that it is 5.5% white —
+ * and its retry pill was the app's CTA rebuilt from scratch, one size off.
+ */
 const RosterNotice = memo(function RosterNotice({ title, body, onPress }: RosterNoticeProps) {
-  const C = useColors();
-
   return (
-    <View style={[styles.notice, { backgroundColor: C.surface }, raised(C)]}>
-      <Users size={20} strokeWidth={2} color={C.ink3} />
-      <Text style={[styles.noticeTitle, { color: C.ink }]}>{title}</Text>
-      <Text style={[styles.noticeBody, { color: C.ink2 }]}>{body}</Text>
-
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Try again"
-        onPress={onPress}
-        style={({ pressed }) => [
-          styles.noticeAction,
-          { backgroundColor: C.pill },
-          pressed ? styles.dim : null,
-        ]}>
-        <RotateCw size={15} strokeWidth={2.4} color={C.pillInk} />
-        <Text style={[styles.noticeActionLabel, { color: C.pillInk }]}>Try again</Text>
-      </Pressable>
-    </View>
+    <EmptyState
+      icon={Users}
+      title={title}
+      description={body}
+      primary={{ label: 'Try again', onPress }}
+    />
   );
 });
 
 // ------------------------------------------------------------- sync orbit
 
-export type SyncOrbitProps = {
+export type SyncOrbitProps = RosterProps & {
   roomId: string | null;
   hostId: string | null;
   currentUserId: string | null;
@@ -488,10 +875,6 @@ export type SyncOrbitProps = {
   timeline: RoomTimeline | null;
   header?: ReactNode;
   footer?: ReactNode;
-  /** Ids this listener has muted locally. Never published, never announced. */
-  mutedIds?: ReadonlySet<string>;
-  onSelectPerson?: (userId: string) => void;
-  contentBottomInset?: number;
 };
 
 export function SyncOrbit({
@@ -503,7 +886,10 @@ export function SyncOrbit({
   header,
   footer,
   mutedIds,
+  speakingIds,
   onSelectPerson,
+  onOpenPerson,
+  voice,
   contentBottomInset = 0,
 }: SyncOrbitProps) {
   const C = useColors();
@@ -540,11 +926,13 @@ export function SyncOrbit({
           isMe={isMe}
           driftMs={isMe ? driftMs : 0}
           muted={mutedIds?.has(item.userId) ?? false}
+          speaking={speakingIds?.has(item.userId) ?? false}
           onSelect={onSelectPerson}
+          onOpen={onOpenPerson}
         />
       );
     },
-    [hostId, currentUserId, driftMs, mutedIds, onSelectPerson]
+    [hostId, currentUserId, driftMs, mutedIds, speakingIds, onSelectPerson, onOpenPerson]
   );
 
   return (
@@ -557,6 +945,7 @@ export function SyncOrbit({
       ListHeaderComponent={
         <>
           {header}
+          {voice ? <VoiceControls {...voice} /> : null}
 
           <View style={styles.hintRow}>
             <Text style={[styles.hint, { color: C.ink3 }]}>Distance from centre is drift</Text>
@@ -588,6 +977,9 @@ export function SyncOrbit({
                 styles.dialCore,
                 {
                   backgroundColor: C.surface,
+                  // The edge is not decoration: a 5.5%-white disc inside a dark
+                  // well has no shape of its own, shadow or no shadow.
+                  borderColor: C.rule,
                   left: dialWidth / 2 - DIAL_CORE / 2,
                   top: DIAL_CENTRE_Y - DIAL_CORE / 2,
                 },
@@ -607,6 +999,7 @@ export function SyncOrbit({
                 total={participants.length}
                 isMe={person.userId === currentUserId}
                 isOnAux={person.userId === hostId}
+                speaking={speakingIds?.has(person.userId) ?? false}
                 driftMs={person.userId === currentUserId ? driftMs : 0}
                 dialWidth={dialWidth}
               />
@@ -620,11 +1013,17 @@ export function SyncOrbit({
           */}
           <View style={styles.legend}>
             <View style={styles.legendItem}>
-              <View style={[styles.swatch, { backgroundColor: C.live }]} />
+              <View style={[styles.swatch, { backgroundColor: C.live }, dotGlow(C.live)]} />
               <Text style={[styles.legendLabel, { color: C.liveText }]}>±40 locked</Text>
             </View>
             <View style={styles.legendItem}>
-              <HatchSwatch />
+              {/*
+                A plain `ink2` dot (design L992). The 45° `HatchSwatch` that
+                stood here — three rotated bars in a clipped 9px box, because
+                React Native has no repeating gradient — was inventing a texture
+                the artboards never used, at 9px where it read as a smudge.
+              */}
+              <View style={[styles.swatch, { backgroundColor: C.ink2 }]} />
               <Text style={[styles.legendLabel, { color: C.ink2 }]}>±220 nudge</Text>
             </View>
             <View style={styles.legendItem}>
@@ -695,6 +1094,7 @@ type OrbitMarkerProps = {
   total: number;
   isMe: boolean;
   isOnAux: boolean;
+  speaking: boolean;
   driftMs: number;
   dialWidth: number;
 };
@@ -705,6 +1105,7 @@ const OrbitMarker = memo(function OrbitMarker({
   total,
   isMe,
   isOnAux,
+  speaking,
   driftMs,
   dialWidth,
 }: OrbitMarkerProps) {
@@ -724,12 +1125,13 @@ const OrbitMarker = memo(function OrbitMarker({
         reading.measured ? `off by ${reading.value}` : reading.rung
       }`}
       style={[styles.marker, { left: left - ORBIT_TILE / 2, top: top - ORBIT_TILE / 2 - 2 }]}>
-      <InitialTile
+      <Avatar
         name={participant.displayName}
-        avatarUrl={participant.avatarUrl}
+        uri={participant.avatarUrl}
         size={ORBIT_TILE}
-        onAux={isOnAux}
-        live={reading.color === C.liveText}
+        live={isOnAux}
+        speaking={speaking}
+        identity={isMe}
       />
       <Text numberOfLines={1} style={[styles.markerLabel, { color: reading.color }]}>
         {reading.value}
@@ -738,14 +1140,11 @@ const OrbitMarker = memo(function OrbitMarker({
   );
 });
 
-type OrbitRowProps = {
+type OrbitRowProps = RowControlProps & {
   participant: ParticipantView;
   isOnAux: boolean;
   isMe: boolean;
   driftMs: number;
-  /** Muted for THIS listener only. Never published, never announced. */
-  muted?: boolean;
-  onSelect?: (userId: string) => void;
 };
 
 const OrbitRow = memo(function OrbitRow({
@@ -754,19 +1153,23 @@ const OrbitRow = memo(function OrbitRow({
   isMe,
   driftMs,
   muted = false,
+  speaking = false,
   onSelect,
+  onOpen,
 }: OrbitRowProps) {
   const C = useColors();
   const reading = readingFor(isMe, participant.isSynced, driftMs, C);
+  const press = rowPress(participant.userId, isMe, onSelect, onOpen);
 
   const content = (
     <>
-      <InitialTile
+      <Avatar
         name={participant.displayName}
-        avatarUrl={participant.avatarUrl}
+        uri={participant.avatarUrl}
         size={ORBIT_TILE}
-        onAux={isOnAux}
-        live={reading.color === C.liveText}
+        live={isOnAux}
+        speaking={speaking}
+        identity={isMe}
       />
 
       <View style={styles.orbitRowMeta}>
@@ -783,22 +1186,6 @@ const OrbitRow = memo(function OrbitRow({
         <Text style={[styles.orbitRowValue, { color: reading.color }]}>{reading.value}</Text>
         <Text style={[styles.orbitRowRung, { color: C.ink3 }]}>{reading.rung}</Text>
       </View>
-
-      {onSelect ? (
-        <View
-          style={[
-            styles.speaker,
-            muted
-              ? { backgroundColor: C.bgRecessed, borderColor: C.rule2 }
-              : { borderColor: 'transparent' },
-          ]}>
-          {muted ? (
-            <VolumeX size={16} strokeWidth={2} color={C.ink2} />
-          ) : (
-            <Volume2 size={16} strokeWidth={2} color={C.ink3} />
-          )}
-        </View>
-      ) : null}
     </>
   );
 
@@ -806,102 +1193,49 @@ const OrbitRow = memo(function OrbitRow({
     reading.measured ? `off by ${reading.value}, ${reading.rung}` : reading.rung
   }${muted ? ', muted for you' : ''}`;
 
-  if (!onSelect) {
-    return (
-      <View
-        accessible
-        accessibilityLabel={label}
-        style={[styles.row, { backgroundColor: C.surface }, raised(C)]}>
-        {content}
-      </View>
-    );
-  }
-
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ selected: muted }}
-      accessibilityHint={muted ? 'Unmutes this person for you' : 'Mutes this person, for you only'}
-      onPress={() => onSelect(participant.userId)}
-      style={({ pressed }) => [
-        styles.row,
-        { backgroundColor: pressed ? C.surface2 : C.surface },
-        raised(C),
-      ]}>
-      {content}
-    </Pressable>
-  );
-});
-
-// ------------------------------------------------------------------ parts
-
-type InitialTileProps = {
-  name: string;
-  avatarUrl: string | null;
-  size: number;
-  onAux: boolean;
-  live: boolean;
-};
-
-/**
- * A rounded letter tile, with a real photo dropping straight over it. Accent
- * fill is reserved for the person on aux — they are the timeline everyone else
- * is measured against, which is the literal meaning of the colour here.
- */
-const InitialTile = memo(function InitialTile({
-  name,
-  avatarUrl,
-  size,
-  onAux,
-  live,
-}: InitialTileProps) {
-  const C = useColors();
-
-  return (
-    <View
-      style={[
-        styles.tile,
-        { width: size, height: size, borderRadius: size >= 32 ? Radii.sm : Radii.xs },
-        {
-          backgroundColor: onAux ? C.live : C.avatar,
-          borderWidth: live && !onAux ? Rule.major : Rule.hair,
-          borderColor: live && !onAux ? C.live : C.rule2,
-        },
-      ]}>
-      {avatarUrl ? (
-        <Image
-          source={{ uri: avatarUrl }}
-          style={StyleSheet.absoluteFill}
-          contentFit="cover"
-          cachePolicy="memory-disk"
-          placeholder={{ blurhash: BLURHASH_SURFACE }}
-          accessibilityIgnoresInvertColors
-        />
+    <View style={[styles.row, { backgroundColor: C.surfaceSolid, borderColor: C.rule }, raised(C)]}>
+      {press ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={label}
+          accessibilityState={{ selected: muted }}
+          accessibilityHint={press.hint}
+          onPress={press.onPress}
+          style={({ pressed }) => [styles.rowBody, pressed ? styles.dim : null]}>
+          {content}
+        </Pressable>
       ) : (
-        <Text style={[styles.tileInitial, { color: onAux ? C.onLive : C.ink2 }]}>
-          {initialFor(name)}
-        </Text>
+        <View accessible accessibilityLabel={label} style={styles.rowBody}>
+          {content}
+        </View>
       )}
+
+      <MemberMuteButton
+        name={participant.displayName}
+        muted={muted}
+        isMe={isMe}
+        onSelect={onSelect}
+        userId={participant.userId}
+      />
     </View>
   );
 });
 
-/**
- * The 45° hatch that means "nudging" in the legend. React Native has no
- * repeating gradient, so it is three rotated bars in a clipped 9px box.
- */
-const HatchSwatch = memo(function HatchSwatch() {
-  const C = useColors();
+/*
+  TWO LOCAL PARTS USED TO LIVE HERE AND BOTH ARE GONE ON PURPOSE.
 
-  return (
-    <View style={[styles.swatch, styles.hatch]}>
-      {[-3, 1, 5].map((left) => (
-        <View key={left} style={[styles.hatchBar, { left, backgroundColor: C.ink }]} />
-      ))}
-    </View>
-  );
-});
+  `InitialTile` was a hand-rolled square avatar with its own photo loader.
+  `Avatar` from the kit is the same object done once: round as every avatar in
+  the artboards is, with the coral speaking ring, the identity gradient for your
+  own row and the blurhash placeholder already inside it. The one thing lost is
+  the coral FILL for the person on aux, which the ring now says instead — a
+  filled coral disc under a photograph is invisible anyway.
+
+  `HatchSwatch` drew a 45° hatch for the nudge legend out of three rotated bars
+  in a clipped 9px box. The artboards use a plain dot there; see the note at the
+  orbit legend.
+*/
 
 const styles = StyleSheet.create({
   list: {
@@ -934,15 +1268,95 @@ const styles = StyleSheet.create({
     letterSpacing: tracking(10, 0.09),
   },
 
+  // ----------------------------------------------------------- your voice
+  voice: {
+    borderWidth: Rule.hair,
+    borderRadius: Radii.xl,
+    padding: Space.md,
+    gap: Space.md,
+    marginBottom: Space.xs,
+  },
+  voiceHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Space.sm,
+    paddingHorizontal: Space.xs,
+  },
+  voiceKicker: {
+    ...Type.label(10),
+    letterSpacing: tracking(10, 0.11),
+  },
+  voiceTiles: {
+    flexDirection: 'row',
+    gap: Space.sm + 1,
+  },
+  voiceTile: {
+    flex: 1,
+    minHeight: VOICE_TILE,
+    justifyContent: 'center',
+    gap: Space.xs + 1,
+    paddingHorizontal: Space.md,
+    paddingVertical: Space.sm,
+    borderWidth: Rule.hair,
+    borderRadius: Radii.lg,
+  },
+  voiceTileLabel: {
+    ...Type.heading(11),
+    letterSpacing: tracking(11, 0.05),
+    textTransform: 'uppercase',
+  },
+  voiceTileCaption: {
+    ...Type.body(10),
+    lineHeight: 13,
+  },
+  voiceMore: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.md,
+    minHeight: TOUCH_TARGET,
+    /** The card's own padding is the gutter; this row only owes the rule above it. */
+    marginHorizontal: -Space.md,
+    paddingHorizontal: Space.md + Space.xs,
+    paddingTop: Space.sm,
+    marginBottom: -Space.xs,
+    borderTopWidth: Rule.hair,
+  },
+  voiceMoreMeta: {
+    flex: 1,
+    minWidth: 0,
+    gap: 1,
+  },
+  voiceMoreLabel: {
+    fontFamily: Fonts.semibold,
+    fontSize: 14,
+    letterSpacing: tracking(14, -0.005),
+  },
+  voiceMoreHint: {
+    ...Type.body(11),
+  },
+
   // ---------------------------------------------------------- drift chart
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Space.sm + 2,
+    gap: Space.sm,
     minHeight: TOUCH_TARGET + Space.md,
     paddingVertical: Space.sm + 1,
     paddingHorizontal: Space.md - 1,
+    borderWidth: Rule.hair,
     borderRadius: Radii.button,
+  },
+  /**
+   * The pressable half. A SIBLING of the mute button, never its parent — see
+   * the note on `MemberMuteButton`.
+   */
+  rowBody: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.sm + 2,
   },
   rowMeta: {
     width: NAME_WIDTH,
@@ -994,50 +1408,16 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     textAlign: 'right',
   },
-  speaker: {
-    width: SPEAKER,
-    height: SPEAKER,
+  mutePlaceholder: {
+    width: MUTE_BUTTON,
     flexGrow: 0,
     flexShrink: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: Radii.sm,
-    borderWidth: Rule.hair,
   },
   tileSkeleton: {
-    borderRadius: Radii.sm,
+    borderRadius: TILE / 2,
   },
   lineSkeleton: {
     borderRadius: Radii.xs,
-  },
-
-  // ------------------------------------------------------------- notices
-  notice: {
-    alignItems: 'flex-start',
-    gap: Space.sm,
-    padding: Space.lg,
-    borderRadius: Radii.lg,
-  },
-  noticeTitle: {
-    ...Type.heading(15),
-  },
-  noticeBody: {
-    ...Type.body(13),
-    maxWidth: 380,
-  },
-  noticeAction: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space.sm - 2,
-    marginTop: Space.xs,
-    minHeight: TOUCH_TARGET,
-    paddingHorizontal: Space.lg,
-    borderRadius: Radii.sm,
-  },
-  noticeActionLabel: {
-    fontFamily: Fonts.semibold,
-    fontSize: 13,
-    letterSpacing: tracking(13, 0.02),
   },
 
   // ----------------------------------------------------------- sync orbit
@@ -1058,6 +1438,7 @@ const styles = StyleSheet.create({
     height: DIAL_CORE,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: Rule.hair,
     borderRadius: Radii.pill,
   },
   dialInitial: {
@@ -1098,22 +1479,13 @@ const styles = StyleSheet.create({
     ...Type.label(10),
     letterSpacing: tracking(10, 0.09),
   },
+  /** Round, as every legend dot in the artboards is. 4.5, not `Radii.pill`. */
   swatch: {
     width: 9,
     height: 9,
     flexGrow: 0,
     flexShrink: 0,
-    borderRadius: 2,
-  },
-  hatch: {
-    overflow: 'hidden',
-  },
-  hatchBar: {
-    position: 'absolute',
-    top: -5,
-    width: 2,
-    height: 19,
-    transform: [{ rotate: '45deg' }],
+    borderRadius: 4.5,
   },
 
   orbitTitleBlock: {
@@ -1160,17 +1532,5 @@ const styles = StyleSheet.create({
     ...Type.heading(10),
     letterSpacing: tracking(10, 0.1),
     textTransform: 'uppercase',
-  },
-
-  // ----------------------------------------------------------------- tile
-  tile: {
-    flexGrow: 0,
-    flexShrink: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  tileInitial: {
-    ...readout(12),
   },
 });

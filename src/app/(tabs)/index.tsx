@@ -1,32 +1,55 @@
 /**
- * The Feed — live "who is listening to what" across every lounge I am in.
+ * The Feed — the screen the app opens on, and the first thing anyone judges.
  *
- * design/v2 "Feed": a masthead with the live mark, one raised hero card for the
- * Session you can walk into (artwork, waveform, timecode, Join), then the
- * LISTENING NOW list — raised cards for the people in a Session, flat rows for
- * the people who are merely online.
+ * Built from `design/nocturne/aux-nocturne.dc.html` L231-L320 (`isFeed`): a
+ * pinned masthead of identity + greeting + settings, then a scroll body of
+ * search, the LOUNGE RAIL, the live list, and a "Start a Session" promo that
+ * closes the screen.
  *
- * Everything here is push-driven: the rows arrive over Realtime presence, and
- * the only queries are the two slow-moving lists behind them (my lounges, my
- * Sessions). Rows are filtered to lounges I am actually a member of, which
+ * FOUR DELIBERATE DEVIATIONS FROM THAT ARTBOARD, ALL FOR THE SAME REASON —
+ * the mock is a static picture of a full app and this screen has real states:
+ *
+ * 1. THE NOW-PLAYING HERO SURVIVES. The artboard has no hero card; it opens
+ *    straight onto search. But the hero is how you get BACK into a Session you
+ *    are already in, and it is the only surface that reports sync. Deleting it
+ *    to match a picture would delete a feature. It sits directly under the
+ *    search pill, where the artboard's eye lands first anyway.
+ * 2. The waveform is gone. It belonged to design/v2; nocturne has no waveform
+ *    anywhere (zero matches for `wave` in the artboard file) and draws playback
+ *    as the 4-6px coral gradient bar that `ProgressBar` now is. 64 hand-laid
+ *    bars and a measured clip box went with it.
+ * 3. The header's messages icon is gone. The nav capsule owns Messages and its
+ *    unread badge now, and the artboard's header carries a settings gear
+ *    instead — which is load-bearing, because settings has no nav slot.
+ * 4. "See all" points at `/lounges`, not Explore. The artboard sends it to
+ *    Explore, but in this app `/lounges` is "the lounges I am in" and it lost
+ *    its nav cell when Messages took the slot. This link is now the only way
+ *    to that screen, which makes the rail below it load-bearing rather than
+ *    decoration.
+ *
+ * Everything here is still push-driven: the rows arrive over Realtime presence,
+ * and the only queries are the two slow-moving lists behind them (my lounges,
+ * my Sessions). Rows are filtered to lounges I am actually a member of, which
  * falls out of `useMyLounges` driving both the subscription and the list.
  */
 
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { Mail, Play, Radio, Users, WifiOff, type LucideIcon } from 'lucide-react-native';
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { ChevronRight, Play, Plus, Search, Settings, Users, WifiOff } from 'lucide-react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   FlatList,
   Pressable,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   View,
-  type LayoutChangeEvent,
   type ListRenderItemInfo,
+  type StyleProp,
   type TextStyle,
+  type ViewStyle,
 } from 'react-native';
 import Animated, {
   Easing,
@@ -36,15 +59,23 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
-import { LiveDot } from '@/components/feed/live-dot';
 import {
   NowPlayingCard,
   glyphFor,
   timecode,
   useFeedClock,
 } from '@/components/feed/now-playing-card';
-import { EmptyState, Screen, Skeleton } from '@/components/ui';
-import { useTotalUnread } from '@/features/dm/queries';
+import {
+  Avatar,
+  AuxButton,
+  CircleIconButton,
+  EmptyState,
+  GlassCard,
+  ProgressBar,
+  Screen,
+  Skeleton,
+  StatusPill,
+} from '@/components/ui';
 import { livePositionMs } from '@/features/presence/presence-client';
 import {
   useBroadcastPresence,
@@ -60,16 +91,16 @@ import {
 } from '@/features/presence/use-lounge-presence';
 import { useAuth } from '@/lib/auth';
 import { syncClock } from '@/lib/clock';
+import { useDockReserve } from '@/lib/dock';
 import { supabase } from '@/lib/supabase';
 import {
   Duration,
   Fonts,
   Radii,
+  Rule,
   Space,
   TOUCH_TARGET,
   Type,
-  dropped,
-  raised,
   raisedLarge,
   tracking,
 } from '@/lib/theme';
@@ -79,29 +110,74 @@ import { expectedPositionMs, type RoomTimeline } from '@/playback/sync-controlle
 
 const MY_SESSIONS_KEY = 'my-sessions';
 const SKELETON_ROWS = [0, 1, 2];
+const SKELETON_RAIL = [0, 1];
 
-/** design/v2: 24 at the masthead, 20 around the hero card, 14 around the rows. */
-const GUTTER = 24;
-const CARD_GUTTER = 20;
-const ROW_GUTTER = 14;
+/**
+ * The screen gutter, and it is 18 on every nocturne artboard — the header at
+ * L232 and the scroll body at L244 both say so. `Screen` holds the same number
+ * for the same reason; this copy exists because this screen renders unpadded
+ * and pays the gutter itself, so the rail can bleed past it.
+ */
+const GUTTER = 18;
 
-/** Clears the floating dock without leaving a hole under the last row. */
-const LIST_TAIL = 48;
+/*
+  WHAT THE LIST LEAVES CLEAR AT THE BOTTOM IS NO LONGER A CONSTANT, AND CANNOT BE.
 
+  This used to be `const LIST_TAIL = Dock.reserve`, a static 126 that every
+  caller was asked to add `insets.bottom` to by hand. This screen — the Feed,
+  the first thing anyone sees — was one of the nine that forgot, so the tail was
+  short by the whole bottom inset and the last row of the busiest list in the
+  app sat under the floating nav capsule. The reservation now comes from
+  `useDockReserve()`, which does that addition itself and so cannot be short;
+  because it is a hook it is read in the component and applied inline, and
+  `styles.content` no longer carries a `paddingBottom` at all.
+*/
+
+/** The hero's artwork well. The artboard's largest art tile is 54; a hero earns 78. */
 const ART = 78;
-const TILE = 52;
 
-/** The 32-bar waveform, exact from the design. Percentages of the 30px band. */
-const BARS = [
-  28, 48, 34, 64, 40, 76, 52, 30, 58, 92, 44, 36, 68, 54, 32, 56, 100, 38, 66, 48, 26, 44, 72, 54,
-  82, 34, 60, 46, 78, 30, 52, 68,
-];
+/** L256/L268: a 172px lounge card and a 108px dashed NEW tile, 12 apart. */
+const RAIL_CARD = 172;
+const RAIL_NEW = 108;
+const RAIL_GAP = 12;
+
+/**
+ * Clearance under the rail.
+ *
+ * `raised()` throws its shadow 16 down with a 34 blur, so it reaches ~19px
+ * below the card — and a horizontal ScrollView clips to its own frame, which
+ * would slice every rail card's lift clean off. The artboard's `padding-bottom:4`
+ * gets away with it because CSS overflow does not clip a shadow the same way.
+ */
+const RAIL_TAIL = 20;
+
+/**
+ * The rail card's floor: 16 padding, a 34 stripe or two 17px lines of name, 14,
+ * the 13.5px meta line, 16 padding. See the note on `styles.railCard` for why
+ * this is a number and not `flex: 1`.
+ */
+const RAIL_HEIGHT = 100;
+
+/** The rail's own corner. `GlassCard` owns 24 internally; the dashed tile has no card to inherit it from. */
+const CARD_RADIUS = 24;
 
 /** `Type.readout` hands back a readonly tuple; TextStyle wants a mutable one. */
 const readout = (size: number): TextStyle => ({
   ...Type.readout(size),
   fontVariant: ['tabular-nums'],
 });
+
+/**
+ * The artboard says "Good evening" because it was drawn in the evening. The
+ * hour decides which one is actually true — a greeting that is wrong is worse
+ * than no greeting, and this is the first line on the first screen.
+ */
+function greetingFor(hour: number): string {
+  if (hour < 5) return 'Still up';
+  if (hour < 12) return 'Good morning';
+  if (hour < 18) return 'Good afternoon';
+  return 'Good evening';
+}
 
 /** A live Session I am already a participant in. */
 type ActiveSession = {
@@ -182,6 +258,270 @@ function useMySessions(userId: string | null | undefined): UseQueryResult<Active
   });
 }
 
+// ------------------------------------------------------------------- masthead
+
+/**
+ * The pinned header (L232-242).
+ *
+ * Outside the scroller on purpose: the artboard has it `flex:none`, and the
+ * two things it carries — who you are, and settings — are the two the rest of
+ * the shell cannot reach. Settings has no cell in the nav capsule at all.
+ */
+function Masthead({
+  name,
+  avatarUrl,
+  greeting,
+  broadcasting,
+  onProfile,
+  onSettings,
+}: {
+  name: string;
+  avatarUrl: string | null;
+  greeting: string;
+  /** Draws the punched-hole activity dot. See the call site for what it means. */
+  broadcasting: boolean;
+  onProfile: () => void;
+  onSettings: () => void;
+}) {
+  const C = useColors();
+
+  return (
+    <View style={styles.masthead}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Your profile"
+        onPress={onProfile}
+        style={({ pressed }) => [pressed && styles.pressed]}>
+        {/*
+          `identity` is the coral-to-magenta gradient, and the kit reserves it
+          for the signed-in user's own face — this is the one avatar on the
+          screen that is allowed to carry it.
+        */}
+        <Avatar uri={avatarUrl} name={name} size={48} identity presence={broadcasting} />
+      </Pressable>
+
+      <View style={styles.mastheadText}>
+        <Text style={[styles.greeting, { color: C.ink3 }]}>{greeting}</Text>
+        <Text numberOfLines={1} style={[styles.name, { color: C.ink }]}>
+          {name}
+        </Text>
+      </View>
+
+      <CircleIconButton
+        icon={Settings}
+        size={44}
+        tone="surface"
+        accessibilityLabel="Settings"
+        onPress={onSettings}
+      />
+    </View>
+  );
+}
+
+/**
+ * The search pill (L245-248) — as a BUTTON, not an input.
+ *
+ * The artboard binds this to the same `{{ search }}` state Explore uses, and
+ * Explore is where the real query, the real results and the invite-code field
+ * already live. So this keeps the artboard's shape and hands the tap to the
+ * screen that can answer it, rather than growing a second search implementation
+ * on the Feed. It is announced as a button, so nothing about it is a pretence.
+ */
+function SearchLink({ onPress }: { onPress: () => void }) {
+  const C = useColors();
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Search lounges, people and tracks"
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.search,
+        { backgroundColor: pressed ? C.surface2 : C.surface, borderColor: C.rule },
+      ]}>
+      <Search size={18} strokeWidth={2} color={C.ink3} />
+      <Text numberOfLines={1} style={[styles.searchLabel, { color: C.ink3 }]}>
+        Search lounges, people, tracks
+      </Text>
+    </Pressable>
+  );
+}
+
+/**
+ * A section rule (L250-253, L275-278): a title with either a link or a live
+ * count on the right.
+ *
+ * The two trailing slots are different registers and never both appear: a link
+ * is an ACTION and takes `priTint`, a count is a STATE of the world and takes
+ * coral. That is the whole accent rule in one row.
+ */
+function SectionHeader({
+  title,
+  action,
+  count,
+  style,
+}: {
+  title: string;
+  action?: { label: string; onPress: () => void };
+  count?: string;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const C = useColors();
+
+  return (
+    <View style={[styles.section, style]}>
+      <Text style={[styles.sectionTitle, { color: C.ink }]}>{title}</Text>
+
+      {action ? (
+        <Pressable
+          accessibilityRole="link"
+          accessibilityLabel={action.label}
+          onPress={action.onPress}
+          style={({ pressed }) => [styles.sectionLink, pressed && styles.pressed]}>
+          <Text style={[styles.sectionLinkLabel, { color: C.priTint }]}>{action.label}</Text>
+        </Pressable>
+      ) : count ? (
+        <Text style={[styles.sectionCount, { color: C.liveText }]}>{count}</Text>
+      ) : null}
+    </View>
+  );
+}
+
+// --------------------------------------------------------------- lounge rail
+
+/** A lounge, plus what presence currently says about it. */
+type RailLounge = {
+  id: string;
+  name: string;
+  /** People from this lounge on the Feed right now. */
+  online: number;
+  /** How many of them are in a Session you could walk into. */
+  live: number;
+};
+
+/**
+ * One rail card (L256-267).
+ *
+ * The 4px stripe is the card's whole live signal, so it only goes coral when
+ * the lounge actually has a Session running — a quiet lounge painted in the
+ * accent is the exact lie the two-colour system exists to prevent. Quiet gets
+ * `rule3`, which is an edge, not a state.
+ */
+function LoungeRailCard({ lounge, onOpen }: { lounge: RailLounge; onOpen: () => void }) {
+  const C = useColors();
+  const live = lounge.live > 0;
+
+  const label = live
+    ? `${lounge.name}, ${lounge.live} live`
+    : `${lounge.name}, ${lounge.online} listening`;
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onOpen}
+      style={({ pressed }) => [pressed && styles.pressed]}>
+      <GlassCard style={styles.railCard}>
+        <View style={styles.railTop}>
+          <View
+            style={[
+              styles.railBar,
+              live
+                ? {
+                    backgroundColor: C.live,
+                    /*
+                      `0 0 12px var(--aux-live-m)` (L257). Centred, so `bloom()`
+                      cannot stand in — every recipe in the theme offsets its
+                      shadow downward and this has to sit around the stripe.
+                    */
+                    boxShadow: [
+                      { offsetX: 0, offsetY: 0, blurRadius: 12, color: C.liveMid },
+                    ],
+                  }
+                : { backgroundColor: C.rule3 },
+            ]}
+          />
+          {/*
+            Two lines, and that is what `RAIL_HEIGHT` is sized for. A third line
+            would make one card taller than its neighbours, and a horizontal row
+            of cards that disagree about height reads as a rendering fault.
+          */}
+          <Text numberOfLines={2} style={[styles.railName, { color: C.ink }]}>
+            {lounge.name}
+          </Text>
+        </View>
+
+        <View style={styles.railMeta}>
+          <Text numberOfLines={1} style={[styles.railMembers, { color: C.ink3 }]}>
+            {lounge.online > 0 ? `${lounge.online} on` : 'quiet'}
+          </Text>
+          {live ? (
+            <Text style={[styles.railLive, { color: C.liveText }]}>{`${lounge.live} live`}</Text>
+          ) : null}
+        </View>
+      </GlassCard>
+    </Pressable>
+  );
+}
+
+/**
+ * The dashed NEW tile that closes the rail (L268).
+ *
+ * Hand-rolled rather than a `GlassCard`, because the whole point of it is that
+ * it has NO fill and NO shadow — it is the outline of a card that does not
+ * exist yet. (`borderStyle: 'dashed'` degrades to a solid hairline on some
+ * Android builds when a radius is present; the outline still reads.)
+ */
+function NewLoungeTile({ onPress }: { onPress: () => void }) {
+  const C = useColors();
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Create a lounge"
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.railNew,
+        { borderColor: pressed ? C.pill : C.rule3 },
+        pressed && styles.pressed,
+      ]}>
+      <Plus size={20} strokeWidth={2} color={C.ink3} />
+      <Text style={[styles.railNewLabel, { color: C.ink3 }]}>New</Text>
+    </Pressable>
+  );
+}
+
+/**
+ * The rail itself (L255-269).
+ *
+ * `margin: 0 -18` in the artboard: it bleeds to the frame edge so the cards
+ * run off the side rather than stopping short of it, which is what tells you
+ * there is more to drag to. The negative margin plus matching content padding
+ * is that, in React Native.
+ */
+function LoungeRail({
+  lounges,
+  onOpen,
+  onCreate,
+}: {
+  lounges: RailLounge[];
+  onOpen: (loungeId: string) => void;
+  onCreate: () => void;
+}) {
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={styles.rail}
+      contentContainerStyle={styles.railContent}>
+      {lounges.map((lounge) => (
+        <LoungeRailCard key={lounge.id} lounge={lounge} onOpen={() => onOpen(lounge.id)} />
+      ))}
+      <NewLoungeTile onPress={onCreate} />
+    </ScrollView>
+  );
+}
+
 // ------------------------------------------------------------------- the hero
 
 /**
@@ -218,103 +558,16 @@ type Hero =
     };
 
 /**
- * The 32-bar waveform, drawn twice: once in `track` for the whole band and once
- * in `ink` inside a clip that is as wide as the progress. That is the design's
- * `clip-path` — React Native has none, so the clip is a measured box with
- * `overflow: hidden` and a full-width row inside it.
+ * The hook: what is playing right now that you can walk into.
  *
- * Memoised on colour alone, so the 64 bars are laid out once and only the clip
- * box moves on each 250ms tick.
+ * THE ACCENT RULE, DRAWN OUT, because this one card carries every register:
+ *   the LIVE badge is coral        — a state of the world
+ *   the progress bar is coral      — something is playing, which is also state
+ *   the lounge link is `priTint`   — an action, at link volume
+ *   the Join CTA is the blue pill  — the action this card is asking for
+ * No element is painted in both. Repainting the CTA coral because the session
+ * is live is the mistake this comment exists to prevent.
  */
-const Bars = memo(function Bars({ color }: { color: string }) {
-  return (
-    <>
-      {BARS.map((height, i) => (
-        <View
-          key={`${i}-${height}`}
-          style={[styles.bar, { height: `${height}%`, backgroundColor: color }]}
-        />
-      ))}
-    </>
-  );
-});
-
-function Waveform({ progress }: { progress: number }) {
-  const C = useColors();
-  const [width, setWidth] = useState(0);
-
-  const onLayout = useCallback((e: LayoutChangeEvent) => {
-    const next = e.nativeEvent.layout.width;
-    setWidth((prev) => (prev === next ? prev : next));
-  }, []);
-
-  return (
-    <View
-      accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
-      style={styles.wave}
-      onLayout={onLayout}>
-      <Bars color={C.track} />
-
-      <View style={[styles.waveClip, { width: width * progress }]}>
-        <View style={[styles.waveInner, { width }]}>
-          <Bars color={C.ink} />
-        </View>
-      </View>
-    </View>
-  );
-}
-
-/** The one filled action on the screen. Reserved for walking into a Session. */
-function HeroActions({
-  primary,
-  onPrimary,
-  secondary,
-  onSecondary,
-}: {
-  primary: string;
-  onPrimary: () => void;
-  secondary: string;
-  onSecondary: () => void;
-}) {
-  const C = useColors();
-
-  return (
-    <View style={styles.actions}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={primary}
-        onPress={onPrimary}
-        style={({ pressed }) => [
-          styles.primary,
-          { backgroundColor: C.pill },
-          dropped(C, 'md'),
-          pressed && styles.pressed,
-        ]}>
-        <Play size={16} strokeWidth={2.5} color={C.pillInk} fill={C.pillInk} />
-        <Text numberOfLines={1} style={[styles.primaryLabel, { color: C.pillInk }]}>
-          {primary}
-        </Text>
-      </Pressable>
-
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Open ${secondary}`}
-        onPress={onSecondary}
-        style={({ pressed }) => [
-          styles.secondary,
-          { backgroundColor: C.surface2 },
-          raised(C),
-          pressed && styles.pressed,
-        ]}>
-        <Text numberOfLines={1} style={[styles.secondaryLabel, { color: C.ink2 }]}>
-          {secondary}
-        </Text>
-      </Pressable>
-    </View>
-  );
-}
-
 function HeroCard({
   hero,
   listeners,
@@ -331,16 +584,15 @@ function HeroCard({
   const driftMs = usePlayback((state) => state.driftMs);
   const isSynced = usePlayback((state) => state.isSynced);
 
+  const mine = hero.kind === 'mine';
+
   /*
     `expectedPositionMs` measures from the room's start stamp and keeps counting
     past the end of the track — the room row simply has not been advanced yet —
     so the readout is clamped to the duration rather than reporting 9:31 of a
     3:12 song. `livePositionMs` already clamps itself.
   */
-  const raw =
-    hero.kind === 'mine'
-      ? expectedPositionMs(hero.timeline, nowMs)
-      : livePositionMs(hero.entry, nowMs);
+  const raw = mine ? expectedPositionMs(hero.timeline, nowMs) : livePositionMs(hero.entry, nowMs);
 
   const positionMs = hero.durationMs > 0 ? Math.min(hero.durationMs, Math.max(0, raw)) : 0;
   const progress = hero.durationMs > 0 ? positionMs / hero.durationMs : 0;
@@ -349,19 +601,39 @@ function HeroCard({
     The centre readout is the only place the two kinds diverge in meaning: my
     own Session can report the sync the controller is actually measuring, while
     somebody else's can only honestly report how many of my lounge-mates are in
-    it.
+    it. IN SYNC is a state, so it — and only it — takes the coral.
   */
-  const centre =
-    hero.kind === 'mine'
-      ? isSynced
-        ? 'IN SYNC'
-        : `${driftMs > 0 ? '+' : ''}${Math.round(driftMs)}MS`
-      : `${listeners} LISTENING`;
+  const synced = mine && isSynced;
+  const centre = mine
+    ? isSynced
+      ? 'IN SYNC'
+      : `${driftMs > 0 ? '+' : ''}${Math.round(driftMs)}MS`
+    : `${listeners} LISTENING`;
 
   return (
-    <View style={[styles.hero, { backgroundColor: C.surface }, raisedLarge(C)]}>
+    <GlassCard style={[styles.hero, raisedLarge(C)]}>
+      <View style={styles.heroHead}>
+        <StatusPill label="live" tone="liveWash" dot live />
+
+        <Pressable
+          accessibilityRole="link"
+          accessibilityLabel={`Open ${hero.loungeName}`}
+          onPress={() => onOpenLounge(hero.loungeId)}
+          style={({ pressed }) => [styles.loungeLink, pressed && styles.pressed]}>
+          <Text numberOfLines={1} style={[styles.loungeLinkLabel, { color: C.priTint }]}>
+            {hero.loungeName}
+          </Text>
+          <ChevronRight size={14} strokeWidth={2.5} color={C.priTint} />
+        </Pressable>
+      </View>
+
       <View style={styles.heroTop}>
-        <View style={[styles.art, { backgroundColor: C.artwork }, dropped(C, 'md')]}>
+        {/*
+          A WELL, not a plate. Artwork inverted in this direction: a dark recess
+          carrying a faint `artInk` monogram. Any code assuming a bright tile —
+          dark ink on it, a light border — is now wrong.
+        */}
+        <View style={[styles.art, { backgroundColor: C.artwork, borderColor: C.rule }]}>
           <Text style={[styles.artGlyph, { color: C.artInk }]}>{glyphFor(hero.title)}</Text>
 
           {/* Over the glyph, so the letter doubles as the error fallback. */}
@@ -379,32 +651,121 @@ function HeroCard({
 
         <View style={styles.heroInfo}>
           <Text numberOfLines={1} style={[styles.heroKicker, { color: C.ink3 }]}>
-            {`${hero.loungeName} · on aux · ${hero.who}`}
+            {mine ? "you're on aux" : `@${hero.who} is on aux`}
           </Text>
           <Text numberOfLines={1} style={[styles.heroTitle, { color: C.ink }]}>
             {hero.title}
           </Text>
-          <Text numberOfLines={1} style={[styles.heroArtist, { color: C.ink2 }]}>
-            {hero.artist}
-          </Text>
+          {hero.artist ? (
+            <Text numberOfLines={1} style={[styles.heroArtist, { color: C.ink2 }]}>
+              {hero.artist}
+            </Text>
+          ) : null}
         </View>
       </View>
 
-      <Waveform progress={progress} />
+      {/*
+        6px rather than the list's 4: this is the one bar on the screen anyone
+        reads a position off, and the coral bleed under it is what makes it
+        register as running rather than drawn. No thumb — nobody scrubs another
+        room's playhead from the Feed.
+      */}
+      <ProgressBar progress={progress} height={6} glow style={styles.heroBar} />
 
       <View style={styles.readout}>
         <Text style={[styles.readoutSide, { color: C.ink2 }]}>{timecode(positionMs)}</Text>
-        <Text style={[styles.readoutCentre, { color: C.ink }]}>{centre}</Text>
+        <Text style={[styles.readoutCentre, { color: synced ? C.liveText : C.ink2 }]}>
+          {centre}
+        </Text>
         <Text style={[styles.readoutSide, { color: C.ink2 }]}>{timecode(hero.durationMs)}</Text>
       </View>
 
-      <HeroActions
-        primary={hero.kind === 'mine' ? 'Back to session' : 'Join session'}
-        onPrimary={() => onOpenRoom(hero.roomId)}
-        secondary={hero.loungeName}
-        onSecondary={() => onOpenLounge(hero.loungeId)}
-      />
-    </View>
+      <View style={styles.heroAction}>
+        <AuxButton
+          label={mine ? 'Back to session' : 'Join session'}
+          onPress={() => onOpenRoom(hero.roomId)}
+          variant="pri"
+          size="lg"
+          shape="pill"
+          align="center"
+          icon={Play}
+          fullWidth
+        />
+      </View>
+    </GlassCard>
+  );
+}
+
+// -------------------------------------------------------------- the end card
+
+/**
+ * The card that closes the Feed (L302-317).
+ *
+ * It is always here, exactly as the artboard has it, and that is what retires
+ * the old "Nobody is on right now" empty state: the answer to an empty Feed and
+ * the answer to a busy one are the same verb, so the screen offers it once,
+ * in one place, and only changes what it says above the button.
+ *
+ * The blue corner bleed is `GlassCard glow="pri"` — blue because this card is
+ * something you DO. A coral bleed here would claim the room is already live.
+ */
+function StartSessionCard({
+  roster,
+  quiet,
+  onStart,
+}: {
+  /** Real faces from presence, not decoration — these are the people who would hear it. */
+  roster: FeedEntry[];
+  /** Nobody is on. Changes the pitch, not the offer. */
+  quiet: boolean;
+  onStart: () => void;
+}) {
+  const C = useColors();
+
+  return (
+    <GlassCard glow="pri" style={styles.promo}>
+      <Text style={[styles.promoKicker, { color: C.ink3 }]}>
+        {quiet ? 'nobody is on right now' : 'the aux is open'}
+      </Text>
+      <Text style={[styles.promoTitle, { color: C.ink }]}>Start a Session</Text>
+      <Text style={[styles.promoBody, { color: C.ink2 }]}>
+        {quiet
+          ? 'Put something on and your lounges will see it the moment it goes live.'
+          : 'Pick a track and everyone who joins hears it at the same millisecond.'}
+      </Text>
+
+      <View style={styles.promoRow}>
+        <AuxButton
+          label="You're on aux"
+          onPress={onStart}
+          variant="pri"
+          size="sm"
+          shape="pill"
+          align="center"
+        />
+
+        {roster.length > 0 ? (
+          <View
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            style={styles.stack}>
+            {roster.map((person) => (
+              /*
+                The ring is the GROUND colour, per the artboard — it reads as
+                each face punched out of the one behind it. Over a translucent
+                card it is a shade darker than the fill, which is what separates
+                them; a `surface` ring would composite twice and go pale.
+              */
+              <View
+                key={person.userId}
+                style={[styles.stackRing, { borderColor: C.bg }]}>
+                <Avatar uri={person.avatarUrl} name={person.displayName} size={26} />
+              </View>
+            ))}
+          </View>
+        ) : null}
+      </View>
+    </GlassCard>
   );
 }
 
@@ -415,6 +776,11 @@ const keyExtractor = (entry: FeedEntry) => entry.userId;
 /**
  * Every module enters the same way: translateY(8) → 0 over 280ms on the
  * design's curve, and nothing at all when the OS asks for reduced motion.
+ *
+ * A shared value driven from an effect, NOT a Reanimated layout animation:
+ * `entering=` marks the view `visibility: hidden` until the animation runs, and
+ * on react-native-web it never runs — leaving the whole Feed permanently
+ * invisible while reporting perfectly correct colour, size and layout.
  */
 function useModuleEnter() {
   const reduced = useReducedMotion();
@@ -438,94 +804,63 @@ function useModuleEnter() {
 }
 
 /**
- * The card that stands in the hero's place when there is no hero.
- *
- * A new account sees this before it sees anything else, so it is built to the
- * hero's own geometry — `size="hero"` is the shared card's 78px tile and 21px
- * title — rather than shrunk to a footnote. One line of what happened, one
- * thing to do about it.
- *
- * The drawing lives in `@/components/ui/empty-state`. This screen, Explore and
- * Lounges each used to carry their own copy of it, which is how the icon ended
- * up 30px here and 24px there.
- */
-function QuietCard({
-  icon,
-  title,
-  line,
-  action,
-}: {
-  icon: LucideIcon;
-  title: string;
-  line?: string;
-  action: { label: string; onPress: () => void };
-}) {
-  return (
-    <EmptyState
-      icon={icon}
-      title={title}
-      description={line}
-      size="hero"
-      primary={action}
-      style={styles.quiet}
-    />
-  );
-}
-
-/**
- * The hero card's own loading twin — artwork well, two lines, the waveform
- * band, the readout, both action cells. The hero is the tallest thing on the
- * screen, so leaving it out of the skeleton is what makes the Feed jump when
- * the data lands.
+ * The hero's own loading twin — badge row, artwork well, two lines, the bar,
+ * the readout, the CTA. The hero is the tallest thing on the screen, so
+ * leaving it out of the skeleton is what makes the Feed jump when data lands.
  */
 function HeroSkeleton() {
-  const C = useColors();
-
   return (
-    <View style={[styles.hero, { backgroundColor: C.surface }, raisedLarge(C)]}>
+    <GlassCard style={styles.hero}>
+      <View style={styles.heroHead}>
+        <Skeleton width={62} height={24} radius={Radii.pill} />
+        <Skeleton width={84} height={14} />
+      </View>
+
       <View style={styles.heroTop}>
         <Skeleton width={ART} height={ART} />
-        <View style={styles.skeletonHeroInfo}>
+        <View style={styles.skeletonInfo}>
           <Skeleton width="46%" height={10} />
           <Skeleton width="82%" height={20} />
           <Skeleton width="60%" height={12} />
         </View>
       </View>
 
-      <Skeleton width="100%" height={30} style={styles.skeletonWave} />
+      <Skeleton width="100%" height={6} style={styles.heroBar} />
 
-      <View style={styles.skeletonReadout}>
+      <View style={styles.readout}>
         <Skeleton width={34} height={11} />
         <Skeleton width={62} height={11} />
         <Skeleton width={34} height={11} />
       </View>
 
-      <View style={styles.actions}>
-        <Skeleton width="100%" height={50} style={styles.flex} />
-        <Skeleton width={118} height={50} />
-      </View>
+      <Skeleton width="100%" height={54} radius={Radii.pill} style={styles.heroAction} />
+    </GlassCard>
+  );
+}
+
+/** The rail at the geometry it will have once it arrives. */
+function RailSkeleton() {
+  return (
+    <View style={styles.railSkeleton}>
+      {SKELETON_RAIL.map((card) => (
+        <Skeleton key={card} width={RAIL_CARD} height={RAIL_HEIGHT} radius={CARD_RADIUS} />
+      ))}
     </View>
   );
 }
 
-/** The whole screen at the geometry it will have once it arrives. */
-function FeedSkeleton() {
-  const C = useColors();
-
+/** The live list, same. */
+function RowsSkeleton() {
   return (
     <View>
-      <HeroSkeleton />
-
-      <Text style={[styles.sectionKicker, { color: C.ink3 }]}>Listening now</Text>
-
       {SKELETON_ROWS.map((row) => (
-        <View key={row} style={[styles.skeletonRow, { backgroundColor: C.surface }, raised(C)]}>
-          <Skeleton width={TILE} height={TILE} />
-          <View style={styles.skeletonInfo}>
+        <GlassCard key={row} variant="row" style={styles.skeletonRow}>
+          <Skeleton width={52} height={52} />
+          <View style={styles.skeletonRowInfo}>
             <Skeleton width="58%" height={13} />
             <Skeleton width="80%" height={11} />
           </View>
-        </View>
+        </GlassCard>
       ))}
     </View>
   );
@@ -539,9 +874,13 @@ export default function FeedScreen() {
   const queryClient = useQueryClient();
   const { profile } = useAuth();
   const moduleStyle = useModuleEnter();
-  const unread = useTotalUnread();
+  const dockReserve = useDockReserve();
 
   const [refreshing, setRefreshing] = useState(false);
+
+  // Read once at mount. Re-reading the clock every render would flip the
+  // greeting mid-scroll at 11:59, which is the one moment anyone would notice.
+  const greeting = useMemo(() => greetingFor(new Date().getHours()), []);
 
   const identity = useMemo<PresenceIdentity | null>(
     () =>
@@ -614,7 +953,12 @@ export default function FeedScreen() {
     [router]
   );
 
-  const openMessages = useCallback(() => router.push('/messages'), [router]);
+  const openProfile = useCallback(() => router.push('/profile'), [router]);
+  const openSettings = useCallback(() => router.push('/settings'), [router]);
+  const openExplore = useCallback(() => router.push('/explore'), [router]);
+  /** The only route to `/lounges` left in the shell — the nav capsule dropped its cell. */
+  const openMyLounges = useCallback(() => router.push('/lounges'), [router]);
+  const createLounge = useCallback(() => router.push('/lounge/create'), [router]);
   const startSession = useCallback(() => router.push('/room/create'), [router]);
 
   const onRefresh = useCallback(async () => {
@@ -648,6 +992,30 @@ export default function FeedScreen() {
     }
     return counts;
   }, [entries]);
+
+  /**
+   * The rail's counts, folded out of the same presence stream the list uses
+   * rather than fetched.
+   *
+   * `entries` is deduplicated by PERSON — somebody in three of my lounges is
+   * tagged with one of them — so these are "people showing on the Feed under
+   * this lounge", not its membership. That is what the labels say: "3 on", not
+   * "3 members". A member count would need its own query per lounge.
+   */
+  const railLounges = useMemo<RailLounge[]>(
+    () =>
+      loungeList.map((lounge) => {
+        let online = 0;
+        let live = 0;
+        for (const entry of entries) {
+          if (entry.loungeId !== lounge.id) continue;
+          online += 1;
+          if (entry.roomId !== null) live += 1;
+        }
+        return { id: lounge.id, name: lounge.name, online, live };
+      }),
+    [entries, loungeList]
+  );
 
   const hero = useMemo<Hero | null>(() => {
     // A Session I am already inside wins the card: it becomes the way back in.
@@ -719,167 +1087,128 @@ export default function FeedScreen() {
     []
   );
 
-  /** The masthead's second line is a readout, not a sentence. */
-  const summary = useMemo(() => {
-    if (lounges.isError) return 'Could not reach your lounges';
-    if (loungeList.length === 0) return 'No lounges yet';
-    if (entries.length === 0) return 'Nobody on right now';
+  /** The count beside "Live now" — coral, because it reports the world, not a control. */
+  const liveCount = useMemo(() => {
     const live = entries.filter((entry) => entry.roomId !== null).length;
-    return `${entries.length} online · ${live} on aux`;
-  }, [entries, lounges.isError, loungeList.length]);
+    return live > 0 ? `${live} on aux` : `${entries.length} online`;
+  }, [entries]);
 
-  /**
-   * The live mark is the accent, so it appears only when something is actually
-   * live. A red dot over an empty Feed is decoration, and it is also a lie.
-   */
-  const anyLive = hero !== null || entries.some((entry) => entry.roomId !== null);
+  const name = profile?.display_name || profile?.username || 'You';
 
-  const header = useMemo(
-    () => (
-      <View>
-        <View style={styles.masthead}>
-          <View style={styles.mastheadText}>
-            {/* Reserved while loading, so the mark arriving does not push the
-                hero down the screen. */}
-            {showSkeleton ? (
-              <Skeleton width={78} height={14} />
-            ) : anyLive ? (
-              <View style={styles.liveRow}>
-                <LiveDot size={7} />
-                <Text style={[styles.liveLabel, { color: C.liveText }]}>Live now</Text>
-              </View>
-            ) : null}
+  /*
+    The activity dot means "your lounges can see what you are playing right
+    now" — the profile toggle AND something actually coming out of the speaker.
+    The artboard binds it to the toggle alone, which would leave it permanently
+    lit for almost everybody and stop meaning anything.
+  */
+  const broadcasting = Boolean(profile?.show_activity) && localNowPlaying !== null;
 
-            <Text
-              style={[
-                styles.title,
-                (showSkeleton || anyLive) && styles.titleStacked,
-                { color: C.ink },
-              ]}>
-              The Feed
-            </Text>
+  /*
+    Composed inline rather than behind a `useMemo`.
 
-            {/* A skeleton rather than the words "Tuning in": the line keeps its
-                height, so the masthead does not reflow when the count lands. */}
-            {showSkeleton ? (
-              <Skeleton width={148} height={13} style={styles.summarySkeleton} />
-            ) : (
-              <Text numberOfLines={1} style={[styles.summary, { color: C.ink2 }]}>
-                {summary}
-              </Text>
-            )}
-          </View>
+    A FlatList reconciles its header by element TYPE, so a fresh element each
+    render costs a re-render of the header and nothing else — and the header
+    depends on nearly every value on this screen, so hoisting it meant a
+    fourteen-entry dependency list that had to be right or the live counts went
+    stale. The compiler memoises what is worth memoising underneath.
+  */
+  const header = (
+    <View>
+      <SearchLink onPress={openExplore} />
 
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={unread > 0 ? `Messages, ${unread} unread` : 'Messages'}
-            onPress={openMessages}
-            style={({ pressed }) => [
-              styles.iconTile,
-              { backgroundColor: C.surface },
-              raised(C),
-              pressed && styles.pressed,
-            ]}>
-            <Mail size={18} strokeWidth={2} color={C.ink} />
-            {unread > 0 ? (
-              <View style={[styles.badge, { backgroundColor: C.live }]}>
-                <Text style={[styles.badgeCount, { color: C.onLive }]}>
-                  {unread > 99 ? '99+' : unread}
-                </Text>
-              </View>
-            ) : null}
-          </Pressable>
-        </View>
+      {hero ? (
+        <HeroCard
+          hero={hero}
+          listeners={listenersByRoom.get(hero.roomId) ?? 1}
+          onOpenRoom={openRoom}
+          onOpenLounge={openLounge}
+        />
+      ) : showSkeleton ? (
+        <HeroSkeleton />
+      ) : null}
 
-        {hero ? (
-          <HeroCard
-            hero={hero}
-            listeners={listenersByRoom.get(hero.roomId) ?? 1}
-            onOpenRoom={openRoom}
-            onOpenLounge={openLounge}
-          />
-        ) : null}
+      <SectionHeader
+        title="Your lounges"
+        action={{ label: 'See all', onPress: openMyLounges }}
+      />
 
-        {rows.length > 0 ? (
-          <Text style={[styles.sectionKicker, { color: C.ink3 }]}>Listening now</Text>
-        ) : null}
-      </View>
-    ),
-    [
-      C,
-      anyLive,
-      hero,
-      listenersByRoom,
-      openLounge,
-      openMessages,
-      openRoom,
-      rows.length,
-      showSkeleton,
-      summary,
-      unread,
-    ]
-  );
-
-  /**
-   * One card closes the list and stands where the hero would: there is no
-   * separate "nothing here" screen to design, only a different reason.
-   */
-  const footer = useMemo(() => {
-    if (showSkeleton) return null;
-
-    if (lounges.isError) {
-      return (
-        <QuietCard
+      {showSkeleton ? (
+        <RailSkeleton />
+      ) : lounges.isError ? (
+        <EmptyState
           icon={WifiOff}
           title="Could not load your lounges"
-          line="Check your connection."
-          action={{ label: 'Try again', onPress: () => void onRefresh() }}
+          description="Check your connection."
+          primary={{ label: 'Try again', onPress: () => void onRefresh() }}
         />
-      );
-    }
-
-    if (loungeList.length === 0) {
-      return (
-        <QuietCard
+      ) : loungeList.length === 0 ? (
+        <EmptyState
           icon={Users}
           title="No lounges yet"
-          line="Join one to see who is listening."
-          action={{ label: 'Find a lounge', onPress: () => router.push('/lounges') }}
+          description="Create one, or join with a code."
+          primary={{ label: 'Find a lounge', onPress: openExplore }}
+          secondary={{ label: 'Create one', onPress: createLounge }}
         />
-      );
-    }
+      ) : (
+        <LoungeRail lounges={railLounges} onOpen={openLounge} onCreate={createLounge} />
+      )}
 
-    if (hero || rows.length > 0) return null;
-
-    return (
-      <QuietCard
-        icon={Radio}
-        title="Nobody is on right now"
-        action={{ label: 'Start a session', onPress: startSession }}
-      />
-    );
-  }, [
-    hero,
-    lounges.isError,
-    loungeList.length,
-    onRefresh,
-    router,
-    rows.length,
-    showSkeleton,
-    startSession,
-  ]);
+      {showSkeleton || rows.length > 0 ? (
+        <SectionHeader
+          title="Live now"
+          count={showSkeleton ? undefined : liveCount}
+          // The rail already paid 20px of clearance for its own shadow, so this
+          // header takes the remainder of the artboard's 24 rather than all of it.
+          style={styles.sectionAfterRail}
+        />
+      ) : null}
+    </View>
+  );
 
   return (
-    <Screen padded={false}>
+    /*
+      `ground={false}`: the ambient blobs are mounted ONCE behind the tab
+      navigator, and every card on this screen is 5.5% white composited over
+      them. An opaque screen background would cover the blobs and collapse the
+      whole surface stack to one flat grey.
+    */
+    <Screen padded={false} ground={false}>
       <Animated.View style={[styles.flex, moduleStyle]}>
+        <Masthead
+          name={name}
+          avatarUrl={profile?.avatar_url ?? null}
+          greeting={greeting}
+          broadcasting={broadcasting}
+          onProfile={openProfile}
+          onSettings={openSettings}
+        />
+
         <FlatList
           data={showSkeleton ? [] : rows}
           keyExtractor={keyExtractor}
           renderItem={renderItem}
           ListHeaderComponent={header}
-          ListEmptyComponent={showSkeleton ? <FeedSkeleton /> : null}
-          ListFooterComponent={footer}
-          contentContainerStyle={styles.content}
+          ListEmptyComponent={showSkeleton ? <RowsSkeleton /> : null}
+          ListFooterComponent={
+            showSkeleton ? null : (
+              <StartSessionCard
+                roster={entries.slice(0, 4)}
+                quiet={rows.length === 0 && hero === null}
+                onStart={startSession}
+              />
+            )
+          }
+          // The masthead is a sibling now rather than part of the header, so the
+          // list is one of two children in a column and has to claim the rest of
+          // it explicitly — without this it sizes to its content and stops
+          // scrolling once the Feed is longer than the screen.
+          style={styles.flex}
+          /*
+            The dock reservation is inline because it depends on the device's
+            bottom inset, which a StyleSheet object cannot carry — that is
+            exactly how the old static `Dock.reserve` came to under-reserve here.
+          */
+          contentContainerStyle={[styles.content, { paddingBottom: dockReserve }]}
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
@@ -887,7 +1216,7 @@ export default function FeedScreen() {
               onRefresh={() => void onRefresh()}
               tintColor={C.ink2}
               colors={[C.live]}
-              progressBackgroundColor={C.surface}
+              progressBackgroundColor={C.surfaceSolid}
             />
           }
         />
@@ -900,10 +1229,10 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
   },
+  /* `paddingBottom` is applied at the call site — see the note at the FlatList. */
   content: {
-    paddingTop: 14,
-    paddingBottom: LIST_TAIL,
-    paddingHorizontal: ROW_GUTTER,
+    paddingTop: Space.xs,
+    paddingHorizontal: GUTTER,
     flexGrow: 1,
   },
   pressed: {
@@ -912,71 +1241,190 @@ const styles = StyleSheet.create({
 
   /* ------------------------------------------------------------- masthead */
 
+  /** L232: `padding:12px 18px 10px`, row, gap 12. */
   masthead: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
+    alignItems: 'center',
     gap: Space.md,
-    paddingHorizontal: GUTTER - ROW_GUTTER,
+    paddingTop: Space.md,
+    paddingBottom: 10,
+    paddingHorizontal: GUTTER,
   },
   mastheadText: {
     flex: 1,
     minWidth: 0,
   },
-  liveRow: {
+  greeting: {
+    ...Type.body(12),
+  },
+  name: {
+    ...Type.display(22),
+    letterSpacing: tracking(22, -0.02),
+  },
+
+  /* --------------------------------------------------------------- search */
+
+  /** L245: a 50px pill of glass. The edge is what makes it an object at 5.5% fill. */
+  search: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Space.sm,
-  },
-  liveLabel: {
-    ...Type.label(10.5),
-    letterSpacing: tracking(10.5, 0.15),
-  },
-  title: {
-    ...Type.display(30),
-    letterSpacing: tracking(30, -0.03),
-  },
-  /** The 9px only exists to clear the live mark; without it the title leads. */
-  titleStacked: {
-    marginTop: 9,
-  },
-  summary: {
-    ...Type.body(13.5),
-    marginTop: 5,
-  },
-  summarySkeleton: {
-    marginTop: 7,
-  },
-  iconTile: {
-    width: TOUCH_TARGET,
-    height: TOUCH_TARGET,
-    borderRadius: Radii.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  badge: {
-    position: 'absolute',
-    top: -3,
-    right: -3,
-    minWidth: 18,
-    height: 18,
+    gap: 10,
+    minHeight: 50,
+    paddingHorizontal: Space.lg,
     borderRadius: Radii.pill,
-    paddingHorizontal: 5,
-    alignItems: 'center',
+    borderWidth: Rule.hair,
+  },
+  searchLabel: {
+    ...Type.body(15),
+    flex: 1,
+  },
+
+  /* -------------------------------------------------------------- section */
+
+  section: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: Space.md,
+    marginTop: 22,
+    marginBottom: Space.md,
+  },
+  sectionAfterRail: {
+    marginTop: Space.xs,
+  },
+  sectionTitle: {
+    fontFamily: Fonts.extrabold,
+    fontSize: 17,
+    lineHeight: 21,
+    letterSpacing: tracking(17, -0.01),
+    flexShrink: 1,
+  },
+  /** 44 tall and 60 wide even though the label is 12px — it is still a target. */
+  sectionLink: {
+    minHeight: TOUCH_TARGET,
+    minWidth: 60,
+    alignItems: 'flex-end',
     justifyContent: 'center',
   },
-  badgeCount: {
-    ...readout(10),
-    lineHeight: 12,
+  sectionLinkLabel: {
+    fontFamily: Fonts.semibold,
+    fontSize: 12,
+    lineHeight: 15,
+  },
+  sectionCount: {
+    ...Type.heading(10),
+    letterSpacing: tracking(10, 0.09),
+    textTransform: 'uppercase',
+  },
+
+  /* ----------------------------------------------------------- lounge rail */
+
+  /** The bleed: out past the gutter, then back in via the content padding. */
+  rail: {
+    marginHorizontal: -GUTTER,
+  },
+  railContent: {
+    paddingHorizontal: GUTTER,
+    paddingTop: 2,
+    paddingBottom: RAIL_TAIL,
+    gap: RAIL_GAP,
+  },
+  railSkeleton: {
+    flexDirection: 'row',
+    gap: RAIL_GAP,
+    paddingBottom: RAIL_TAIL,
+  },
+  /*
+    A FIXED floor, not `flex: 1`.
+
+    The obvious way to make rail cards agree on height is to stretch them, and
+    it silently collapses the whole rail: a `flex: 1` child inside an
+    auto-height parent measures its hypothetical size as ZERO, so the row's
+    cross size comes out as the height of the dashed tile and every card is
+    clipped to ~40px. A floor tall enough for the two-line name is definite at
+    measure time, so the cards match and the tile stretches to them.
+  */
+  railCard: {
+    width: RAIL_CARD,
+    minHeight: RAIL_HEIGHT,
+    /* Pins the meta row to the bottom edge when the name only takes one line. */
+    justifyContent: 'space-between',
+  },
+  railTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 9,
+  },
+  railBar: {
+    width: 4,
+    height: 34,
+    borderRadius: Radii.pill,
+  },
+  railName: {
+    fontFamily: Fonts.extrabold,
+    fontSize: 14,
+    lineHeight: 17,
+    letterSpacing: tracking(14, -0.01),
+    flex: 1,
+    minWidth: 0,
+  },
+  railMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Space.sm,
+    marginTop: 14,
+  },
+  railMembers: {
+    ...Type.label(10),
+    letterSpacing: tracking(10, 0.07),
+    flexShrink: 1,
+  },
+  railLive: {
+    ...Type.heading(10),
+    letterSpacing: tracking(10, 0.07),
+    textTransform: 'uppercase',
+  },
+  railNew: {
+    width: RAIL_NEW,
+    borderRadius: CARD_RADIUS,
+    borderWidth: Rule.hair,
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+  },
+  railNewLabel: {
+    ...Type.heading(10),
+    letterSpacing: tracking(10, 0.08),
+    textTransform: 'uppercase',
   },
 
   /* ----------------------------------------------------------- hero card */
 
   hero: {
-    marginTop: 22,
-    marginHorizontal: CARD_GUTTER - ROW_GUTTER,
-    padding: Space.lg,
-    borderRadius: Radii.xl,
+    marginTop: Space.md,
+  },
+  heroHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Space.sm,
+    marginBottom: Space.md,
+  },
+  loungeLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    minHeight: TOUCH_TARGET,
+    /* Grows the target upward and downward without adding row height. */
+    marginVertical: -10,
+    flexShrink: 1,
+  },
+  loungeLinkLabel: {
+    ...Type.heading(11),
+    letterSpacing: tracking(11, 0.04),
+    flexShrink: 1,
   },
   heroTop: {
     flexDirection: 'row',
@@ -986,7 +1434,8 @@ const styles = StyleSheet.create({
   art: {
     width: ART,
     height: ART,
-    borderRadius: Radii.lg,
+    borderRadius: Radii.xl,
+    borderWidth: Rule.hair,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
@@ -1013,34 +1462,10 @@ const styles = StyleSheet.create({
     ...Type.body(13),
     marginTop: 2,
   },
-
-  wave: {
-    height: 30,
+  heroBar: {
+    /* The bar's own bleed needs air; at Space.md the coral touches the artist line. */
     marginTop: Space.lg,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5.5,
-    overflow: 'hidden',
   },
-  waveClip: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    overflow: 'hidden',
-  },
-  waveInner: {
-    height: '100%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5.5,
-  },
-  bar: {
-    flex: 1,
-    minWidth: 0,
-    borderRadius: 1,
-  },
-
   readout: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1054,80 +1479,66 @@ const styles = StyleSheet.create({
   readoutCentre: {
     ...readout(11.5),
   },
-
-  actions: {
-    flexDirection: 'row',
-    gap: 11,
+  heroAction: {
     marginTop: Space.lg,
   },
-  primary: {
-    flex: 1,
-    height: 50,
-    borderRadius: Radii.md,
+
+  /* ------------------------------------------------------------ end card */
+
+  promo: {
+    marginTop: Space.lg,
+  },
+  promoKicker: {
+    ...Type.heading(10),
+    letterSpacing: tracking(10, 0.12),
+    textTransform: 'uppercase',
+  },
+  promoTitle: {
+    ...Type.display(22),
+    lineHeight: 25,
+    letterSpacing: tracking(22, -0.02),
+    marginVertical: Space.sm,
+  },
+  promoBody: {
+    ...Type.body(14),
+    lineHeight: 22,
+  },
+  promoRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 9,
+    gap: 10,
+    marginTop: Space.lg,
+    flexWrap: 'wrap',
   },
-  primaryLabel: {
-    fontFamily: Fonts.semibold,
-    fontSize: 14,
-    lineHeight: 18,
-  },
-  secondary: {
-    width: 118,
-    height: 50,
-    borderRadius: Radii.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: Space.md,
-  },
-  secondaryLabel: {
-    fontFamily: Fonts.regular,
-    fontSize: 14,
-    lineHeight: 18,
-  },
-
-  /* ---------------------------------------------------------- list parts */
-
-  sectionKicker: {
-    ...Type.label(10.5),
-    letterSpacing: tracking(10.5, 0.15),
-    paddingHorizontal: GUTTER - ROW_GUTTER,
-    paddingTop: 26,
-    paddingBottom: 10,
-  },
-  skeletonRow: {
+  stack: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: ROW_GUTTER,
-    padding: 10,
-    borderRadius: Radii.lg,
-    marginBottom: 9,
+    /*
+      Cancels the FIRST ring's overlap. The artboard puts `margin-left:-8` on
+      every face including the leading one, which eats 8 of the row's 10px gap
+      and leaves the stack all but touching the button.
+    */
+    paddingLeft: 8,
   },
+  stackRing: {
+    borderRadius: Radii.pill,
+    borderWidth: 2,
+    marginLeft: -8,
+  },
+
+  /* ---------------------------------------------------------- skeletons */
+
   skeletonInfo: {
     flex: 1,
     gap: Space.sm,
   },
-  skeletonHeroInfo: {
-    flex: 1,
-    gap: Space.sm,
-  },
-  skeletonWave: {
-    marginTop: Space.lg,
-  },
-  skeletonReadout: {
+  skeletonRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 9,
+    gap: 14,
+    marginBottom: 9,
   },
-
-  /* ------------------------------------------- loading, empty and error */
-
-  /* Placement only. The card itself is drawn by `EmptyState`. */
-  quiet: {
-    marginTop: 22,
-    marginHorizontal: CARD_GUTTER - ROW_GUTTER,
+  skeletonRowInfo: {
+    flex: 1,
+    gap: Space.sm,
   },
 });

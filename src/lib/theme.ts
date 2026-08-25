@@ -42,106 +42,158 @@ import { Platform } from 'react-native';
  * ---------------------------------------------------------------------------
  */
 export const DarkPalette = {
-  /** App ground — the gradient's middle stop. */
-  bg: '#1e2128',
-  /** Recessed: wells, inputs, the inside of a pressed control. */
-  bgRecessed: '#1a1d23',
-  /** The card. The most common surface in the design. */
-  surface: '#23272e',
-  surface2: '#262a31',
-  /** Top of the ladder: recess < nav < card < card2 < surface3. */
-  surface3: '#2c313a',
-  avatar: '#2c313a',
+  /** App ground. The blobs are what give it depth — it is flat on its own. */
+  bg: '#0a0d14',
+  /** Recessed: wells, inputs, artwork tiles. */
+  bgRecessed: '#0d111a',
   /**
-   * INVERTS between themes — near-WHITE on dark, near-black on light.
-   * Artwork is a bright tile here, not a dark well, so anything drawn on it
-   * must use `artInk` rather than `ink`, or it disappears.
-   */
-  artwork: '#edeff2',
-  /** The only ink that reads on `artwork`. */
-  artInk: 'rgba(30,34,41,.42)',
-
-  ink: '#edeff2',
-  ink2: '#8e949e',
-  /** Lightened from the design's #757b85 for contrast — see the note above. */
-  ink3: '#8a9099',
-
-  /** RESERVED: live, playing, joinable, in sync, on aux, unread, selected. */
-  live: '#ec3013',
-  /** The accent as small text — the fill fails at label sizes. */
-  liveText: '#ff563c',
-  /** WHITE, in both themes: the design sets #fff on every accent fill. */
-  onLive: '#ffffff',
-  /** One alarm colour. Destructive = a `live` outline with `liveText` on it. */
-  danger: '#ec3013',
-
-  ruleSoft: 'rgba(237,239,242,.06)',
-  rule: 'rgba(237,239,242,.1)',
-  /**
-   * Controls in this design carry shadows, not borders. These two survive for
-   * the call sites that still draw a border, and should fall away as each
-   * component is rebuilt on the shadow recipes.
-   */
-  rule2: 'rgba(237,239,242,.14)',
-  rule3: 'rgba(237,239,242,.20)',
-  /** Unplayed waveform bar. Not text, so it takes the design's raw value. */
-  track: '#757b85',
-  grid: 'rgba(237,239,242,.03)',
-
-  liveWash: 'rgba(236,48,19,.14)',
-  liveMid: 'rgba(236,48,19,.30)',
-  dangerBorder: '#ec3013',
-  dangerWash: 'rgba(236,48,19,.10)',
-  /** Behind sheets. The one colour the design keeps identical across themes. */
-  scrim: 'rgba(0,0,0,.5)',
-
-  /* ------------------------------------------------------- the two shadows */
-
-  /**
-   * THE MOST IMPORTANT PAIR IN THIS FILE.
+   * THE CARD, AND IT IS TRANSLUCENT.
    *
-   * Every raised surface is one dark shadow down-right and one light shadow
-   * up-left, as if lit from the top-left. Note the ~30x alpha asymmetry against
-   * the light theme: on a dark ground the highlight is almost subliminal
-   * (.032), because a bright edge on dark reads as a glow rather than a lit
-   * surface. Copying the light theme's .95 here would look like neon piping.
+   * 5.5% white over the ground, so the ambient blobs bleed through every card.
+   * That bleed is the direction's whole idea — but it has two failure modes
+   * worth knowing before you reach for this token:
+   *   a `surface` card inside another `surface` card composites to ~11%, and
+   *   a `surface` chip laid over album art goes see-through.
+   * Use `surfaceSolid` for either case.
    */
-  shadowDark: 'rgba(0,0,0,.46)',
-  shadowLight: 'rgba(255,255,255,.032)',
-  /** Ordinary drop shadow, for things genuinely floating above the page. */
-  shadowDrop: 'rgba(0,0,0,.42)',
+  surface: 'rgba(255,255,255,0.055)',
+  /** The pressed state, and the resting fill for chips. */
+  surface2: 'rgba(255,255,255,0.09)',
+  surface3: 'rgba(255,255,255,0.13)',
+  avatar: 'rgba(255,255,255,0.14)',
+  /**
+   * INVERTS from the previous direction: artwork is now a dark WELL with a
+   * faint monogram, not a bright plate. Anything that assumed bright artwork
+   * breaks visually rather than at compile time.
+   */
+  artwork: '#0d111a',
+  artInk: 'rgba(255,255,255,0.22)',
 
-  /* ------------------------------------------------------- inverted button */
-
-  /** Primary action fill — near-white on dark, near-black on light. */
-  pill: '#f1f3f6',
-  pillInk: '#1e2229',
-  /** Kept as the older name for the same device. */
-  cream: '#f1f3f6',
-  onCream: '#1e2229',
-  onCream2: 'rgba(30,34,41,.65)',
-
-  /** The tab bar. Darker than a card, so the bar reads as behind the content. */
-  nav: '#1b1e24',
-  dock: '#1b1e24',
-  /** An unselected chip — the recessed value. */
-  chip: '#1a1d23',
-
-  /* ------------------------------------------------------------- gradient */
-
-  /** The ground is a three-stop vertical wash, not a flat fill. */
-  bgTop: '#272c34',
-  bgBot: '#191c21',
+  ink: '#f4f6fb',
+  ink2: '#a6b0c2',
+  ink3: '#828da2',
 
   /**
-   * Deprecated with the Apex direction, which had a second amber accent. Held
-   * as aliases of `live` so nothing breaks and nothing drifts off-palette.
+   * CORAL — and it means STATE, not action.
+   *
+   * live · playing · happening · in sync · on aux · unread · PREMIUM · joinable.
+   * The rule that governs every screen in this direction:
+   *   coral says "this is happening right now"
+   *   `pill` (blue) says "you do this"
+   * If something is both — a Join button on a live session — the BUTTON is blue
+   * and the BADGE beside it is coral. Never paint one element in both.
    */
-  ember: '#ec3013',
-  emberText: '#ff563c',
-  /** INVERTS: a LIGHT bloom on dark, a dark one on light. */
-  glow: 'rgba(237,239,242,.15)',
-  glowSoft: 'rgba(237,239,242,.08)',
+  live: '#ff4a2e',
+  /** Coral as small text. */
+  liveText: '#ff8163',
+  /** Warm near-black on a coral fill. Not white — white on coral fails. */
+  onLive: '#180703',
+  /** Destruction regains its own hue, distinct from both accents. */
+  danger: '#ff5f7e',
+
+  ruleSoft: 'rgba(255,255,255,0.055)',
+  rule: 'rgba(255,255,255,0.085)',
+  rule2: 'rgba(255,255,255,0.13)',
+  rule3: 'rgba(255,255,255,0.2)',
+  track: 'rgba(255,255,255,0.1)',
+  grid: 'rgba(255,255,255,0.03)',
+
+  liveWash: 'rgba(255,74,46,0.15)',
+  /** Also the colour of every coral glow. */
+  liveMid: 'rgba(255,74,46,0.32)',
+  dangerBorder: 'rgba(255,95,126,0.45)',
+  dangerWash: 'rgba(255,95,126,0.12)',
+  scrim: 'rgba(4,6,11,0.78)',
+
+  /* -------------------------------------------------------------- shadows */
+
+  /**
+   * The soft-UI highlight is GONE — deliberately zero rather than deleted.
+   *
+   * The previous direction lifted surfaces with a light edge up-left and a dark
+   * shadow down-right. This one lifts them with a plain drop shadow and a
+   * border, so the light half has no job. Kept at zero alpha so the 120 call
+   * sites through `raised`/`pressed`/`dropped` keep compiling and simply stop
+   * drawing it.
+   */
+  shadowDark: 'rgba(0,0,0,0.6)',
+  shadowLight: 'rgba(255,255,255,0)',
+  shadowDrop: 'rgba(0,0,0,0.7)',
+
+  /* -------------------------------------------------- the primary action */
+
+  /**
+   * BLUE - and it means ACTION. Every CTA, the FAB, the play button.
+   *
+   * MEASURED 3.6:1 under white at 15px/600. That is below AA for text this
+   * size, and it is the design's own value, kept on purpose: the blue gradient
+   * plus its glow is the signature of this direction, and a CTA is a large,
+   * unmistakable target rather than something anyone has to read carefully.
+   * Deepening to #3a63f0 clears AA and still reads as the same colour if that
+   * trade is preferred. The light theme already takes the deeper blue.
+   */
+  pill: '#4a7dff',
+  pillInk: '#ffffff',
+  cream: '#4a7dff',
+  onCream: '#ffffff',
+  onCream2: 'rgba(255,255,255,0.7)',
+
+  /**
+   * Two chrome fills doing two different jobs — do not collapse them.
+   * `nav` sits BEHIND a blur, so it is translucent.
+   * `dock` sits ON artwork with no blur, so it must stay near-opaque or the
+   * album cover reads straight through the control.
+   */
+  nav: 'rgba(16,20,31,0.72)',
+  dock: 'rgba(16,20,31,0.92)',
+  chip: 'rgba(255,255,255,0.09)',
+
+  /** No vertical wash in this direction; depth comes from the blobs. */
+  bgTop: '#0a0d14',
+  bgBot: '#0a0d14',
+
+  ember: '#ff4a2e',
+  emberText: '#ff8163',
+  /** The BLUE glow — under a primary action. */
+  glow: 'rgba(74,125,255,0.5)',
+  /** The CORAL glow — under something that is live. */
+  glowSoft: 'rgba(255,74,46,0.32)',
+
+  /* ------------------------------------------------------------ nocturne */
+
+  /** Top stop of the primary gradient. */
+  priTint: '#9ab4ff',
+  /**
+   * The glass edge. Roughly twice as bright as `rule`, and that delta is
+   * precisely what separates a piece of glass from a card — without it the
+   * floating nav reads as another surface.
+   */
+  chromeBorder: 'rgba(255,255,255,0.16)',
+  /** The ring punched around a badge so it reads on glass. */
+  badgeRing: 'rgba(10,13,20,0.9)',
+  /** Far stop of the identity gradient behind an avatar. */
+  avatarEnd: '#c0207a',
+  /**
+   * The wordmark's dot.
+   *
+   * Equal to `live` here but NOT in light, where the accent turns blue and the
+   * dot stays warm - the mark keeps its red full stop in both themes, and it is
+   * the last piece of coral the light theme has. Reading `live` for this would
+   * quietly turn the logo blue.
+   */
+  logoDot: '#ff4a2e',
+  shadowSheet: 'rgba(0,0,0,0.8)',
+
+  /**
+   * The three ambient blobs. They drift slowly behind everything and are the
+   * only reason a 5.5%-white card has anything to show through it.
+   */
+  blobA: 'rgba(122,63,255,0.34)',
+  blobB: 'rgba(255,45,120,0.26)',
+  blobC: 'rgba(74,125,255,0.3)',
+
+  /** Opaque stand-in for `surface`: card-in-card, or anything over artwork. */
+  surfaceSolid: '#161a24',
 } as const;
 
 /**
@@ -156,71 +208,114 @@ export type Palette = { readonly [K in keyof typeof DarkPalette]: string };
 export type ColorToken = keyof Palette;
 
 /**
- * The accent DARKENS on light. White on #ec3013 reaches only 3.8:1, which fails
- * on small labels; #ae1800 reaches 6.5:1 and reads stronger on a light ground.
+ * The light theme.
+ *
+ * Nocturne is a dark-only direction — it has no light artboards — so this holds
+ * the design's OWN light values, taken from its light theme block rather than
+ * derived here. Two things differ structurally from dark and are commented
+ * where they appear: artwork stops inverting across themes, and the two
+ * accents collapse into one blue.
  */
 export const LightPalette: Palette = {
-  bg: '#f3f5f8',
-  bgRecessed: '#e6e9ef',
-  surface: '#f5f7fa',
-  surface2: '#f8fafc',
-  surface3: '#dce1e8',
-  avatar: '#dce1e8',
-  /** Inverts with the theme: a DARK tile on a light ground. */
-  artwork: '#242830',
-  artInk: 'rgba(241,243,246,.5)',
+  bg: '#eceef5',
+  bgRecessed: '#e3e7f0',
+  /** Still translucent, still glass — white at 76% rather than white at 5.5%. */
+  surface: 'rgba(255,255,255,0.76)',
+  surface2: 'rgba(255,255,255,0.94)',
+  surface3: 'rgba(18,22,34,0.09)',
+  avatar: 'rgba(18,22,34,0.1)',
+  /** A light WELL. Artwork no longer inverts across themes — it is recessed in both. */
+  artwork: '#e3e7f0',
+  artInk: 'rgba(18,22,34,0.24)',
 
-  ink: '#1b1e24',
-  ink2: '#5d636d',
-  /** Lightened from the design's #868c96 for contrast. */
-  ink3: '#6f757f',
-
-  /** Darker on light: #ec3013 under white text reaches only 3.9:1. */
-  live: '#c41f08',
-  liveText: '#ae1800',
-  onLive: '#ffffff',
-  danger: '#c41f08',
-
-  ruleSoft: 'rgba(27,30,36,.07)',
-  rule: 'rgba(27,30,36,.12)',
-  rule2: 'rgba(27,30,36,.16)',
-  rule3: 'rgba(27,30,36,.22)',
-  track: '#868c96',
-  grid: 'rgba(27,30,36,.03)',
-
-  liveWash: 'rgba(196,31,8,.10)',
-  liveMid: 'rgba(196,31,8,.24)',
-  dangerBorder: '#c41f08',
-  dangerWash: 'rgba(196,31,8,.08)',
-  scrim: 'rgba(0,0,0,.5)',
+  ink: '#141824',
+  ink2: '#4d566b',
+  ink3: '#5f6879',
 
   /**
-   * The highlight is nearly opaque here (.95) against .032 on dark. On a light
-   * ground the raised look comes from the WHITE edge; on a dark one it comes
-   * almost entirely from the shadow. Swapping these is the classic way to make
-   * neumorphism look wrong in one theme.
+   * THE ACCENT COLLAPSE — the design's own light values, kept deliberately.
+   *
+   * In dark, coral means STATE and blue means ACTION, and no element is ever
+   * painted in both. The light artboards drop coral entirely and resolve `live`
+   * and `pill` to the SAME blue (#2f5fe0), so in light mode a LIVE badge and a
+   * Join button are the same colour and the distinction the whole system rests
+   * on stops being visible.
+   *
+   * This is faithful to the design rather than a mistake in transcription. If
+   * the split should hold in both themes, the fix is confined to the four
+   * tokens below: a deepened coral (#d63a18 / #b32d0f, with liveWash and
+   * liveMid retinted to match) restores it without touching a single screen.
    */
-  shadowDark: 'rgba(30,34,41,.13)',
-  shadowLight: 'rgba(255,255,255,.95)',
-  shadowDrop: 'rgba(30,34,41,.15)',
+  live: '#2f5fe0',
+  liveText: '#1f47b8',
+  onLive: '#ffffff',
+  danger: '#c62348',
 
-  pill: '#1e2229',
-  pillInk: '#f1f3f6',
-  cream: '#1e2229',
-  onCream: '#f1f3f6',
-  onCream2: 'rgba(241,243,246,.65)',
+  ruleSoft: 'rgba(18,22,34,0.07)',
+  rule: 'rgba(18,22,34,0.11)',
+  rule2: 'rgba(18,22,34,0.16)',
+  rule3: 'rgba(18,22,34,0.24)',
+  track: 'rgba(18,22,34,0.12)',
+  grid: 'rgba(18,22,34,0.04)',
 
-  nav: '#edf0f4',
-  dock: '#edf0f4',
-  chip: '#e6e9ef',
+  liveWash: 'rgba(47,95,224,0.1)',
+  liveMid: 'rgba(47,95,224,0.28)',
+  dangerBorder: 'rgba(198,35,72,0.4)',
+  dangerWash: 'rgba(198,35,72,0.1)',
+  scrim: 'rgba(18,22,34,0.5)',
 
-  bgTop: '#ffffff',
-  bgBot: '#e9ecf1',
+  /**
+   * The highlight is zero in BOTH themes now, which is a real change.
+   *
+   * Under the old soft-UI model a light surface got its lift almost entirely
+   * from a near-opaque white edge (.95) while a dark one got it from the shadow
+   * (.032) - a ~30x asymmetry that had to be maintained by hand. The new model
+   * lifts everything with one drop shadow plus a border, so neither theme needs
+   * the edge and the asymmetry disappears.
+   */
+  shadowDark: 'rgba(18,22,34,0.4)',
+  shadowLight: 'rgba(255,255,255,0)',
+  shadowDrop: 'rgba(18,22,34,0.3)',
 
-  ember: '#c41f08',
-  emberText: '#ae1800',
-  glow: 'rgba(30,34,41,.13)',
-  glowSoft: 'rgba(30,34,41,.07)',
+  /** 4.9:1 under white - the light theme has no contrast debt on its CTA. */
+  pill: '#2f5fe0',
+  pillInk: '#ffffff',
+  cream: '#2f5fe0',
+  onCream: '#ffffff',
+  onCream2: 'rgba(255,255,255,0.72)',
+
+  nav: 'rgba(255,255,255,0.78)',
+  dock: 'rgba(255,255,255,0.94)',
+  chip: 'rgba(255,255,255,0.94)',
+
+  bgTop: '#eceef5',
+  bgBot: '#eceef5',
+
+  ember: '#2f5fe0',
+  emberText: '#1f47b8',
+  glow: 'rgba(47,95,224,0.28)',
+  glowSoft: 'rgba(47,95,224,0.28)',
+
+  /** Light collapses the gradient to a single stop; there is no tint step. */
+  priTint: '#2f5fe0',
+  chromeBorder: 'rgba(18,22,34,0.12)',
+  badgeRing: 'rgba(255,255,255,0.95)',
+  /** Echoes the warm stop the light wordmark keeps - the last coral in the theme. */
+  avatarEnd: '#c0341a',
+  /** Stays warm while the accent goes blue. See the note on the dark value. */
+  logoDot: '#e0341a',
+  shadowSheet: 'rgba(18,22,34,0.28)',
+
+  /**
+   * Roughly a third of the dark alphas, and all three shift blue. At dark-mode
+   * strength these read as stains on a pale ground rather than light behind it.
+   */
+  blobA: 'rgba(96,110,255,0.13)',
+  blobB: 'rgba(64,140,255,0.12)',
+  blobC: 'rgba(74,125,255,0.12)',
+
+  /** The opaque composite of `surface` over `bg`, for card-in-card and artwork. */
+  surfaceSolid: '#f8fafd',
 };
 
 export const Palettes = { dark: DarkPalette, light: LightPalette } as const;
@@ -356,18 +451,39 @@ export const Radii = {
  * design's real numbers.
  */
 export const Dock = {
-  /** Tile size in the bar, and the metrics the old floating dock used. */
-  cell: 34,
-  gap: 6,
-  padding: 0,
-  lift: 0,
+  /** Inset from the frame on each side - the air that makes it an object. */
+  inset: 16,
+  /** How far it floats clear of the bottom. */
+  bottom: 42,
+  height: 68,
+  radius: 34,
+  /** Padding inside the capsule, before the first cell. */
+  padding: 14,
 
-  /** Full bar height, before the safe-area inset. */
-  height: 88,
-  bottomPad: 12,
-  /** Corner on each destination tile. */
-  tileRadius: 11,
-  labelSize: 9.5,
+  /** Each destination: a 48px round hit area around a 22px glyph. */
+  cell: 48,
+  icon: 22,
+
+  /** The centre action, lifted out of the capsule so it reads as primary. */
+  fab: 60,
+  fabLift: 20,
+  fabIcon: 26,
+
+  /**
+   * DO NOT READ THIS DIRECTLY. Use `useDockReserve()` from '@/lib/dock'.
+   *
+   * This is the reservation MINUS the device bottom inset, and on its own it is
+   * always wrong. The capsule positions itself at `bottom + insets.bottom`, so a
+   * screen padding by this number alone leaves `16 - insets.bottom` of clearance:
+   * roughly -18px on an iPhone home indicator, -32px on Android three-button
+   * navigation. Negative clearance puts the last row of the list under the glass.
+   *
+   * It was previously called `reserve` and documented as `add insets.bottom`.
+   * Ten screens were written against it and nine got that addition wrong,
+   * including the Feed - so the name now says it is only half the answer, and
+   * the hook that completes it is the only thing that reads it.
+   */
+  reserveBase: 42 + 68 + 16,
 } as const;
 
 /** Horizontal filter chips. */
@@ -462,12 +578,28 @@ export const noShadow = Platform.select({
  * sources are what make soft UI look like a mistake rather than a surface.
  */
 
-/** The standard raised surface — cards, controls, tiles. Used ~34× in the design. */
+/**
+ * Raised — the ordinary card.
+ *
+ * ONE downward shadow with a negative spread, not the offset pair this used to
+ * emit. The previous direction lifted a surface by lighting its top-left edge
+ * and shadowing its bottom-right, which implied a light source up and to the
+ * left. This one lights everything from directly above and lifts by distance
+ * alone, so the light half has no job and `shadowLight` sits at zero alpha in
+ * both themes.
+ *
+ * The negative spread is what keeps it from reading as fog: the shadow is
+ * pulled 14px narrower than the box before a 34px blur is applied, so it stays
+ * under the card instead of haloing out around it.
+ *
+ * Depth in this direction is shadow AND border together. A raised surface that
+ * skips its 1px `rule` edge will read as flat no matter what this returns,
+ * because a 5.5%-white card has almost no edge of its own.
+ */
 export function raised(c: Palette): object {
   return {
     boxShadow: [
-      { offsetX: 5, offsetY: 5, blurRadius: 12, color: c.shadowDark },
-      { offsetX: -4, offsetY: -4, blurRadius: 10, color: c.shadowLight },
+      { offsetX: 0, offsetY: 16, blurRadius: 34, spreadDistance: -14, color: c.shadowDark },
     ],
   };
 }
@@ -476,8 +608,7 @@ export function raised(c: Palette): object {
 export function raisedLarge(c: Palette): object {
   return {
     boxShadow: [
-      { offsetX: 6, offsetY: 6, blurRadius: 16, color: c.shadowDark },
-      { offsetX: -5, offsetY: -5, blurRadius: 13, color: c.shadowLight },
+      { offsetX: 0, offsetY: 22, blurRadius: 46, spreadDistance: -16, color: c.shadowDark },
     ],
   };
 }
@@ -485,15 +616,18 @@ export function raisedLarge(c: Palette): object {
 /**
  * Recessed — wells, inputs, an unselected segment, a pressed control.
  *
- * The same pair as `raised`, inverted. Reuse it for the pressed STATE of a
- * raised control: the surface appearing to sink under a finger is the whole
- * idiom, and it costs no extra tokens.
+ * Dark half only, for the same reason `raised` dropped its light half. This is
+ * now a supporting signal rather than the whole story: the primary cue for a
+ * recess in this direction is the FILL (`bgRecessed` for a well, `surface2` for
+ * something being pressed), and this adds a little depth under it.
+ *
+ * Do not reach for it to indicate a pressed state on its own — at these alphas
+ * the fill change is what people actually see.
  */
 export function pressed(c: Palette): object {
   return {
     boxShadow: [
-      { offsetX: 4, offsetY: 4, blurRadius: 10, color: c.shadowDark, inset: true },
-      { offsetX: -3, offsetY: -3, blurRadius: 8, color: c.shadowLight, inset: true },
+      { offsetX: 0, offsetY: 2, blurRadius: 10, color: c.shadowDark, inset: true },
     ],
   };
 }
@@ -502,8 +636,39 @@ export function pressed(c: Palette): object {
 export function pressedSoft(c: Palette): object {
   return {
     boxShadow: [
-      { offsetX: 3, offsetY: 3, blurRadius: 8, color: c.shadowDark, inset: true },
-      { offsetX: -2, offsetY: -2, blurRadius: 6, color: c.shadowLight, inset: true },
+      { offsetX: 0, offsetY: 1, blurRadius: 6, color: c.shadowDark, inset: true },
+    ],
+  };
+}
+
+/**
+ * Floating — the nav capsule and the session lobby bar.
+ *
+ * Deliberately separate from `dropped`: this is the shadow that makes a thing
+ * read as an OBJECT hovering over the page rather than a panel resting on it,
+ * and it is most of the reason the nav stopped looking like a bar. Pair it with
+ * `chromeBorder` all the way around; a floating object with an edge on only one
+ * side is a bar again.
+ */
+export function floating(c: Palette): object {
+  return {
+    boxShadow: [
+      { offsetX: 0, offsetY: 18, blurRadius: 40, spreadDistance: -12, color: c.shadowDrop },
+    ],
+  };
+}
+
+/**
+ * The bottom sheet — the one shadow that points UP.
+ *
+ * A sheet is lit from the page it covers, so its shadow falls onto the content
+ * above it. Handing this `dropped()` puts the shadow underneath, off-screen,
+ * and the sheet loses its edge against whatever it is covering.
+ */
+export function sheetShadow(c: Palette): object {
+  return {
+    boxShadow: [
+      { offsetX: 0, offsetY: -10, blurRadius: 60, spreadDistance: -10, color: c.shadowSheet },
     ],
   };
 }
@@ -514,10 +679,16 @@ export function pressedSoft(c: Palette): object {
  * a floating object is lit by the same source as everything under it.
  */
 export function dropped(c: Palette, size: 'sm' | 'md' | 'lg' = 'md'): object {
-  const spec = { sm: [3, 8], md: [10, 24], lg: [12, 32] }[size];
+  const spec = { sm: [6, 16, -6], md: [14, 34, -12], lg: [16, 40, -12] }[size];
   return {
     boxShadow: [
-      { offsetX: 0, offsetY: spec[0], blurRadius: spec[1], color: c.shadowDrop },
+      {
+        offsetX: 0,
+        offsetY: spec[0],
+        blurRadius: spec[1],
+        spreadDistance: spec[2],
+        color: c.shadowDrop,
+      },
     ],
   };
 }

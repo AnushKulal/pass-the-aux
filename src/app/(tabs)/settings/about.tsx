@@ -1,12 +1,26 @@
 /**
- * About. Built from the Settings vocabulary — back tile, kicker, raised cards.
+ * About. Design: `design/nocturne/aux-nocturne.dc.html`, the `sc-if isAbout`
+ * block at L644–L661.
  *
- * Facts only: who made it, what it is running, where the source lives.
+ * The artboard turns this from a facts list into a short piece of writing: a
+ * lead paragraph that states the one architectural claim the app rests on, the
+ * developer card, the build stats, and then HOW SYNC WORKS — the only place in
+ * the product that explains the sync engine to the person using it.
+ *
+ * EVERY NUMBER IN THE SYNC CARD IS READ OUT OF THE CODE, not transcribed from
+ * the mock. The artboard says "five times, lowest round-trip wins" (true:
+ * `SAMPLE_COUNT = 5` in '@/lib/clock'), "±2%" (true: `Drift.RATE_NUDGE`), and
+ * "every reading is written to sync_metrics" — which is NOT true: `use-room-sync`
+ * samples one in ten, deliberately, because an unsampled two-hour Session is
+ * ~2,400 rows per listener. A card that explains the engine is the last place
+ * that may round a number, so it says one in ten. The two thresholds the mock
+ * leaves out (`Drift.IGNORE` 250ms, `Drift.SEEK` 1.5s) are named here, since
+ * "a three-rung ladder" with no rungs is a shape rather than an explanation.
  *
  * FOUR STATES. Nothing here is fetched, so they attach to the two things that
  * can actually be unknown or go wrong:
- *   loading   the repository handoff is in flight — the row says so and locks
- *   error     the browser refused; the row says so and the URL appears so it
+ *   loading   the repository handoff is in flight — the button says so and locks
+ *   error     the browser refused; the button says so and the URL appears so it
  *             can be copied by hand
  *   empty     a build fact the binary was not stamped with reads as an em dash
  *             rather than a made-up version number
@@ -16,8 +30,8 @@
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import { ChevronLeft, ExternalLink } from 'lucide-react-native';
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { ArrowLeft } from 'lucide-react-native';
+import { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View, type TextStyle } from 'react-native';
 import Animated, {
   useAnimatedStyle,
@@ -27,7 +41,10 @@ import Animated, {
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { Wordmark } from '@/components/shell/wordmark';
+import { GlassCard } from '@/components/ui';
 import { installedVersionCode } from '@/lib/apk-updates';
+import { useDockReserve } from '@/lib/dock';
 import {
   Duration,
   Fonts,
@@ -36,31 +53,41 @@ import {
   Space,
   TOUCH_TARGET,
   Type,
-  raised,
   tracking,
 } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
-const CARD_GUTTER = 20;
-const TEXT_GUTTER = 24;
+/** The artboard's scroll body is `padding:14px 18px 130px`. See `(tabs)/profile.tsx`. */
+const GUTTER = 18;
 
-const BACK_TILE = 38;
-const BACK_SLOP = { top: 3, bottom: 3, left: 6, right: 6 };
-const MARK = 46;
+const BACK_ICON = 16;
+
+/** The artboard's lockup mark is 22px of cap height (design L650). */
+const MARK = 22;
+
+/** The design's ghost footer button: 50 tall, one step under the 54px CTA. */
+const FOOTER_HEIGHT = 50;
 
 const REPOSITORY = 'https://github.com/AnushKulal/pass-the-aux';
 
 /** The em dash stands for "this build was not stamped with one". */
 const UNKNOWN = '—';
 
+/** `Type.readout()` hands back a readonly tuple; `TextStyle` wants a mutable one. */
+const readout = (size: number): TextStyle => ({
+  ...Type.readout(size),
+  fontVariant: ['tabular-nums'],
+});
+
 export default function AboutScreen() {
   const C = useColors();
   const reduced = useReducedMotion();
+  const dockReserve = useDockReserve();
 
   /*
     The handoff used to swallow its own failure — `.catch(() => undefined)` —
-    which left the row looking untapped on any device with no browser to hand.
-    It now has somewhere to say so, and the URL to fall back on.
+    which left the control looking untapped on any device with no browser to
+    hand. It now has somewhere to say so, and the URL to fall back on.
   */
   const [handoff, setHandoff] = useState<'idle' | 'opening' | 'error'>('idle');
 
@@ -87,90 +114,150 @@ export default function AboutScreen() {
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={[styles.root, { backgroundColor: C.bg }]}>
       <Animated.View style={[styles.flex, enterStyle]}>
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <View style={styles.head}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Back to settings"
-              hitSlop={BACK_SLOP}
-              onPress={() => {
-                if (router.canGoBack()) router.back();
-                else router.replace('/settings');
-              }}
-              style={({ pressed }) => [
-                styles.backTile,
-                { backgroundColor: pressed ? C.surface2 : C.surface },
-                raised(C),
-              ]}>
-              <ChevronLeft size={20} strokeWidth={2.4} color={C.ink} />
-            </Pressable>
-            <Text style={[styles.title, { color: C.ink }]}>About</Text>
-          </View>
+        <ScrollView
+          contentContainerStyle={[
+            styles.content,
+            /*
+              The nav capsule floats and takes no layout space, so the body has
+              to leave room for it or its last row sits under the glass. Inline
+              rather than a StyleSheet entry because `useDockReserve()` includes
+              the device's bottom inset, which a static object cannot carry —
+              the old `Dock.reserve` here left NEGATIVE clearance on every phone
+              with a home indicator.
+            */
+            { paddingBottom: dockReserve },
+          ]}
+          showsVerticalScrollIndicator={false}>
+          <BackLink
+            label="Settings"
+            onPress={() => {
+              if (router.canGoBack()) router.back();
+              else router.replace('/settings');
+            }}
+          />
+          <Text accessibilityRole="header" style={[styles.title, { color: C.ink }]}>
+            About
+          </Text>
 
-          <Kicker>Developer</Kicker>
-          <View style={styles.block}>
-            <View style={[styles.card, { backgroundColor: C.surface }, raised(C)]}>
+          {/*
+            The artboard's emphasis span: same 400 weight, brighter ink only.
+            It lands on the clause that is the actual claim — the rest of the
+            sentence is setup for it.
+          */}
+          <Text style={[styles.lead, { color: C.ink2 }]}>
+            Aux is built and maintained by one person. No audio passes through the backend — every
+            listener plays from their own account, and the server only says
+            <Text style={{ color: C.ink }}> this track, starting at this instant.</Text>
+          </Text>
+
+          {/* -------------------------------------------------------- developer */}
+          <View style={styles.card}>
+            <GlassCard style={styles.developer}>
               {/*
-                A 46px well: backgroundColor plus a hairline, never an inset
-                pair. Below roughly 60px the light half of that pair is too
-                faint to land and only the dark half shows, which reads as dirt.
+                The real wordmark rather than the "AUX" monogram tile this
+                screen used to draw. That tile was `bgRecessed` behind a
+                hairline with `ink` lettering — which was correct under the
+                previous direction and is now redundant twice over: artwork
+                inverted to a dark well, so the tile reads as a hole, and the
+                mark has had a gradient of its own since nocturne landed.
               */}
-              <View style={[styles.mark, { backgroundColor: C.bgRecessed, borderColor: C.rule }]}>
-                {/* Ink, not the accent — a wordmark is not live, playing or selected. */}
-                <Text style={[styles.markLabel, { color: C.ink }]}>AUX</Text>
-              </View>
-              <View style={styles.cardText}>
-                <Text numberOfLines={1} style={[styles.cardTitle, { color: C.ink }]}>
+              <Wordmark size={MARK} />
+              <View style={styles.developerText}>
+                <Text numberOfLines={1} style={[styles.name, { color: C.ink }]}>
                   Anush Kulal
                 </Text>
-                <Text numberOfLines={1} style={[styles.cardValue, { color: C.ink2 }]}>
-                  @anushkulal
+                <Text numberOfLines={1} style={[styles.handle, { color: C.ink3 }]}>
+                  DEVELOPER · @AnushKulal
                 </Text>
               </View>
-            </View>
+            </GlassCard>
           </View>
 
-          <Kicker>Build</Kicker>
+          {/* ------------------------------------------------------------ build */}
           <View style={styles.stats}>
-            <Stat value={version} label="Version" />
-            <Stat value={build > 0 ? String(build) : UNKNOWN} label="Build" />
-            <Stat value="Expo" label="Runtime" />
+            <Stat label="Version" value={version} />
+            <Stat label="Build" value={build > 0 ? String(build) : UNKNOWN} />
+            {/*
+              The artboard's third fact is STACK / "Expo · Supabase". A third
+              column leaves roughly 78px of text on a 375pt frame and two words
+              wrap to three lines there, so this carries the runtime alone and
+              the sync card below names the backend in the sentence where it
+              actually matters.
+            */}
+            <Stat label="Stack" value="Expo" numeric={false} />
           </View>
 
-          <Kicker>Source</Kicker>
-          <View style={styles.block}>
-            <Pressable
-              accessibilityRole="link"
-              accessibilityLabel="Open the source repository"
-              accessibilityState={{ disabled: handoff === 'opening', busy: handoff === 'opening' }}
-              disabled={handoff === 'opening'}
-              onPress={() => {
-                void openRepository();
-              }}
-              style={({ pressed }) => [
-                styles.row,
-                { backgroundColor: pressed ? C.surface2 : C.surface },
-                raised(C),
+          {/* ------------------------------------------------------------- sync */}
+          <View style={styles.cardTight}>
+            <GlassCard>
+              <Text style={[styles.kicker, { color: C.ink3 }]}>How sync works</Text>
+              <Text style={[styles.prose, { color: C.ink2 }]}>
+                Clock offset is sampled NTP-style, five times a round, and the lowest round-trip
+                wins. Drift is corrected on a three-rung ladder — ignore it under 250ms, nudge the
+                playback rate ±2% up to 1.5s, hard-seek past that. One reading in ten is written to
+                sync_metrics on Supabase.
+              </Text>
+            </GlassCard>
+          </View>
+
+          {/* ----------------------------------------------------------- source */}
+          {/*
+            The design's ghost footer: `surface` behind a hairline, and on press
+            the EDGE turns blue rather than the fill changing. That is the one
+            place a secondary control is allowed to touch the action colour —
+            it is answering a press, not advertising itself. Hand-rolled rather
+            than `AuxButton variant="bordered"` for two reasons: the role is a
+            link, not a button, and the label carries the handoff's three states.
+          */}
+          <Pressable
+            accessibilityRole="link"
+            accessibilityLabel="Open the source repository"
+            accessibilityState={{ disabled: handoff === 'opening', busy: handoff === 'opening' }}
+            disabled={handoff === 'opening'}
+            onPress={() => {
+              void openRepository();
+            }}
+            style={({ pressed }) => [
+              styles.footer,
+              {
+                backgroundColor: C.surface,
+                borderColor: pressed ? C.pill : C.rule,
+              },
+            ]}>
+            {/*
+              ONE HUE ON THIS LABEL, AND IT IS THE FAILURE ONE.
+
+              This used to read `error ? liveText : pressed ? priTint : ink` —
+              a single Text cycling through BOTH accents: coral when the handoff
+              failed, blue while held. Two things were wrong with it. Coral is
+              the LIVE accent — playing, in sync, on aux, unread — and a browser
+              that refused to open is a failure, which has its own pink-red hue
+              (`danger`); an error is not a state of the world worth
+              celebrating. And no single element may carry two accents at all,
+              so the blue press tint moves off the label entirely: the EDGE
+              already turns blue on press (see the note above), which is this
+              control's designated place for the action colour, and having the
+              word turn blue underneath it was the same signal twice.
+            */}
+            <Text
+              style={[
+                styles.footerLabel,
+                { color: handoff === 'error' ? C.danger : C.ink },
               ]}>
-              <Text numberOfLines={1} style={[styles.rowTitle, { color: C.ink }]}>
-                Repository
-              </Text>
-              {handoff === 'opening' ? (
-                <Text style={[styles.rowValue, { color: C.ink2 }]}>Opening…</Text>
-              ) : handoff === 'error' ? (
-                <Text style={[styles.rowValue, { color: C.liveText }]}>Could not open</Text>
-              ) : (
-                <ExternalLink size={17} strokeWidth={2} color={C.ink3} />
-              )}
-            </Pressable>
+              {handoff === 'opening'
+                ? 'Opening…'
+                : handoff === 'error'
+                  ? 'Could not open the browser'
+                  : 'Open source repository'}
+            </Text>
+          </Pressable>
 
-            {/* The fallback the error leaves you with: the address, selectable. */}
-            {handoff === 'error' ? (
-              <Text selectable style={[styles.fallback, { color: C.ink3 }]}>
-                {REPOSITORY}
-              </Text>
-            ) : null}
-          </View>
+          {/* The fallback the error leaves you with: the address, selectable. */}
+          {handoff === 'error' ? (
+            <Text selectable style={[styles.fallback, { color: C.ink3 }]}>
+              {REPOSITORY}
+            </Text>
+          ) : null}
         </ScrollView>
       </Animated.View>
     </SafeAreaView>
@@ -179,32 +266,64 @@ export default function AboutScreen() {
 
 /* ------------------------------------------------------------------- parts */
 
-function Kicker({ children }: { children: ReactNode }) {
+/**
+ * The back control shared by the settings family — a named LINK above the
+ * title, not the 44px circle `ui/screen.tsx` draws. See the note in
+ * `settings/index.tsx`; the three copies are deliberately identical and stay
+ * local to their files until the kit grows a home for it.
+ */
+function BackLink({ label, onPress }: { label: string; onPress: () => void }) {
   const C = useColors();
-  return <Text style={[styles.kicker, { color: C.ink3 }]}>{children}</Text>;
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Back to ${label}`}
+      onPress={onPress}
+      style={({ pressed }) => [styles.back, pressed && styles.backHeld]}>
+      <ArrowLeft size={BACK_ICON} strokeWidth={2} color={C.ink2} />
+      <Text style={[styles.backLabel, { color: C.ink2 }]}>{label}</Text>
+    </Pressable>
+  );
 }
 
-function Stat({ value, label }: { value: string; label: string }) {
+/**
+ * One build fact.
+ *
+ * KICKER ABOVE VALUE, which is the artboard's order and the reverse of what
+ * this screen used to draw. It matters more than it looks: the label is the
+ * question and the value is the answer, and a version number with no context
+ * above it is just a number floating in a box.
+ *
+ * Radius 18 and NO shadow — the design's second card size, and it is exact
+ * about which is which: all 43 of its radius-24 surfaces carry a shadow, none
+ * of its 54 radius-18 ones do.
+ */
+function Stat({
+  label,
+  value,
+  numeric = true,
+}: {
+  label: string;
+  value: string;
+  /** Tabular figures and the larger size. False for a value that is a word. */
+  numeric?: boolean;
+}) {
   const C = useColors();
+
   return (
-    <View style={[styles.stat, { backgroundColor: C.surface }, raised(C)]}>
-      <Text numberOfLines={1} style={[styles.statValue, { color: C.ink }]}>
-        {value}
-      </Text>
+    <View style={[styles.stat, { backgroundColor: C.surface, borderColor: C.rule }]}>
       <Text numberOfLines={1} style={[styles.statLabel, { color: C.ink3 }]}>
         {label}
+      </Text>
+      <Text numberOfLines={1} style={[numeric ? styles.statValue : styles.statWord, { color: C.ink }]}>
+        {value}
       </Text>
     </View>
   );
 }
 
 /* ------------------------------------------------------------------ styles */
-
-/** `Type.readout()` hands back a readonly tuple; `TextStyle` wants a mutable one. */
-const readout = (size: number): TextStyle => ({
-  ...Type.readout(size),
-  fontVariant: ['tabular-nums'],
-});
 
 const styles = StyleSheet.create({
   root: {
@@ -217,114 +336,147 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 720,
     alignSelf: 'center',
-    paddingTop: Space.md,
-    paddingBottom: Space.huge,
+    paddingHorizontal: GUTTER,
+    paddingTop: 14,
+    // The bottom padding is inline on the ScrollView — see the note there.
   },
 
-  head: {
+  /* -------------------------------------------------------------- header */
+
+  back: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    paddingHorizontal: TEXT_GUTTER,
+    alignSelf: 'flex-start',
+    gap: Space.sm,
+    minHeight: TOUCH_TARGET,
+    paddingRight: Space.md,
   },
-  backTile: {
-    width: BACK_TILE,
-    height: BACK_TILE,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: Radii.sm,
+  backHeld: {
+    opacity: 0.6,
+  },
+  backLabel: {
+    fontFamily: Fonts.semibold,
+    fontSize: 12,
+    lineHeight: 16,
   },
   title: {
-    ...Type.display(24),
-    letterSpacing: tracking(24, -0.03),
+    ...Type.display(28),
+    letterSpacing: tracking(28, -0.025),
+    marginTop: Space.sm,
+    // 8, not the 18 the other two screens use: a paragraph follows immediately
+    // here, and the artboard tightens the gap so the title and its lead read as
+    // one block rather than a heading over a section.
+    marginBottom: Space.sm,
+  },
+  lead: {
+    ...Type.body(14),
+    lineHeight: 22,
   },
 
-  kicker: {
-    ...Type.label(10.5),
-    letterSpacing: tracking(10.5, 0.15),
-    paddingHorizontal: TEXT_GUTTER,
-    paddingTop: Space.xxxl,
-    paddingBottom: Space.md,
-  },
-  block: {
-    paddingHorizontal: CARD_GUTTER,
-    gap: 10,
-  },
+  /* ----------------------------------------------------------- developer */
 
   card: {
+    marginTop: Space.lg,
+  },
+  /** The artboard opens with 16 under the lead and tightens to 12 between cards. */
+  cardTight: {
+    marginTop: Space.md,
+  },
+  developer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    padding: 15,
-    borderRadius: Radii.lg,
+    gap: 13,
   },
-  mark: {
-    width: MARK,
-    height: MARK,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: Radii.md,
-    borderWidth: Rule.hair,
-  },
-  markLabel: {
-    ...Type.heading(12),
-    letterSpacing: tracking(12, 0.06),
-  },
-  cardText: {
+  developerText: {
     flex: 1,
     minWidth: 0,
   },
-  cardTitle: {
-    fontFamily: Fonts.semibold,
-    fontSize: 14.5,
-    lineHeight: 19,
+  name: {
+    ...Type.display(16),
+    // `Type.display` sets its line box at 1.06x, which is right for a 28px
+    // screen title and clips a descender at 16 on Android. Opened to 1.3.
+    lineHeight: 21,
+    letterSpacing: tracking(16, -0.01),
   },
-  cardValue: {
-    ...Type.body(12.5),
+  /*
+    400 at 11px, uppercase and widely tracked — NOT `Type.label`, which is the
+    same case and tracking at 600. The artboard sets this line light on purpose
+    so it reads as a footnote under the name rather than as a second title.
+  */
+  handle: {
+    fontFamily: Fonts.regular,
+    fontSize: 11,
+    lineHeight: 15,
+    letterSpacing: tracking(11, 0.06),
+    textTransform: 'uppercase',
     marginTop: 2,
   },
 
+  /* --------------------------------------------------------------- build */
+
   stats: {
     flexDirection: 'row',
-    gap: 11,
-    paddingHorizontal: CARD_GUTTER,
+    gap: 10,
+    marginTop: Space.md,
   },
   stat: {
     flex: 1,
-    padding: Space.lg,
+    minWidth: 0,
+    padding: 14,
     borderRadius: Radii.lg,
-  },
-  statValue: {
-    ...readout(17),
-    letterSpacing: tracking(17, -0.02),
+    borderWidth: Rule.hair,
   },
   statLabel: {
-    ...Type.label(10.5),
-    letterSpacing: tracking(10.5, 0.13),
+    ...Type.label(9.5),
+    fontFamily: Fonts.extrabold,
+    letterSpacing: tracking(9.5, 0.11),
+  },
+  statValue: {
+    ...readout(18),
+    letterSpacing: tracking(18, -0.02),
+    marginTop: 5,
+  },
+  /** The one stat whose value is a word rather than a numeral, so no tabular figures. */
+  statWord: {
+    fontFamily: Fonts.extrabold,
+    fontSize: 15,
+    lineHeight: 20,
     marginTop: 5,
   },
 
-  row: {
-    flexDirection: 'row',
+  /* ---------------------------------------------------------------- sync */
+
+  kicker: {
+    ...Type.label(9.5),
+    fontFamily: Fonts.extrabold,
+    letterSpacing: tracking(9.5, 0.12),
+  },
+  prose: {
+    ...Type.body(13),
+    lineHeight: 21,
+    marginTop: 7,
+  },
+
+  /* -------------------------------------------------------------- source */
+
+  footer: {
+    minHeight: FOOTER_HEIGHT,
     alignItems: 'center',
-    gap: Space.md,
-    minHeight: TOUCH_TARGET + Space.xs,
-    padding: 15,
-    borderRadius: Radii.lg,
+    justifyContent: 'center',
+    marginTop: 14,
+    paddingHorizontal: Space.lg,
+    borderRadius: Radii.pill,
+    borderWidth: Rule.hair,
   },
-  rowTitle: {
-    flex: 1,
-    minWidth: 0,
+  footerLabel: {
     fontFamily: Fonts.semibold,
-    fontSize: 14.5,
-    lineHeight: 19,
-  },
-  rowValue: {
-    ...readout(13),
-    fontFamily: Fonts.semibold,
+    fontSize: 13,
+    lineHeight: 17,
+    letterSpacing: tracking(13, 0.02),
   },
   fallback: {
     ...Type.body(12),
+    marginTop: Space.sm,
     paddingHorizontal: 2,
   },
 });

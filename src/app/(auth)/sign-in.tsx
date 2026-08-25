@@ -1,15 +1,30 @@
 /**
  * Sign in.
  *
- * Built from design/v2/aux-v2.dc.html, screen "Sign in": title, two recessed
- * fields, the filled Continue, a rule with OR through it, and Google outlined
- * beside it. The wordmark, the pitch paragraph and the Spotify note the previous
- * version opened with are gone — the lede carries the one fact that changes
- * what someone does here.
+ * Built from design/nocturne/aux-nocturne.dc.html, screen `isSignin` (L107-144):
+ * the 54px wordmark over a two-tone rule, the Sign in / Create account
+ * segmented switch, two field cards, the gradient CTA, an OR divider, and the
+ * provider buttons under it.
  *
- * The artboard shows a single mode. Creating an account is still wired, so it
- * lives on the quiet link under the button rather than in a segmented control
- * the design does not have; the title and the a11y label follow the mode.
+ * TWO STRUCTURAL CHANGES FROM THE VERSION THIS REPLACES, both the design's:
+ *
+ * 1. THE BRAND HEADER IS BACK. The previous pass cut the wordmark and the pitch
+ *    line on the grounds that "the lede carries the one fact that changes what
+ *    someone does here". Nocturne puts them back, and they earn it now that
+ *    Intro is one screen instead of four — this is the first place the mark is
+ *    ever seen at size, and the one line under it is the only pitch left in the
+ *    signed-out flow.
+ * 2. THE MODE IS A SWITCH, NOT A LINK. Creating an account used to hide behind
+ *    a text link below the button, which made the second of the two things
+ *    people come here to do the quietest thing on the screen. The segmented
+ *    control states both up front and keeps the title honest without one.
+ *
+ * DELIBERATE DEVIATION: the design draws three provider buttons — Google,
+ * Spotify and Apple Music. Only Google is wired (`signInWithOAuth`); Spotify
+ * exists in this app as an account LINK from Settings, not as an identity
+ * provider, and there is no Apple Music auth at all. Painting three buttons
+ * where one works would be a worse screen than painting one. The design's own
+ * footnote already explains the absence, so it is kept verbatim.
  */
 
 import { makeRedirectUri } from 'expo-auth-session';
@@ -30,12 +45,13 @@ import Animated from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
+  BrandRule,
   OnboardingField,
-  OnboardingHeader,
+  OnboardingSwitch,
   PrimaryCta,
-  SecondaryLink,
   useEnterStyle,
 } from '@/components/auth/onboarding';
+import { Wordmark } from '@/components/shell/wordmark';
 import { useToast } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
@@ -48,10 +64,32 @@ WebBrowser.maybeCompleteAuthSession();
 
 type Mode = 'signin' | 'signup';
 
-/** Straight off the artboard. */
-const GUTTER = 26;
-const GOOGLE_HEIGHT = 56;
-const GOOGLE_MARK = 19;
+/**
+ * The screen gutter — 18, the house value (`src/components/ui/screen.tsx` and
+ * all eleven tab screens).
+ *
+ * This said 24, straight off the artboard, while Intro said 30 and Claim handle
+ * said 22. Those are three screens walked back to back on a first launch, and
+ * the content column stepped inward at every tap. Each artboard's own number
+ * loses to a column that holds still across the flow.
+ */
+const GUTTER = 18;
+/** The wordmark at its sign-in size — design L111. */
+const LOGO = 54;
+/** The brand rule under it — 52 wide here, 64 on Intro (L112). */
+const RULE_W = 52;
+/** The provider button and its leading glyph chip (L136). */
+const PROVIDER_HEIGHT = 54;
+const PROVIDER_CHIP = 26;
+
+/**
+ * The two modes, as the switch reads them. Declared at module scope so the
+ * array identity is stable across renders — the switch maps over it.
+ */
+const MODES = [
+  { value: 'signin', label: 'Sign in' },
+  { value: 'signup', label: 'Create account' },
+] as const satisfies readonly { value: Mode; label: string }[];
 
 /** Deliberately loose. The confirmation email is the real validator. */
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -184,10 +222,36 @@ export default function SignInScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
           <Animated.View style={[styles.column, enterStyle]}>
-            <OnboardingHeader
-              title={signup ? 'Create account' : 'Sign in'}
-              lede="Spotify links later, from Settings."
-            />
+            <View style={styles.brand}>
+              <Wordmark size={LOGO} />
+
+              {/*
+                Was an inline `LinearGradient` here, claiming to be the one
+                element in the app that paints both accents — while Intro drew
+                the same object 12px wider and made the same claim. `BrandRule`
+                now owns the gradient and the reasoning, once.
+              */}
+              <BrandRule width={RULE_W} style={styles.accentRule} />
+
+              {/* The screen's heading. The title moved into the switch below,
+                  so this is what a screen reader lands on first. */}
+              <Text accessibilityRole="header" style={[styles.kicker, { color: C.ink3 }]}>
+                PASS THE AUX
+              </Text>
+              <Text style={[styles.pitch, { color: C.ink2 }]}>
+                Join a Lounge and hear the same chorus at the same moment.
+              </Text>
+            </View>
+
+            <View style={styles.switchGap}>
+              <OnboardingSwitch
+                accessibilityLabel="Sign in or create an account"
+                value={mode}
+                options={MODES}
+                onChange={changeMode}
+                disabled={busy !== null}
+              />
+            </View>
 
             <View style={styles.fields}>
               <OnboardingField
@@ -214,8 +278,7 @@ export default function SignInScreen() {
 
             <View style={styles.ctaGap}>
               <PrimaryCta
-                label="Continue"
-                accessibilityLabel={signup ? 'Create account' : 'Sign in'}
+                label={signup ? 'Create account' : 'Sign in'}
                 loading={busy === 'email'}
                 disabled={busy !== null}
                 onPress={() => {
@@ -230,8 +293,8 @@ export default function SignInScreen() {
               <View style={[styles.hair, { backgroundColor: C.rule }]} />
             </View>
 
-            {/* Raised rather than filled: the one fill on this screen is the
-                action that gets you in. */}
+            {/* A surface pill, not a second gradient: one filled thing per
+                screen, and on this one it is the button that gets you in. */}
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Continue with Google"
@@ -240,38 +303,41 @@ export default function SignInScreen() {
               onPress={() => {
                 void continueWithGoogle();
               }}
-              /*
-                Outlined, not raised. With the fields drawn as hairlines now, a
-                heavy lift here made the SECONDARY action the loudest object on
-                the page. One filled thing — Continue — and everything else
-                outlined: that is the whole hierarchy of this screen.
-              */
               style={({ pressed }) => [
-                styles.google,
-                { backgroundColor: C.surface, borderColor: C.rule },
+                styles.provider,
+                { backgroundColor: pressed ? C.surface2 : C.surface, borderColor: C.rule },
                 busy !== null && busy !== 'google' ? styles.blocked : null,
-                pressed ? styles.held : null,
               ]}>
               {busy === 'google' ? (
                 <ActivityIndicator size="small" color={C.ink} />
               ) : (
                 <>
-                  <View style={[styles.googleMark, { borderColor: C.ink2 }]} />
-                  <Text style={[styles.googleLabel, { color: C.ink }]}>Continue with Google</Text>
+                  {/*
+                    `surface2` on `surface`, which is the one place in this
+                    screen that stacking two translucent fills is the point: the
+                    chip has to read as a disc set INTO the button rather than
+                    as a second object on the ground.
+                  */}
+                  <View
+                    style={[
+                      styles.providerChip,
+                      { backgroundColor: C.surface2, borderColor: C.rule },
+                    ]}>
+                    <Text style={[styles.providerGlyph, { color: C.ink2 }]}>G</Text>
+                  </View>
+                  <Text style={[styles.providerLabel, { color: C.ink }]}>Continue with Google</Text>
                 </>
               )}
             </Pressable>
 
             <View style={styles.spacer} />
 
-            <SecondaryLink
-              label={signup ? 'I already have an account' : 'Create an account'}
-              disabled={busy !== null}
-              onPress={() => changeMode(signup ? 'signin' : 'signup')}
-            />
-
+            <Text style={[styles.footnote, { color: C.ink3 }]}>
+              No Spotify needed. Aux plays through YouTube by default — link Premium later from
+              Settings if you have it.
+            </Text>
             <Text style={[styles.terms, { color: C.ink3 }]}>
-              {'By continuing you agree to the terms.\nWe never post anything.'}
+              By continuing you agree to the terms. We never post anything.
             </Text>
           </Animated.View>
         </ScrollView>
@@ -359,50 +425,90 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     paddingHorizontal: GUTTER,
     paddingTop: 44,
-    paddingBottom: Space.huge,
+    paddingBottom: 30,
   },
 
-  fields: {
+  brand: {
+    alignItems: 'center',
+  },
+  /** Spacing only — `BrandRule` carries the width, height and radius. */
+  accentRule: {
+    marginTop: Space.xxl,
+    marginBottom: Space.md,
+  },
+  kicker: {
+    fontFamily: Fonts.extrabold,
+    fontSize: 10,
+    letterSpacing: tracking(10, 0.2),
+  },
+  pitch: {
+    ...Type.body(14),
+    lineHeight: 22,
+    textAlign: 'center',
+    marginTop: 14,
+    // The artboard's own 280. Caps the measure at roughly two even lines
+    // instead of one long ragged one.
+    maxWidth: 280,
+  },
+
+  switchGap: {
     marginTop: 34,
-    gap: Space.lg,
+  },
+  fields: {
+    marginTop: Space.lg,
+    gap: 10,
   },
   ctaGap: {
-    marginTop: 26,
+    marginTop: 22,
   },
 
   orRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    marginVertical: 26,
+    gap: Space.md,
+    marginVertical: Space.xl,
   },
   hair: {
     flex: 1,
     height: Rule.hair,
   },
   or: {
-    ...Type.label(11),
-    letterSpacing: tracking(11, 0.12),
+    ...Type.label(10),
+    fontFamily: Fonts.extrabold,
+    letterSpacing: tracking(10, 0.14),
   },
 
-  google: {
-    height: GOOGLE_HEIGHT,
-    borderRadius: Radii.button,
+  provider: {
+    minHeight: PROVIDER_HEIGHT,
+    borderRadius: Radii.pill,
     borderWidth: Rule.hair,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 11,
+    gap: Space.md,
+    paddingHorizontal: 18,
   },
-  googleMark: {
-    width: GOOGLE_MARK,
-    height: GOOGLE_MARK,
+  providerChip: {
+    width: PROVIDER_CHIP,
+    height: PROVIDER_CHIP,
+    flexShrink: 0,
     borderRadius: Radii.pill,
-    borderWidth: Rule.major,
+    borderWidth: Rule.hair,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  googleLabel: {
+  providerGlyph: {
+    fontFamily: Fonts.extrabold,
+    fontSize: 12,
+  },
+  providerLabel: {
+    // Left-aligned inside a flexed slot, per the artboard: the labels of a
+    // provider stack have to start on one x or the glyphs stop reading as a
+    // column.
+    flex: 1,
+    textAlign: 'left',
     fontFamily: Fonts.semibold,
-    fontSize: 15,
+    fontSize: 14,
   },
 
   /** Collapses first when the keyboard takes the bottom half of the screen. */
@@ -411,17 +517,22 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     minHeight: Space.xxl,
   },
-  terms: {
-    ...Type.body(12.5),
-    lineHeight: 19,
+  footnote: {
+    ...Type.body(13),
+    lineHeight: 21,
     textAlign: 'center',
-    marginTop: Space.sm,
+  },
+  terms: {
+    ...Type.body(11.5),
+    lineHeight: 17,
+    textAlign: 'center',
+    marginTop: Space.md,
+    // The least important text on the screen, and set to say so. Kept because
+    // it is the only place the terms are stated, not because anyone reads it.
+    opacity: 0.8,
   },
 
   blocked: {
     opacity: 0.55,
-  },
-  held: {
-    opacity: 0.9,
   },
 });

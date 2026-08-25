@@ -1,23 +1,49 @@
 /**
- * One lounge row — Explore and the Lounges tab share it.
+ * One lounge, as a row — and it has to hold at two sizes on two grounds.
  *
- * design/v2 "Lounges" and "Explore" draw the same row twice: a raised card, an
- * artwork tile carrying the lounge's tag, the name, and one or two lines under
- * it. The two artboards differ only in what the row can know — Explore has a
- * description and no roster (RLS hides it), Lounges has counts and a live pill.
+ * design/nocturne/aux-nocturne.dc.html draws this object twice with the same
+ * parts and different metrics: L268 (Explore — radius 24 with `--sh`, a 46px
+ * tag tile, a description under the name) and L399 (the profile's "Your
+ * lounges" — radius 18, no shadow, a 38px tile, one line of counts). The
+ * artboard is exact about which corner means what: all 43 of its radius-24
+ * surfaces carry a shadow and none of its 54 radius-18 surfaces do. So
+ * `variant` is not a taste knob — `card` is a row STANDING on the page, `row`
+ * is a row sitting inside something else.
  *
- * The live treatment is the only accent the row is allowed, and it comes in two
- * registers: a pill when there is a NUMBER to report, a bare dot when a Session
- * is up but empty. Both mean the same thing — there is something to walk into.
+ * THE TRANSLUCENCY TRAP, WHICH IS THIS FILE'S REAL HAZARD. `surface` is 5.5%
+ * white, so two of them stacked composite to ~11% and the inner one stops
+ * reading as a separate object; the same fill laid over album art goes
+ * see-through. A row dropped inside a section card must therefore be handed
+ * `solid`, which swaps in the opaque composite. `GlassCard` owns that switch,
+ * and that is most of why the skin is no longer hand-rolled here — the previous
+ * version painted `C.surface` + `raised()` directly and had no way to say
+ * "nested".
  *
- * REPLACES the Patchbay row this file used to hold: a ruled band with a JOIN
- * cell cut off by a hairline. Nothing imported it any more, and both screens
- * had grown a private copy of the v2 row instead.
+ * THE ACCENT. A live lounge is a STATE, so it is coral, in three registers: a
+ * wash pill when there is a NUMBER to report, a bare dot when a Session is up
+ * but empty, and the `badge` word beside the name for a membership you already
+ * hold. All of them mean "this is true of the world right now".
+ *
+ * The one blue thing is `cta`, and it is blue because it is the only thing on
+ * the row that names an ACTION — "Join". It is drawn as an affordance INSIDE
+ * the row's own Pressable rather than as a second button: a 44px cell inside a
+ * 90px card that does exactly what the card does is two targets for one intent,
+ * so screen readers get one node and the cell borrows the card's pressed state
+ * for its edge. A row never carries `cta` and a coral pill in the same trailing
+ * slot — no element and no slot takes two accents.
+ *
+ * THIS COMPONENT WAS ORPHANED AND IS NOT ANY MORE. Explore and the Lounges tab
+ * both carried comments claiming this file "still draws the previous
+ * direction's row (radius 22, no border)" and hand-rolled a duplicate on the
+ * strength of it. It was false — the file was rebuilt for nocturne — and the
+ * app shipped three lounge rows with three different tile radii. `badge` and
+ * `cta` are the two props those forks actually needed; both screens now render
+ * this.
  */
 
 import { Image } from 'expo-image';
 import { memo, useEffect, useRef } from 'react';
-import { Pressable, StyleSheet, Text, View, type TextStyle } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -28,28 +54,54 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { LiveDot } from '@/components/feed/live-dot';
-import { Skeleton } from '@/components/ui';
-import {
-  Duration,
-  Fonts,
-  Radii,
-  Rule,
-  Space,
-  Stagger,
-  Type,
-  raised,
-  tracking,
-} from '@/lib/theme';
+import { GlassCard, Skeleton, StatusPill } from '@/components/ui';
+import { Duration, Fonts, Radii, Rule, Space, Stagger, Type, tracking } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
-/** design/v2: a 56px tile inside 13px of padding, so the row clears 44 twice over. */
-const TILE = 56;
+/** `card` is Explore's row (L268); `row` is the profile's (L399). */
+export type LoungeCardVariant = 'card' | 'row';
 
-/** `Type.readout` hands back a readonly tuple; TextStyle wants a mutable one. */
-const readout = (size: number): TextStyle => ({
-  ...Type.readout(size),
-  fontVariant: ['tabular-nums'],
-});
+type Metrics = {
+  tile: number;
+  /** The artboard's own corners: 15 on the 46px tile, 13 on the 38px one. */
+  tileRadius: number;
+  tag: number;
+  padding: number;
+  gap: number;
+  /** The face the name is set in — extrabold on the card, semibold in the row. */
+  nameFont: string;
+  marginBottom: number;
+};
+
+const SIZES: Record<LoungeCardVariant, Metrics> = {
+  card: {
+    tile: 46,
+    tileRadius: 15,
+    tag: 12,
+    padding: 14,
+    gap: 11,
+    nameFont: Fonts.extrabold,
+    marginBottom: Space.md,
+  },
+  row: {
+    tile: 38,
+    tileRadius: 13,
+    tag: 10,
+    padding: 13,
+    gap: Space.md,
+    nameFont: Fonts.semibold,
+    marginBottom: 10,
+  },
+};
+
+/**
+ * The action cell's floor. 44 is the touch-target minimum even though the cell
+ * takes no press itself — it is the visual promise of one, and a 30px pill
+ * beside a 46px tile reads as an afterthought. Shared with the skeleton so the
+ * row cannot resize when the data lands.
+ */
+const CTA_HEIGHT = 44;
+const CTA_WIDTH = 62;
 
 export type LoungeCardProps = {
   name: string;
@@ -64,10 +116,32 @@ export type LoungeCardProps = {
   isLive?: boolean;
   /** People inside those Sessions. Above zero, the pill reports the number. */
   listeners?: number;
+  /**
+   * A coral word beside the name — a STATE you already hold, not a count.
+   * Explore's "Joined". It sits in the name row rather than the trailing slot
+   * because on a joined lounge that slot is holding the "Open" cell.
+   */
+  badge?: string;
+  /**
+   * The trailing action cell (design L349): a blue label in a `surface2` pill,
+   * NOT a Pressable — see the header. Only the verb; the row does the work.
+   */
+  cta?: string;
   /** A join is in flight: the row stops taking taps and steps back. */
   busy?: boolean;
   /** Position in the list, for the 55ms entrance stagger. */
   index?: number;
+  /**
+   * `card` (the default) stands on the page: radius 24, a shadow, and the
+   * translucent fill the ambient blobs bleed through. `row` sits inside
+   * something else: radius 18, flat.
+   */
+  variant?: LoungeCardVariant;
+  /**
+   * OPAQUE FILL. Required whenever this row is nested inside another `surface`
+   * card, laid over artwork, or mounted inside a `BlurView` — see the header.
+   */
+  solid?: boolean;
   onPress: () => void;
   accessibilityHint?: string;
 };
@@ -95,13 +169,18 @@ function LoungeCardBase({
   tag,
   isLive = false,
   listeners = 0,
+  badge,
+  cta,
   busy = false,
   index = 0,
+  variant = 'card',
+  solid = false,
   onPress,
   accessibilityHint,
 }: LoungeCardProps) {
   const C = useColors();
   const reduced = useReducedMotion();
+  const s = SIZES[variant];
 
   const count = Math.max(0, listeners);
   /*
@@ -114,6 +193,7 @@ function LoungeCardBase({
 
   const label = [
     name,
+    badge,
     showPill ? `${count} listening` : showDot ? 'live now' : null,
     busy ? 'joining' : meta,
   ]
@@ -150,66 +230,152 @@ function LoungeCardBase({
         accessibilityState={{ busy }}
         disabled={busy}
         onPress={onPress}
-        style={({ pressed }) => [
-          styles.row,
-          { backgroundColor: C.surface },
-          raised(C),
-          (pressed || busy) && styles.pressed,
-        ]}>
-        <View style={[styles.tile, { backgroundColor: C.artwork }]}>
-          <Text numberOfLines={1} style={[styles.tag, { color: C.artInk }]}>
-            {tagFor(name, tag)}
-          </Text>
-
-          {/* Over the tag, so the letters double as the error fallback. */}
-          {iconUrl ? (
-            <Image
-              source={{ uri: iconUrl }}
-              style={StyleSheet.absoluteFill}
-              contentFit="cover"
-              cachePolicy="memory-disk"
-              // FlatList recycles rows; without this the previous lounge's icon
-              // stays on screen until the new one has decoded.
-              recyclingKey={name}
-              transition={Duration.press}
-              accessible={false}
-            />
-          ) : null}
-        </View>
-
-        <View style={styles.info}>
-          <View style={styles.nameRow}>
-            <Text numberOfLines={1} style={[styles.name, { color: C.ink }]}>
-              {name}
-            </Text>
-            {showDot ? <LiveDot size={6} /> : null}
-          </View>
-
-          {description ? (
-            <Text numberOfLines={2} style={[styles.description, { color: C.ink2 }]}>
-              {description}
-            </Text>
-          ) : null}
-
-          {meta ? (
-            <Text numberOfLines={1} style={[styles.meta, { color: C.ink2 }]}>
-              {meta}
-            </Text>
-          ) : null}
-        </View>
-
+        /*
+          The artboard's press on a whole card is `transform:scale(.985)`
+          (L256, L438), not a fill change — and it has to be, because the fill
+          belongs to `GlassCard`, whose skin is deliberately not overridable
+          from a caller's `style`. Busy fades on top of it: a row that has
+          stopped taking taps should look spent, not merely pressed.
+        */
+        style={({ pressed }) => [pressed && styles.held, busy && styles.spent]}>
         {/*
-          The design draws this pill with an inset pair. At ~29px tall only the
-          dark half of that pair survives on a dark ground, so it reads as dirt
-          rather than depth — a recessed fill and a hairline say the same thing
-          and hold up at this size.
+          Children as a FUNCTION, so the `cta` cell can light its own edge from
+          the card's pressed state — the artboard's
+          `style-active="border-color:var(--aux-pri)"` on L349. There is no
+          second Pressable to read it from, and there must not be.
         */}
-        {showPill ? (
-          <View style={[styles.livePill, { backgroundColor: C.bgRecessed, borderColor: C.rule }]}>
-            <LiveDot size={6} />
-            <Text style={[styles.liveCount, { color: C.liveText }]}>{count}</Text>
-          </View>
-        ) : null}
+        {({ pressed }) => (
+          <GlassCard
+            variant={variant}
+            solid={solid}
+            padded={false}
+            style={{ marginBottom: s.marginBottom }}>
+            <View style={[styles.body, { padding: s.padding, gap: s.gap }]}>
+              {/*
+                A WELL, not a plate. `artwork` inverted in this direction — it is
+                now darker than the ground with a faint monogram on it — so a tile
+                carrying dark ink or a light edge is reading the old palette.
+
+                The tag itself is `ink2` rather than `artInk`: the artboard spends
+                `--aux-art` (22% white) on a Session's now-playing monogram, which
+                is decoration behind a title that already says the track, but a
+                lounge tag is the only identity an icon-less lounge has and has to
+                be legible on its own.
+              */}
+              <View
+                style={[
+                  styles.tile,
+                  {
+                    width: s.tile,
+                    height: s.tile,
+                    borderRadius: s.tileRadius,
+                    backgroundColor: C.artwork,
+                    borderColor: C.rule,
+                  },
+                ]}>
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.tag,
+                    { fontSize: s.tag, letterSpacing: tracking(s.tag, 0.06), color: C.ink2 },
+                  ]}>
+                  {tagFor(name, tag)}
+                </Text>
+
+                {/* Over the tag, so the letters double as the error fallback. */}
+                {iconUrl ? (
+                  <Image
+                    source={{ uri: iconUrl }}
+                    style={StyleSheet.absoluteFill}
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
+                    // FlatList recycles rows; without this the previous lounge's icon
+                    // stays on screen until the new one has decoded.
+                    recyclingKey={name}
+                    transition={Duration.press}
+                    accessible={false}
+                  />
+                ) : null}
+              </View>
+
+              <View style={styles.info}>
+                <View style={styles.nameRow}>
+                  <Text
+                    numberOfLines={1}
+                    style={[styles.name, { fontFamily: s.nameFont, color: C.ink }]}>
+                    {name}
+                  </Text>
+
+                  {/*
+                    STATE beside the name — coral, at wash volume. It cannot go
+                    in the trailing slot: on a lounge you have already joined
+                    that slot is holding the "Open" cell, and a coral badge and
+                    a blue cell stacked in one corner is two accents in one
+                    place.
+                  */}
+                  {badge ? <StatusPill tone="liveWash" label={badge} /> : null}
+
+                  {/* The dot beats at the artboard's 2s LIVE-in-a-list tempo —
+                      ambient, not the 1s urgency of a recording light. */}
+                  {showDot ? <LiveDot size={7} tempo="badge" /> : null}
+                </View>
+
+                {description ? (
+                  <Text numberOfLines={2} style={[styles.description, { color: C.ink2 }]}>
+                    {description}
+                  </Text>
+                ) : null}
+
+                {meta ? (
+                  <Text numberOfLines={1} style={[styles.meta, { color: C.ink3 }]}>
+                    {meta}
+                  </Text>
+                ) : null}
+              </View>
+
+              {/*
+                STATE, so coral — and the wash tone rather than the solid fill,
+                because this pill sits inside a card whose own title it must not
+                out-shout. The accessible label spells out what the numeral means;
+                "3 LIVE" read aloud on its own is a measurement of nothing.
+              */}
+              {showPill ? (
+                <StatusPill
+                  tone="liveWash"
+                  dot
+                  live
+                  label={`${count} live`}
+                  accessibilityLabel={`${count} listening`}
+                />
+              ) : null}
+
+              {/*
+                The ACTION cell (L349) — blue, and hidden from assistive tech
+                because the Pressable around it already announces the same verb
+                through `accessibilityHint`. `surface2` over the card's
+                `surface` composites to ~14% white, which is the one place the
+                translucency hazard works FOR us: a cell inside a card should
+                sit slightly proud of it. On a `solid` card it lands on the
+                opaque composite instead and reads the same.
+              */}
+              {cta ? (
+                <View
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
+                  style={[
+                    styles.cta,
+                    { backgroundColor: C.surface2, borderColor: pressed ? C.pill : C.rule },
+                  ]}>
+                  {busy ? (
+                    <ActivityIndicator size="small" color={C.priTint} />
+                  ) : (
+                    <Text style={[styles.ctaLabel, { color: C.priTint }]}>{cta}</Text>
+                  )}
+                </View>
+              ) : null}
+            </View>
+          </GlassCard>
+        )}
       </Pressable>
     </Animated.View>
   );
@@ -221,63 +387,76 @@ function LoungeCardBase({
  */
 export const LoungeCard = memo(LoungeCardBase);
 
+export type LoungeCardSkeletonProps = {
+  /** Adds the description line Explore's rows carry and the profile's do not. */
+  wide?: boolean;
+  variant?: LoungeCardVariant;
+  solid?: boolean;
+  /** Reserves the trailing action cell, for the lists whose rows carry a `cta`. */
+  cta?: boolean;
+};
+
 /**
  * The row's loading twin. Lives here so its geometry cannot drift from the real
- * row's — a skeleton that resizes on load is worse than no skeleton.
+ * row's — a skeleton that resizes on load is worse than no skeleton, and the
+ * tile corner is passed through for the same reason.
  */
-export function LoungeCardSkeleton({ wide = false }: { wide?: boolean }) {
-  const C = useColors();
+export function LoungeCardSkeleton({
+  wide = false,
+  variant = 'card',
+  solid = false,
+  cta = false,
+}: LoungeCardSkeletonProps) {
+  const s = SIZES[variant];
 
   return (
-    <View style={[styles.row, { backgroundColor: C.surface }, raised(C)]}>
-      <Skeleton width={TILE} height={TILE} />
-      <View style={styles.skeletonInfo}>
-        <Skeleton width="54%" height={14} />
-        {wide ? <Skeleton width="86%" height={11} /> : null}
-        <Skeleton width="32%" height={11} />
+    <GlassCard variant={variant} solid={solid} padded={false} style={{ marginBottom: s.marginBottom }}>
+      <View style={[styles.body, { padding: s.padding, gap: s.gap }]}>
+        <Skeleton width={s.tile} height={s.tile} radius={s.tileRadius} />
+        <View style={styles.skeletonInfo}>
+          <Skeleton width="54%" height={14} />
+          {wide ? <Skeleton width="86%" height={11} /> : null}
+          <Skeleton width="32%" height={11} />
+        </View>
+        {cta ? <Skeleton width={CTA_WIDTH} height={CTA_HEIGHT} radius={Radii.pill} /> : null}
       </View>
-    </View>
+    </GlassCard>
   );
 }
 
-/** `wide` adds the description line Explore's rows carry and Lounges' do not. */
-export function LoungeListSkeleton({ count = 4, wide = false }: { count?: number; wide?: boolean }) {
+export type LoungeListSkeletonProps = LoungeCardSkeletonProps & { count?: number };
+
+export function LoungeListSkeleton({ count = 4, ...rest }: LoungeListSkeletonProps) {
   return (
     <View>
       {Array.from({ length: count }, (_, index) => (
-        <LoungeCardSkeleton key={index} wide={wide} />
+        <LoungeCardSkeleton key={index} {...rest} />
       ))}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  row: {
+  body: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    padding: 13,
-    borderRadius: Radii.xl,
-    marginBottom: 10,
   },
-  pressed: {
-    opacity: 0.7,
+  held: {
+    transform: [{ scale: 0.985 }],
+  },
+  spent: {
+    opacity: 0.6,
   },
 
   tile: {
-    width: TILE,
-    height: TILE,
-    borderRadius: Radii.lg,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: Space.xs,
+    borderWidth: Rule.hair,
     overflow: 'hidden',
   },
   tag: {
     fontFamily: Fonts.extrabold,
-    fontSize: 14,
-    lineHeight: 17,
-    letterSpacing: tracking(14, -0.02),
   },
 
   info: {
@@ -291,34 +470,43 @@ const styles = StyleSheet.create({
   },
   name: {
     flexShrink: 1,
-    fontFamily: Fonts.semibold,
-    fontSize: 15.5,
+    fontSize: 15,
     lineHeight: 20,
-    letterSpacing: tracking(15.5, -0.015),
+    letterSpacing: tracking(15, -0.01),
   },
   description: {
     ...Type.body(12.5),
-    lineHeight: 17,
+    lineHeight: 18,
     marginTop: 3,
   },
+  /*
+    The artboard sets this line at 10px. Held at 11 instead, for the same reason
+    `ink3` was lightened in the token layer: it is the row's only statement of
+    how many people are in there, and at 10px regular it stops being read at
+    arm's length. The tracking is the artboard's.
+  */
   meta: {
-    ...Type.body(12.5),
-    lineHeight: 17,
+    ...Type.body(11),
+    lineHeight: 16,
+    letterSpacing: tracking(11, 0.07),
     marginTop: 3,
   },
 
-  livePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    paddingVertical: Space.sm,
-    paddingHorizontal: Space.md,
+  cta: {
+    flexShrink: 0,
+    minHeight: CTA_HEIGHT,
+    minWidth: CTA_WIDTH,
+    paddingHorizontal: Space.lg,
     borderRadius: Radii.pill,
     borderWidth: Rule.hair,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  liveCount: {
-    ...readout(11),
-    fontFamily: Fonts.semibold,
+  ctaLabel: {
+    fontFamily: Fonts.extrabold,
+    fontSize: 11,
+    lineHeight: 14,
+    letterSpacing: tracking(11, 0.04),
   },
 
   skeletonInfo: {

@@ -10,9 +10,12 @@
  * app, and a 28px strip is too easy to hit by accident to be allowed to do
  * that — Settings shows what is in the update and asks properly.
  *
- * NO ACCENT HERE, deliberately. Red means live / playing / joinable / in sync /
- * on aux in this design, and a pending update is none of those. It earns weight
- * from the 2px rule and ink contrast instead.
+ * NO ACCENT HERE, deliberately, and the reasoning survived the direction change
+ * intact even though the palette did not. There are two accents now: coral for
+ * state and blue for action. A pending update is not a state of the world, so
+ * coral would lie about it; and this strip is a standing reminder rather than
+ * the thing you act on, so spending blue here would put it in competition with
+ * the actual buttons. It earns weight from the rule and ink contrast instead.
  */
 
 import { router } from 'expo-router';
@@ -25,7 +28,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
-import { Duration, Rule, Space, Type, tracking } from '@/lib/theme';
+import { Duration, Radii, Rule, Space, Type, tracking } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 import { useUpdates } from '@/lib/updates';
 
@@ -75,9 +78,12 @@ export function UpdateBanner() {
         onPress={() => router.push('/settings')}
         style={({ pressed }) => [styles.press, pressed && { opacity: 0.6 }]}>
         {/*
-          A filled square, not a dot: the grid in this direction is built from
-          rules and rectangles, and a circle would be the only round thing on
-          the screen.
+          A DOT, and it used to be a square.
+          The square was justified by the old direction being built from rules
+          and rectangles, where a circle would have been the only round thing on
+          screen. That is no longer remotely true — the navigation is a capsule,
+          every button is a pill, and every card is generously rounded — so the
+          square would now be the odd one out for exactly the same reason.
         */}
         {/* `ink`, not `ink2`: this is the mark, not the sentence beside it, and
             it is the same token the Settings row's dot uses. Those two comments
@@ -106,6 +112,7 @@ const styles = StyleSheet.create({
   mark: {
     width: 6,
     height: 6,
+    borderRadius: Radii.pill,
   },
   label: {
     ...Type.label(10),

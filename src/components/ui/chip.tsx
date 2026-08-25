@@ -1,20 +1,33 @@
 /**
  * The pill filter chip, and the row it lives in.
  *
+ * Built from `design/nocturne/aux-nocturne.dc.html` L139 (the Sign in / Create
+ * account pair) and L435–L438 (the lounge's Sessions / Chat / Members row) —
+ * the same control at two widths.
+ *
  * One control replacing five hand-built segmented rows, so it has to cover both
  * shapes the references use:
  *
- *  - `scroll` — the full-bleed `ALL / CARDIO / MUSCLE / WORKOUT` strip. More
- *    options than fit, so it runs off the edge and invites a drag. The chips
- *    sit directly on the ground, each carrying its own faint fill.
+ *  - `scroll` — a full-bleed strip with more options than fit, so it runs off
+ *    the edge and invites a drag. The chips sit directly on the ground, each
+ *    carrying its own `surface2` fill behind a `rule` hairline.
  *  - `hug` — a width-hugging capsule for two or three mutually exclusive
  *    options (Dark / Light / System, public / private). Here the TRACK supplies
  *    the surface and the unselected chips go transparent; a chip fill inside a
- *    track fill is two greys stacked, which reads as a rendering mistake.
+ *    track fill is two translucent whites stacked, which composites to a
+ *    brighter grey than either and reads as a rendering mistake.
  *
- * The accent is spent here on purpose and only here: a selected filter is what
- * you are currently looking at, which is the same claim the red makes
- * everywhere else in the app. Nothing else in a chip is coloured.
+ * THE SELECTED CHIP IS BLUE, AND THAT IS A CHANGE.
+ *
+ * This file used to argue that the accent belonged here and only here, because
+ * "a selected filter is what you are currently looking at, which is the same
+ * claim the red makes everywhere else in the app". The reasoning was sound and
+ * the conclusion is now wrong. Nocturne splits the load one red used to carry:
+ * CORAL means a state of the world — live, playing, in sync, unread — and BLUE
+ * means an action you took. A selected chip is the second one. Nobody's filter
+ * choice is happening in the world; it happened in this app, because they
+ * tapped it. Painting it coral would put it in the same register as a LIVE
+ * badge sitting two rows below, and the badge is the one that has to win.
  *
  * ONE selection, always. `selectedKey` is not nullable because every reference
  * row opens with `All` already lit — "no filter" is a chip, not an empty state.
@@ -44,16 +57,25 @@ import Animated, {
 // The metrics token is also called `Chip`, and so is the component below it.
 // Aliasing here rather than renaming the component keeps the call site reading
 // `<Chip />`, which is the name that matters to everyone else.
-import { Chip as ChipMetrics, Duration, Radii, Space, TOUCH_TARGET, Type } from '@/lib/theme';
+import {
+  Chip as ChipMetrics,
+  Duration,
+  Radii,
+  Rule,
+  Space,
+  TOUCH_TARGET,
+  Type,
+  bloom,
+} from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
 /** Leading glyph. 16 against an 11px label — any larger and the icon leads. */
 const ICON = 16;
 
 /**
- * The chip is 40 tall because the design says so, and a touch target is 44
- * because the platform says so. Slop reconciles the two without inflating the
- * pill.
+ * The chip and the platform's touch target agree at 44 in this design, so the
+ * slop is zero and the constant survives only to keep the arithmetic visible:
+ * shrink `ChipMetrics.height` and the hit box grows back automatically.
  *
  * VERTICAL ONLY. `ChipMetrics.gap` is exactly the 8px minimum between adjacent
  * targets, so widening the hit box sideways would spend a gap that is already
@@ -116,6 +138,13 @@ export type ChipProps = {
   onTrack?: boolean;
 };
 
+/**
+ * Held at 1 on every state. A selected chip is a blue fill and an unselected
+ * one is a hairline, and if the hairline were the only one with a border the
+ * whole row would shift by 2px on every tap.
+ */
+const CLEAR = 'transparent';
+
 export const Chip = memo(function Chip({
   label,
   selected,
@@ -127,7 +156,7 @@ export const Chip = memo(function Chip({
   onTrack = false,
 }: ChipProps) {
   const C = useColors();
-  const fg = selected ? C.onLive : C.ink2;
+  const fg = selected ? C.pillInk : C.ink2;
 
   /*
     The held flag is React state driving the shared value from an effect, rather
@@ -178,7 +207,19 @@ export const Chip = memo(function Chip({
         style={[
           styles.pill,
           animated,
-          { backgroundColor: selected ? C.live : onTrack ? 'transparent' : C.chip },
+          {
+            backgroundColor: selected ? C.pill : onTrack ? CLEAR : C.surface2,
+            borderColor: selected || onTrack ? CLEAR : C.rule,
+          },
+          /*
+            The blue bloom under the selected chip is not decoration — it is how
+            this direction says how much weight a control carries, and the
+            design scales it with height all the way from a 34px knob to a 66px
+            play button. `bloom.sm` is 0/8/24 against the artboard's 0/6/18 for
+            a segment this size; two pixels of blur is worth keeping every glow
+            in the app on one ladder.
+          */
+          selected && bloom(C.glow, 'sm'),
           disabled && styles.disabled,
         ]}>
         {Icon ? <Icon size={ICON} strokeWidth={selected ? 2.4 : 2} color={fg} /> : null}
@@ -188,7 +229,7 @@ export const Chip = memo(function Chip({
         </Text>
 
         {count === undefined ? null : (
-          <Text style={[styles.count, { color: selected ? C.onLive : C.ink3 }]}>{count}</Text>
+          <Text style={[styles.count, { color: selected ? C.pillInk : C.ink3 }]}>{count}</Text>
         )}
       </Animated.View>
     </Pressable>
@@ -218,7 +259,7 @@ export type ChipRowProps = {
  * the first chip lines up with the headings above it and the last one runs
  * under the edge — which means it wants a parent that is *not* already
  * gutter-padded (`<Screen padded={false}>`, or a negative margin). Inside a
- * padded parent the strip stops 40px short on both sides and stops reading as
+ * padded parent the strip stops 36px short on both sides and stops reading as
  * something you can drag.
  *
  * `hug` pairs with `role="radio"` almost every time: two or three options where
@@ -257,7 +298,7 @@ export function ChipRow({
     return (
       <View
         accessibilityRole={ROLES[role].group}
-        style={[styles.track, { backgroundColor: C.surface }]}>
+        style={[styles.track, { backgroundColor: C.surface, borderColor: C.rule }]}>
         {chips}
       </View>
     );
@@ -287,10 +328,20 @@ const styles = StyleSheet.create({
     height: ChipMetrics.height,
     paddingHorizontal: ChipMetrics.paddingX,
     borderRadius: Radii.pill,
+    borderWidth: Rule.hair,
     gap: Space.sm,
   },
+  /*
+    `Type.heading`, not `Type.label`.
+
+    Every segment in the design is 800 at ~.04em and in SENTENCE case —
+    "Sessions", "Create account", "Members". `Type.label` is 600, tracked to
+    .12em, and force-uppercases, which turns a two-word label into a wide
+    shouted band that no longer fits the pill. `heading` is the exact voice:
+    same weight, same tracking, no transform.
+  */
   label: {
-    ...Type.label(11),
+    ...Type.heading(11),
     // Lets a long label truncate inside a narrow chip instead of forcing the
     // pill wider than the row it sits in.
     flexShrink: 1,
@@ -309,10 +360,11 @@ const styles = StyleSheet.create({
     gap: ChipMetrics.gap,
     // The screen gutter, applied to the CONTENT rather than to the ScrollView:
     // padding on the scroller itself clips the chips at the edge instead of
-    // letting them travel under it.
-    paddingHorizontal: Space.xl,
+    // letting them travel under it. 18 is a literal because `Space` has no step
+    // for the gutter yet — same note as the one at the top of `screen.tsx`.
+    paddingHorizontal: 18,
     // Room for the hit slop. Android drops touches landing outside the parent's
-    // bounds, so those extra 2px each side have to exist as real layout.
+    // bounds, so any extra pixels each side have to exist as real layout.
     paddingVertical: SLOP,
   },
 
@@ -322,8 +374,15 @@ const styles = StyleSheet.create({
     // Hugs its content — this is a control, not a bar.
     alignSelf: 'flex-start',
     borderRadius: Radii.pill,
+    borderWidth: Rule.hair,
+    /*
+      The design runs 5px of padding and 5px between cells, which lands between
+      `Space.xs` and `Space.sm`; 4 is the nearer step. The gap is new — the
+      cells used to sit flush, which was right when the selected cell was a flat
+      fill. It is a blue pill with a bloom under it now, and a bloom needs a
+      little air on both sides or it just tints its neighbours.
+    */
     padding: Space.xs,
-    // Cells sit flush, for the reason `SheetTabs` gives: the 8px-between-targets
-    // rule is about neighbouring controls, not the segments inside one.
+    gap: Space.xs,
   },
 });

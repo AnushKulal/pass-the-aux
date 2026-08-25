@@ -1,46 +1,50 @@
 /**
- * The bubble language, shared by every chat surface in the app.
+ * The chat drawing kit: the bubble column, and the chrome every chat surface
+ * shares.
  *
- * There are two logs — the DM thread (`@/components/dm/message-bubble`) and the
- * lounge / Session log (`@/components/chat/message-row`) — and they were built
- * a month apart, so they did not match: one was a bubble column, the other a
- * flat Discord-style row. This file is the single drawing both now render
- * through, so a message looks the same wherever it is read.
+ * Sources: `design/nocturne/aux-nocturne.dc.html` — the DM thread at L744–L777,
+ * the lounge log at L462–L476, the Session log at L1251–L1264.
  *
- * The grammar, from `design/v2/aux-v2.dc.html`, screen "Thread":
+ * NOCTURNE SPLITS THE TWO CHAT SURFACES BACK APART, AND THAT IS THE HEADLINE.
  *
- *  - THEIRS sits left on `surface`, raised off the ground, with the bottom-left
- *    corner cut to 6.
- *  - YOURS sits right on the ACCENT, with the bottom-right corner cut instead.
- *    This is the one legitimate accent fill in a log: "this one is mine" is the
- *    only distinction a thread actually has to make, and alignment alone fails
- *    the moment a bubble is wide enough to reach both edges.
- *  - Attachments — a track, a photo, a file, a voice note — keep `surface` on
- *    BOTH sides. They carry their own frame, and a red field behind a red-framed
- *    card would spend the accent on decoration.
+ *  - The DM thread is a BUBBLE COLUMN (L749): a 20px bubble, no avatar, no
+ *    name. Two people are talking, so which edge a bubble hugs is a complete
+ *    answer to "who said this".
+ *  - The lounge and Session logs are a CARD LIST (L465, L1253): one glass card
+ *    per message carrying avatar, name, time, body and reactions. Six people
+ *    are talking, and a six-speaker bubble column is unreadable.
  *
- * DENSITY, NOT DRAMA. A thread is read, not admired: 14px body, 10px between
- * bubbles, and the small `raised()` recipe rather than `raisedLarge()`. The
- * accent bubble takes NO shadow at all — a coloured fill on a dark ground is
- * already separated, and a drop shadow under every one of your own messages is
- * the fastest way to make a log look like a pile of cards.
+ * The previous direction unified them into one bubble language and this file
+ * was that unification. Undoing it is not a reversal of taste — the reason the
+ * shapes differ is structural, and the card list lives in `./message-row` now.
+ * What is left here is what BOTH still draw.
+ *
+ * THE OWN-SIDE BUBBLE IS BLUE. THIS IS A CHANGE, AND IT IS THE ACCENT RULE.
+ *
+ * Coral means a state of the world — live, playing, in sync, on aux, unread.
+ * Being the author of a message is not one of those; it is a thing you did, and
+ * things you did are blue. The old coral fill also put every second bubble of
+ * every DM thread in the same register as the LIVE badge on a session card, and
+ * between those two the badge is the one that has to win.
+ *
+ * DENSITY, NOT DRAMA. A log is read, not admired: 15px body in the thread, 10px
+ * between bubbles, and the small `raised()` recipe rather than `raisedLarge()`.
  */
 
 import { memo, type ReactNode } from 'react';
 import {
-  Pressable,
   StyleSheet,
   Text,
   View,
+  Pressable,
   type StyleProp,
   type TextStyle,
   type ViewStyle,
 } from 'react-native';
 
-import { Avatar } from '@/components/ui';
+import { Avatar, AuxButton, GlassCard } from '@/components/ui';
 import {
   Fonts,
-  Radii,
   Rule,
   Space,
   TOUCH_TARGET,
@@ -51,6 +55,14 @@ import {
 } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
+/**
+ * The thread bubble's corner, L749. `Radii` has no 20 — `lg` is 18 and `xl` is
+ * 22, and both read as a different shape beside the design's own screenshot.
+ * Held locally exactly as `GlassCard` holds its 24; both disappear the day the
+ * token layer grows the step.
+ */
+const BUBBLE_RADIUS = 20;
+
 /** The design's 30px identity avatar. */
 export const BUBBLE_AVATAR = 30;
 /** Half the difference between the avatar and its 44px target. */
@@ -60,9 +72,10 @@ const NAME_INSET = 13;
 
 /**
  * A bubble never spans the column — the free edge on one side is half of what
- * says who spoke. The design's 76%, and 82% for the wider attachment cards.
+ * says who spoke. The design's 80% (L747), and 82% for the wider attachment
+ * cards.
  */
-export const BUBBLE_MAX_WIDTH = '76%';
+export const BUBBLE_MAX_WIDTH = '80%';
 export const CARD_MAX_WIDTH = '82%';
 
 /** Vertical rhythm between bubbles in a run, and between runs. */
@@ -70,6 +83,24 @@ export const BUBBLE_GAP = 10;
 
 /** `@mira`, `@sol_r`. Split, not replace, so the surrounding text survives. */
 export const MENTION = /(@[A-Za-z0-9_]{1,32})/g;
+
+/**
+ * WHICH GROUND A CHAT SURFACE HAS LANDED ON — and this is not a cosmetic knob.
+ *
+ * `screen` — the lounge's Chat tab, drawn straight onto the app ground.
+ * `sheet`  — the Session log, inside the player's glass panel (L1166:
+ *            `background:var(--chrome);backdrop-filter:blur(34px)`).
+ *
+ * `surface` is 5.5% white. On the plain ground that is a card with the ambient
+ * blobs bleeding through it, which is the whole point of the direction. Inside
+ * the Session sheet the same token is 5.5% white over a 72% chrome panel over a
+ * blur — it composites to very nearly nothing and every message in the log
+ * loses its shape. Everything in this folder takes this and swaps to
+ * `surfaceSolid` on `sheet`; the design does the same swap by hand, drawing the
+ * Session composer on `bg2` (L1280) where the lounge composer is on `--g`
+ * (L492).
+ */
+export type ChatGround = 'screen' | 'sheet';
 
 /** `Type.readout` hands back a readonly fontVariant tuple; TextStyle wants a mutable one. */
 export const readout = (size: number): TextStyle => ({
@@ -84,7 +115,7 @@ export function formatBubbleTime(iso: string): string {
 /**
  * What a bubble is made of.
  *
- * `fill`    — your own words. The accent.
+ * `fill`    — your own words. The blue primary.
  * `surface` — their words, and every attachment on either side.
  */
 export type BubbleTone = 'fill' | 'surface';
@@ -93,20 +124,37 @@ export type BubbleTone = 'fill' | 'surface';
 export function bubbleInk(C: Palette, tone: BubbleTone) {
   const fill = tone === 'fill';
   return {
-    body: fill ? C.onLive : C.ink,
+    body: fill ? C.pillInk : C.ink,
     /*
-      Accent-on-accent is invisible, so inside your own bubble a handle is
-      carried by WEIGHT instead of by colour. `ink` would work on the light
-      theme and vanish on the dark one, where it is the same near-white as
-      `onLive` — so both themes use `onLive` at 800.
+      A handle is a LINK, and a link is blue here — the design draws every
+      handle it prints in `pri-t` (L490, the mention picker's handle column).
+      Inside the blue bubble that same blue is invisible, so there the handle is
+      carried by WEIGHT on the white the body already uses.
+
+      This used to be `liveText` on both sides. Coral on a handle spent the
+      state accent on a piece of prose.
     */
-    mention: fill ? C.onLive : C.liveText,
+    mention: fill ? C.pillInk : C.priTint,
     mentionFont: fill ? Fonts.extrabold : Fonts.semibold,
-    meta: fill ? C.onLive : C.ink2,
+    /** 70% white on the blue; `ink2` on glass. Both clear AA on their fill. */
+    meta: fill ? C.onCream2 : C.ink2,
   };
 }
 
 /* --------------------------------------------------------------------- body */
+
+export type BubbleBodyProps = {
+  text: string;
+  tone: BubbleTone;
+  /**
+   * The card log's 14px/1.5 (L470) instead of the thread's 15px/1.45 (L749).
+   *
+   * Two sizes rather than a free `size` number: these are the only two the
+   * design uses, and a static pair keeps the text style out of the render path
+   * on a component that redraws once per message.
+   */
+  compact?: boolean;
+};
 
 /**
  * The body, with handles lifted out of it.
@@ -117,10 +165,8 @@ export function bubbleInk(C: Palette, tone: BubbleTone) {
 export const BubbleBody = memo(function BubbleBody({
   text,
   tone,
-}: {
-  text: string;
-  tone: BubbleTone;
-}) {
+  compact = false,
+}: BubbleBodyProps) {
   const C = useColors();
   const ink = bubbleInk(C, tone);
   const parts = text.split(MENTION);
@@ -129,8 +175,8 @@ export const BubbleBody = memo(function BubbleBody({
     <Text
       selectable
       style={[
-        styles.body,
-        // Your own words carry a step of weight: white on the accent needs it,
+        compact ? styles.bodyCompact : styles.body,
+        // Your own words carry a step of weight: white on the blue needs it,
         // and the design steps the own-side bubble up too.
         tone === 'fill' && styles.bodyMine,
         { color: ink.body },
@@ -165,9 +211,20 @@ export type BubbleProps = {
 /**
  * The bubble itself: the fill, the corner, and the lift.
  *
- * The cut corner points at its own edge — bottom-left for theirs, bottom-right
- * for yours — which is what makes a column of bubbles read as two speakers
- * rather than as a ragged list.
+ * BOTH SIDES ARE LIFTED NOW. The design gives every shape in the thread the
+ * same `--sh` (L749, L752, L761, L767, L770) — the previous direction withheld
+ * the shadow from the accent bubble on the theory that a coloured fill
+ * separates itself, which was true of a red fill on near-black and is not true
+ * of the blue.
+ *
+ * The `surface` bubble additionally takes the 1px `rule` edge, because 5.5%
+ * white has no edge of its own and reads FLAT under any shadow without one.
+ * The blue fill is opaque and needs none.
+ *
+ * THE CUT CORNER IS KEPT, and the design's own bubbles are a uniform 20. It
+ * survives for one shape: an attachment card is `surface` on BOTH sides
+ * (L761/L767), so on a photo or a file the corner is the only thing besides
+ * alignment left naming the speaker.
  */
 export function Bubble({ mine, tone, card = false, children, style }: BubbleProps) {
   const C = useColors();
@@ -178,10 +235,11 @@ export function Bubble({ mine, tone, card = false, children, style }: BubbleProp
       style={[
         card ? styles.card : styles.bubble,
         mine ? styles.cornerMine : styles.cornerTheirs,
-        { backgroundColor: fill ? C.live : C.surface },
-        // The accent fill separates itself. Only the surface bubble is lifted,
-        // and only by the small recipe.
-        fill ? null : raised(C),
+        {
+          backgroundColor: fill ? C.pill : C.surface,
+          borderColor: fill ? 'transparent' : C.rule,
+        },
+        raised(C),
         style,
       ]}>
       {children}
@@ -224,9 +282,12 @@ export type BubbleIdentityProps = {
 /**
  * Avatar and name above the first bubble of somebody else's run.
  *
- * Never drawn on your own side: the accent fill and the right edge already name
+ * The THREAD's identity line — the card log names its author inside the card
+ * instead, on the same baseline as the timestamp (L469).
+ *
+ * Never drawn on your own side: the blue fill and the right edge already name
  * the sender, and a column of your own avatars would be the loudest thing on a
- * screen where the red is supposed to mean something.
+ * screen where the accents are supposed to mean something.
  */
 export const BubbleIdentity = memo(function BubbleIdentity({
   name,
@@ -263,7 +324,7 @@ export const BubbleIdentity = memo(function BubbleIdentity({
 /**
  * The stamp under the LAST bubble of a run, in tabular figures.
  *
- * Not under every bubble: a timestamp per line doubles the height of a log
+ * Not under every bubble: a timestamp per line doubles the height of a thread
  * without adding a fact anyone reads. A message still in flight always shows
  * one, because "has this sent" is a question worth answering immediately.
  */
@@ -286,52 +347,55 @@ export const BubbleStamp = memo(function BubbleStamp({
 
 /* ------------------------------------------------------------------ notices */
 
-/** Carries the 40px action pill to the 44px floor. */
-const NOTICE_SLOP = { top: 2, bottom: 2, left: 0, right: 0 } as const;
-
 export type ChatNoticeProps = {
   /** One line. Never a paragraph, and always a thing to do or to know. */
   label: string;
   action?: { label: string; onPress: () => void };
+  /**
+   * The opaque fill. Set it wherever this lands on anything other than the
+   * plain screen ground — inside the Session's blurred sheet, most of all,
+   * where a 5.5%-white card over a 72%-chrome panel is barely a shape.
+   */
+  solid?: boolean;
 };
 
 /**
  * The one figure every chat surface uses where a list would be — empty, failed,
- * or filtered to nothing. A raised card, one line, and at most one way out.
+ * or filtered to nothing. A card, one line, and at most one way out.
  *
- * Shared so the inbox, the DM thread and the lounge log cannot drift into three
- * different ways of saying "there is nothing here".
+ * Shared so the inbox, the DM thread, the lounge log and the Session log cannot
+ * drift into four different ways of saying "there is nothing here".
  *
  * Deliberately NOT `@/components/ui/empty-state`: this one sits INSIDE a
- * message log, in the position a bubble would occupy, so it carries no icon
+ * message log, in the position a message would occupy, so it carries no icon
  * tile and no display-size title. A chat log that is merely empty should read
  * as a quiet line in the conversation, not as a full-page announcement that
  * something has gone wrong. The shared card is for screens; this is for logs.
  */
-export const ChatNotice = memo(function ChatNotice({ label, action }: ChatNoticeProps) {
+export const ChatNotice = memo(function ChatNotice({
+  label,
+  action,
+  solid = false,
+}: ChatNoticeProps) {
   const C = useColors();
 
   return (
-    <View style={[styles.notice, { backgroundColor: C.surface }, raised(C)]}>
-      <Text numberOfLines={2} style={[styles.noticeLabel, { color: C.ink2 }]}>
-        {label}
-      </Text>
-      {action ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={action.label}
-          onPress={action.onPress}
-          hitSlop={NOTICE_SLOP}
-          style={({ pressed }) => [
-            styles.noticeAction,
-            { backgroundColor: pressed ? C.cream : C.pill },
-          ]}>
-          <Text numberOfLines={1} style={[styles.noticeActionLabel, { color: C.pillInk }]}>
-            {action.label}
-          </Text>
-        </Pressable>
-      ) : null}
-    </View>
+    <GlassCard variant="card" solid={solid} padded={false}>
+      <View style={styles.notice}>
+        <Text numberOfLines={2} style={[styles.noticeLabel, { color: C.ink2 }]}>
+          {label}
+        </Text>
+        {/*
+          The retry is an ACTION, so it is the blue gradient pill — the same
+          control the rest of the app uses, at the one size that fits beside a
+          line of body text. Hand-rolling it here is how a second button
+          language starts.
+        */}
+        {action ? (
+          <AuxButton label={action.label} onPress={action.onPress} variant="pri" size="sm" />
+        ) : null}
+      </View>
+    </GlassCard>
   );
 });
 
@@ -340,11 +404,13 @@ export const styles = StyleSheet.create({
   bubble: {
     paddingHorizontal: 15,
     paddingVertical: Space.md,
-    borderRadius: Radii.lg,
+    borderRadius: BUBBLE_RADIUS,
+    borderWidth: Rule.hair,
   },
   card: {
     padding: Space.md,
-    borderRadius: Radii.lg,
+    borderRadius: BUBBLE_RADIUS,
+    borderWidth: Rule.hair,
   },
   /** The cut corner points at the speaker's own edge. */
   cornerTheirs: {
@@ -354,9 +420,15 @@ export const styles = StyleSheet.create({
     borderBottomRightRadius: 6,
   },
 
+  /** The thread, L749. */
   body: {
+    ...Type.body(15),
+    lineHeight: 22,
+  },
+  /** The card log, L470. */
+  bodyCompact: {
     ...Type.body(14),
-    lineHeight: 20,
+    lineHeight: 21,
   },
   bodyMine: {
     fontFamily: Fonts.semibold,
@@ -447,29 +519,18 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: Space.xl,
   },
+  /** Layout only — the fill, the edge and the lift come from `GlassCard`. */
   notice: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Space.md,
     minHeight: TOUCH_TARGET + Space.xs,
-    padding: 15,
-    borderRadius: Radii.lg,
+    paddingVertical: Space.md,
+    paddingHorizontal: Space.lg,
   },
   noticeLabel: {
     flex: 1,
     minWidth: 0,
     ...Type.body(13.5),
-  },
-  noticeAction: {
-    minHeight: 40,
-    flexShrink: 0,
-    justifyContent: 'center',
-    paddingHorizontal: Space.lg,
-    borderRadius: Radii.xs,
-  },
-  noticeActionLabel: {
-    fontFamily: Fonts.semibold,
-    fontSize: 12.5,
-    lineHeight: 16,
   },
 });

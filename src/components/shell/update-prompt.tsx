@@ -18,6 +18,7 @@
  * user is — is decided in `@/lib/release-notes`.
  */
 
+import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
@@ -29,7 +30,17 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X } from 'lucide-react-native';
 
-import { Duration, PointerEvents, Rule, Space, TOUCH_TARGET, Type, ZIndex } from '@/lib/theme';
+import {
+  Duration,
+  PointerEvents,
+  Radii,
+  Rule,
+  Space,
+  TOUCH_TARGET,
+  Type,
+  ZIndex,
+  dropped,
+} from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 import { useUpdates } from '@/lib/updates';
 
@@ -115,7 +126,15 @@ export function UpdatePrompt() {
         style={[
           styles.card,
           animated,
-          { backgroundColor: C.surface, borderColor: C.rule2 },
+          { backgroundColor: C.surfaceSolid, borderColor: C.chromeBorder },
+          /*
+            `surfaceSolid`, not `surface`. This card floats over whatever screen
+            happens to be underneath it, and `surface` is 5.5% white — at that
+            alpha the content behind would read straight through the update
+            notes. Anything that overlays arbitrary content needs the opaque
+            composite.
+          */
+          dropped(C, 'lg'),
           promptVisible ? PointerEvents.auto : PointerEvents.none,
         ]}>
         <View style={styles.head}>
@@ -181,22 +200,30 @@ export function UpdatePrompt() {
           </Pressable>
 
           {/*
-            The inverted pill, which is what a primary action looks like
-            everywhere else in this app — the Feed's empty card, CREATE on the
-            lounge form, the notice actions in every chat surface.
+            Blue, and under the current rule that is now exactly right rather
+            than merely defensible.
 
-            It used to be an accent fill. Applying an update is not live, not
-            playing, not joinable and not selected; it was the accent standing
-            in for "primary", which is the one job the accent does not have.
+            The old direction had ONE accent covering live, playing, joinable, in
+            sync and selected, so this button had to avoid it — applying an
+            update is none of those things, and the note here used to explain
+            that at length. There are two accents now, and the second one means
+            precisely "this is the thing you do". A primary action is what blue
+            is FOR, so this stopped being an exception and became the rule.
           */}
           <Pressable
             onPress={() => void apply()}
             disabled={applying}
             accessibilityRole="button"
-            style={[styles.action, { backgroundColor: C.pill }]}>
-            <Text style={[styles.actionLabel, { color: C.pillInk }]}>
-              {applying ? 'RESTARTING' : 'UPDATE NOW'}
-            </Text>
+            style={styles.action}>
+            <LinearGradient
+              colors={[C.priTint, C.pill]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0, y: 1 }}
+              style={styles.actionFill}>
+              <Text style={[styles.actionLabel, { color: C.pillInk }]}>
+                {applying ? 'RESTARTING' : 'UPDATE NOW'}
+              </Text>
+            </LinearGradient>
           </Pressable>
         </View>
       </Animated.View>
@@ -228,8 +255,19 @@ const styles = StyleSheet.create({
     display: 'none',
   },
   card: {
-    // Radius 0 and a hard border: no shadow, no glass. Separation is the rule.
-    borderWidth: Rule.major,
+    /*
+      Rounded, bordered and floating — where this was previously radius 0 with a
+      2px hard edge and no shadow at all, because the old direction separated
+      surfaces with rules rather than depth.
+
+      `overflow: hidden` is not optional now that there is a radius: the actions
+      row runs edge to edge along the bottom of the card, so without it the
+      primary action's fill paints square corners straight through the rounded
+      ones.
+    */
+    borderRadius: Radii.xxl,
+    borderWidth: Rule.hair,
+    overflow: 'hidden',
   },
   head: {
     flexDirection: 'row',
@@ -290,6 +328,14 @@ const styles = StyleSheet.create({
   },
   action: {
     flex: 1,
+    minHeight: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  /** The gradient has to fill the whole cell, so the press target owns no padding. */
+  actionFill: {
+    width: '100%',
+    height: '100%',
     minHeight: 52,
     alignItems: 'center',
     justifyContent: 'center',
