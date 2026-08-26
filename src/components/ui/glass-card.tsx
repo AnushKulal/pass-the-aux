@@ -14,6 +14,25 @@
  * Drop the border and the card reads FLAT no matter what shadow it carries —
  * that is the single most common way this direction gets rendered wrong.
  *
+ * IS IT ACTUALLY TRANSLUCENT? MEASURED, because "glass" is exactly the kind of
+ * claim that stays true in the file and goes false on the screen. Dark mode,
+ * over the brightest part of an ambient blob:
+ *
+ *   the ground alone        #0a0d14      ->  under the blob   rgb(48,30,100)
+ *   the same, through this  rgb(23,26,33) ->  rgb(59,42,108)
+ *
+ * a 36/16/75 shift — a card you can see light through, not a grey plate. So the
+ * fill is right, and every way this direction fails is the GROUND going missing
+ * instead. Two of them, both silent:
+ *   - a screen inside `(tabs)` that forgets `ground={false}` paints an opaque
+ *     `bg` over the blobs mounted once behind the navigator (see `Screen`);
+ *   - the blobs not reaching the middle of the screen at all. That one WAS
+ *     happening; `ambient-ground.tsx` has the post-mortem in its header.
+ *
+ * Light mode is deliberately much quieter — its card is 76% white and its blobs
+ * are a third of the dark alphas, so the same measurement moves about 4/255.
+ * That is the palette matching the light artboard, not a bug to fix here.
+ *
  * TWO SIZES, and the design is perfectly consistent about which is which: every
  * one of its 43 radius-24 surfaces carries `--sh`, and not one of its 54
  * radius-18 surfaces does. So the corner is not a taste knob — 24 means "a card
@@ -80,10 +99,15 @@ export type GlassCardProps = {
   glow?: GlassCardGlow;
   padded?: boolean;
   /**
-   * @deprecated Cards are not glass. The design blurs exactly five surfaces —
-   * the nav, the mini-player, the sheet, the toast and the lobby bar — and a
-   * card is none of them; blurring one would kill the blob bleed-through that
-   * is the whole effect. Accepted and ignored so old call sites keep compiling.
+   * @deprecated A card IS glass here — it is simply not BLURRED, and the
+   * difference is the direction rather than a quibble. The design blurs exactly
+   * five surfaces: the nav, the mini-player, the sheet, the toast and the lobby
+   * bar. A card is none of them, and blurring one would smear the ambient blobs
+   * it exists to show through, which is the effect itself.
+   *
+   * This note used to open "Cards are not glass", which is how the whole
+   * direction gets read as absent — the translucency IS the glass, the blur is
+   * only chrome's share of it. Accepted and ignored so old call sites compile.
    */
   intensity?: number;
 };

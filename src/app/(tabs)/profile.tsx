@@ -42,17 +42,8 @@ import {
   WifiOff,
   type LucideIcon,
 } from 'lucide-react-native';
-import { useCallback, useEffect, useMemo } from 'react';
-import {
-  Alert,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-  type TextStyle,
-} from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View, type TextStyle } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useReducedMotion,
@@ -64,6 +55,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   Avatar,
   AuxButton,
+  ConfirmDialog,
   EmptyState,
   GlassCard,
   Skeleton,
@@ -168,12 +160,42 @@ export default function ProfileScreen() {
   }, [reduced, enter]);
   const enterStyle = useAnimatedStyle(() => ({ opacity: enter.value }));
 
-  const confirmSignOut = useCallback(() => {
-    confirmDestructive('Sign out?', 'Any Session you are hosting ends.', 'Sign out', () => {
-      void signOut().catch((caught: unknown) => {
+  /*
+    SIGNING OUT IS A TWO-STEP NOW, AND THE FIRST STEP IS THE APP'S OWN DIALOG.
+    This used to call `Alert.alert`, which paints the PLATFORM's box — stock
+    Android chrome landing on a screen that shares none of its type, corners or
+    colour — and on react-native-web painted nothing at all, so the sign-out
+    either fired unguarded or the fallback handed the user the browser's own
+    `confirm`. Three dialogs for one question. `ConfirmDialog` is one, and it is
+    the only one that looks like this app.
+
+    Open state rather than an imperative call, because a Modal has to be
+    rendered to exist. `signingOut` is separate from it: the dialog stays up
+    with a spinner in its confirm action until the request settles, so a slow
+    network does not look like a dead button.
+  */
+  const [signOutOpen, setSignOutOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+
+  const askSignOut = useCallback(() => setSignOutOpen(true), []);
+  const cancelSignOut = useCallback(() => setSignOutOpen(false), []);
+
+  const runSignOut = useCallback(() => {
+    setSigningOut(true);
+    void signOut()
+      .catch((caught: unknown) => {
         toast.show(caught instanceof Error ? caught.message : 'Could not sign out.', 'error');
+      })
+      .finally(() => {
+        /*
+          On success the auth listener routes away and this screen unmounts
+          before either of these lands — React 19 drops a set on an unmounted
+          tree silently. They exist for the FAILURE path, where the screen is
+          still here and has to give the button back.
+        */
+        setSigningOut(false);
+        setSignOutOpen(false);
       });
-    });
   }, [signOut, toast]);
 
   const retry = useCallback(() => {
@@ -332,7 +354,10 @@ export default function ProfileScreen() {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Sign out"
-            onPress={confirmSignOut}
+            // It opens a confirmation now rather than signing out on the tap.
+            // A destructive control that does not say so reads as immediate.
+            accessibilityHint="Asks you to confirm first"
+            onPress={askSignOut}
             style={({ pressed }) => [
               styles.signOut,
               {
@@ -350,6 +375,23 @@ export default function ProfileScreen() {
           </Pressable>
         </ScrollView>
       </Animated.View>
+
+      {/*
+        A SIBLING of the animated wrapper, not a child. On native a Modal is its
+        own window and an ancestor's opacity cannot reach it, but on
+        react-native-web it renders inline in the DOM — parented under the enter
+        fade, the dialog would inherit whatever opacity that wrapper happened to
+        be holding.
+      */}
+      <ConfirmDialog
+        visible={signOutOpen}
+        title="Sign out?"
+        message="Any Session you are hosting ends, and this device forgets your account."
+        confirmLabel="Sign out"
+        loading={signingOut}
+        onConfirm={runSignOut}
+        onCancel={cancelSignOut}
+      />
     </SafeAreaView>
   );
 }
@@ -599,27 +641,15 @@ function shortDate(iso: string): string {
   return `${month} '${String(date.getFullYear()).slice(-2)}`;
 }
 
-/**
- * `Alert` on react-native-web renders without its buttons, so a destructive
- * confirmation there would be a dialog you cannot say no to. Fall back to the
- * browser's own confirm, which is the honest equivalent.
- */
-function confirmDestructive(
-  title: string,
-  message: string,
-  confirmLabel: string,
-  onConfirm: () => void,
-) {
-  if (Platform.OS === 'web') {
-    if (globalThis.confirm?.(`${title}\n\n${message}`)) onConfirm();
-    return;
-  }
-
-  Alert.alert(title, message, [
-    { text: 'Cancel', style: 'cancel' },
-    { text: confirmLabel, style: 'destructive', onPress: onConfirm },
-  ]);
-}
+/*
+  `confirmDestructive()` lived here and is gone. It branched on platform —
+  `Alert.alert` on native, `globalThis.confirm` on web — because neither one
+  works everywhere, and the result was that the sign-out guard wore three
+  different faces depending on where you ran it and none of them was this app's.
+  `ConfirmDialog` in '@/components/ui' is one Modal that behaves identically on
+  all three platforms and is drawn in the app's own chrome, which is the whole
+  point: the user reported the "odd android pop up" by name.
+*/
 
 /* ----------------------------------------------------------------- styles */
 

@@ -2,33 +2,44 @@
  * Sign in.
  *
  * Built from design/nocturne/aux-nocturne.dc.html, screen `isSignin` (L107-144):
- * the 54px wordmark over a two-tone rule, the Sign in / Create account
- * segmented switch, two field cards, the gradient CTA, an OR divider, and the
- * provider buttons under it.
+ * the 54px wordmark over a two-tone rule, two field cards, the gradient CTA, an
+ * OR divider, and the provider buttons under it.
  *
- * TWO STRUCTURAL CHANGES FROM THE VERSION THIS REPLACES, both the design's:
+ * THIS SCREEN SIGNS PEOPLE IN. IT DOES NOT CREATE ACCOUNTS, and that is the
+ * correction this pass exists for.
  *
- * 1. THE BRAND HEADER IS BACK. The previous pass cut the wordmark and the pitch
- *    line on the grounds that "the lede carries the one fact that changes what
- *    someone does here". Nocturne puts them back, and they earn it now that
- *    Intro is one screen instead of four — this is the first place the mark is
- *    ever seen at size, and the one line under it is the only pitch left in the
- *    signed-out flow.
- * 2. THE MODE IS A SWITCH, NOT A LINK. Creating an account used to hide behind
- *    a text link below the button, which made the second of the two things
- *    people come here to do the quietest thing on the screen. The segmented
- *    control states both up front and keeps the title honest without one.
+ * 1. THE SEGMENTED SWITCH IS GONE. A Sign in / Create account control flipped
+ *    ONE form between two jobs, and this file used to argue that stating both
+ *    modes up front was the honest thing. It is not, because the two are not
+ *    variants of each other: one hands a password to an account that already
+ *    exists, the other builds an account and a profile from nothing. Sharing a
+ *    form made them look interchangeable, and the bug that fell out of it is
+ *    the whole reason for this rewrite — signing in walked people through
+ *    profile setup, for a profile they made months ago. Creating an account
+ *    now has its own screen: `(auth)/create-account`.
+ * 2. SIGNING IN NEVER RUNS PROFILE SETUP. The gate that was sending them there
+ *    lives in `useLocalProfile` (AsyncStorage, per-device), and the fix is in
+ *    `(auth)/_layout` — it reconciles that local flag against the account's own
+ *    `profiles` row before letting anyone out of this group. Read the comment
+ *    there; it is the substance of the fix and it is deliberately NOT here,
+ *    because the layout is the only place that can hold the redirect while it
+ *    happens.
+ * 3. THE PITCH LINE IS GONE. It sat under the wordmark and said what Aux is.
+ *    Nobody arrives at a SIGN IN screen needing to be sold the app — they have
+ *    an account. `(auth)/intro` is the pitch, and it is what a first-time
+ *    visitor sees. The line under the title now says what to do instead.
  *
- * DELIBERATE DEVIATION: the design draws three provider buttons — Google,
- * Spotify and Apple Music. Only Google is wired (`signInWithOAuth`); Spotify
- * exists in this app as an account LINK from Settings, not as an identity
- * provider, and there is no Apple Music auth at all. Painting three buttons
- * where one works would be a worse screen than painting one. The design's own
- * footnote already explains the absence, so it is kept verbatim.
+ * PROVIDERS: Google and Spotify are both real (`signInWithOAuth`). Apple Music
+ * is rendered DISABLED rather than omitted, because the user asked for it and
+ * a missing button is indistinguishable from an oversight. There is no honest
+ * way to wire it: Apple's MusicKit is an iOS and web SDK with no Android
+ * implementation, this app has no Apple Music playback path at all, and Apple
+ * is not a Supabase auth provider configured for this project. The button says
+ * so on its face rather than failing after a tap.
  */
 
 import { makeRedirectUri } from 'expo-auth-session';
-import { Redirect } from 'expo-router';
+import { Redirect, router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useCallback, useState } from 'react';
 import {
@@ -47,8 +58,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   BrandRule,
   OnboardingField,
-  OnboardingSwitch,
   PrimaryCta,
+  SecondaryCta,
   useEnterStyle,
 } from '@/components/auth/onboarding';
 import { Wordmark } from '@/components/shell/wordmark';
@@ -62,7 +73,19 @@ import { useColors } from '@/lib/theme-context';
 // No-op on native, required on web.
 WebBrowser.maybeCompleteAuthSession();
 
-type Mode = 'signin' | 'signup';
+/**
+ * The identity providers this screen can actually complete a round trip with.
+ *
+ * Apple Music is deliberately not in here — see the file header. Keeping the
+ * type to what works is what stops a disabled button from ever being handed to
+ * `signInWithOAuth`.
+ */
+type Provider = 'google' | 'spotify';
+
+const PROVIDER_NAME: Record<Provider, string> = {
+  google: 'Google',
+  spotify: 'Spotify',
+};
 
 /**
  * The screen gutter — 18, the house value (`src/components/ui/screen.tsx` and
@@ -81,50 +104,31 @@ const RULE_W = 52;
 /** The provider button and its leading glyph chip (L136). */
 const PROVIDER_HEIGHT = 54;
 const PROVIDER_CHIP = 26;
+/** The screen title, sized to sit under a 54px wordmark rather than fight it. */
+const TITLE = 26;
 
-/**
- * The two modes, as the switch reads them. Declared at module scope so the
- * array identity is stable across renders — the switch maps over it.
- */
-const MODES = [
-  { value: 'signin', label: 'Sign in' },
-  { value: 'signup', label: 'Create account' },
-] as const satisfies readonly { value: Mode; label: string }[];
-
-/** Deliberately loose. The confirmation email is the real validator. */
+/** Deliberately loose. The account either exists or it does not. */
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-/** Supabase's own floor is 6; 8 is the cheapest security win available here. */
-const MIN_PASSWORD = 8;
 
 export default function SignInScreen() {
   const C = useColors();
   const toast = useToast();
   const enterStyle = useEnterStyle();
-  const { session, pendingUsernameClaim, beginUsernameClaim, finishUsernameClaim } = useAuth();
+  const { session, pendingUsernameClaim } = useAuth();
 
-  const [mode, setMode] = useState<Mode>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitted, setSubmitted] = useState(false);
-  const [busy, setBusy] = useState<'email' | 'google' | null>(null);
-
-  const signup = mode === 'signup';
+  const [busy, setBusy] = useState<'email' | Provider | null>(null);
 
   const emailProblem = EMAIL_PATTERN.test(email.trim()) ? undefined : 'Enter a valid email address.';
-  const passwordProblem = signup
-    ? password.length >= MIN_PASSWORD
-      ? undefined
-      : `Use at least ${MIN_PASSWORD} characters.`
-    : password.length > 0
-      ? undefined
-      : 'Enter your password.';
-
-  const changeMode = useCallback((next: Mode) => {
-    setMode(next);
-    // Rules differ between the two modes, so a message written for the other
-    // one is worse than no message.
-    setSubmitted(false);
-  }, []);
+  /*
+    No length rule here, and that is part of the point of splitting the screens.
+    A minimum belongs on the screen that SETS a password; on the screen that
+    checks one, "use at least 8 characters" is the app second-guessing a
+    password the server accepted long ago.
+  */
+  const passwordProblem = password.length > 0 ? undefined : 'Enter your password.';
 
   const submit = useCallback(async () => {
     setSubmitted(true);
@@ -132,85 +136,85 @@ export default function SignInScreen() {
 
     setBusy('email');
     try {
-      const credentials = { email: email.trim(), password };
-
-      if (mode === 'signin') {
-        const { error } = await supabase.auth.signInWithPassword(credentials);
-        if (error) throw error;
-        // The session lands via onAuthStateChange and the (auth) layout
-        // redirects; navigating here as well would race it.
-        return;
-      }
-
-      // Flagged before the request so the layout is already holding the door
-      // open by the time the new session arrives.
-      beginUsernameClaim();
-      const { data, error } = await supabase.auth.signUp(credentials);
-      if (error) throw error;
-
-      if (!data.session) {
-        // Email confirmation is on for this project — there is nothing to
-        // claim until they come back through the link.
-        finishUsernameClaim();
-        toast.show('Check your email to confirm your account, then sign in.', 'info');
-        setMode('signin');
-        setPassword('');
-      }
-    } catch (caught) {
-      finishUsernameClaim();
-      toast.show(authMessage(caught), 'error');
-    } finally {
-      setBusy(null);
-    }
-  }, [
-    beginUsernameClaim,
-    email,
-    emailProblem,
-    finishUsernameClaim,
-    mode,
-    password,
-    passwordProblem,
-    toast,
-  ]);
-
-  const continueWithGoogle = useCallback(async () => {
-    setBusy('google');
-    try {
-      const redirectTo = googleRedirectUri();
-
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo,
-          // Native has no page to navigate away from; we open the browser
-          // ourselves so we can read the callback URL back out of it.
-          skipBrowserRedirect: Platform.OS !== 'web',
-        },
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
       });
       if (error) throw error;
-
-      // On web the tab is already navigating to Google; `detectSessionInUrl`
-      // picks the session up when it comes back.
-      if (Platform.OS === 'web') return;
-      if (!data?.url) throw new Error('Google sign-in could not be started.');
-
-      const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
-      // Anything but 'success' means the user backed out. That is a choice,
-      // not a failure — return to idle without an error toast.
-      if (result.type !== 'success') return;
-
-      await completeOAuthCallback(result.url);
+      // The session lands via onAuthStateChange, `(auth)/_layout` reconciles
+      // the profile gate against the account's row, and the redirect follows.
+      // Navigating from here would race that and land on the very gate the
+      // layout is busy satisfying.
     } catch (caught) {
       toast.show(authMessage(caught), 'error');
     } finally {
       setBusy(null);
     }
-  }, [toast]);
+  }, [email, emailProblem, password, passwordProblem, toast]);
 
-  // Declarative rather than an imperative push after signUp: this survives a
-  // re-render race with the layout's own redirect, and self-heals if the user
-  // somehow lands back here mid-claim.
+  /**
+   * One handler for both real providers.
+   *
+   * This was `continueWithGoogle`, hardcoded end to end. The provider is now an
+   * argument because Spotify takes exactly the same round trip, and two copies
+   * of a PKCE-or-implicit callback parser is two chances to fix only one.
+   *
+   * NOTE FOR THE PROVIDER PLUMBING IN `@/lib/auth`: this calls Supabase
+   * directly because there is nothing else to call yet. When that module
+   * exposes a shared sign-in — and the source-preference inheritance that
+   * should follow a Spotify identity into playback — replace the body of this
+   * callback with it. The buttons below need no changes.
+   */
+  const continueWith = useCallback(
+    async (provider: Provider) => {
+      setBusy(provider);
+      try {
+        const redirectTo = oauthRedirectUri();
+
+        const { data, error } = await supabase.auth.signInWithOAuth({
+          provider,
+          options: {
+            redirectTo,
+            // Native has no page to navigate away from; we open the browser
+            // ourselves so we can read the callback URL back out of it.
+            skipBrowserRedirect: Platform.OS !== 'web',
+          },
+        });
+        if (error) throw error;
+
+        // On web the tab is already navigating away; `detectSessionInUrl`
+        // picks the session up when it comes back.
+        if (Platform.OS === 'web') return;
+        if (!data?.url) {
+          throw new Error(`${PROVIDER_NAME[provider]} sign-in could not be started.`);
+        }
+
+        const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+        // Anything but 'success' means the user backed out. That is a choice,
+        // not a failure — return to idle without an error toast.
+        if (result.type !== 'success') return;
+
+        await completeOAuthCallback(result.url, PROVIDER_NAME[provider]);
+      } catch (caught) {
+        toast.show(authMessage(caught), 'error');
+      } finally {
+        setBusy(null);
+      }
+    },
+    [toast]
+  );
+
+  /*
+    A self-heal, not the signup path — that moved to `(auth)/create-account`
+    along with the `beginUsernameClaim` call that raises this flag. It stays
+    here because the flag is held in memory: if a signup is interrupted and the
+    user ends up back on this screen with a live session, the (auth) layout will
+    not send them to the tabs, and without this they would sit on a sign-in form
+    for an account they are already signed in to.
+  */
   if (session && pendingUsernameClaim) return <Redirect href="/(auth)/claim-username" />;
+
+  const blocked = busy !== null;
 
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: C.bg }]}>
@@ -233,24 +237,24 @@ export default function SignInScreen() {
               */}
               <BrandRule width={RULE_W} style={styles.accentRule} />
 
-              {/* The screen's heading. The title moved into the switch below,
-                  so this is what a screen reader lands on first. */}
-              <Text accessibilityRole="header" style={[styles.kicker, { color: C.ink3 }]}>
-                PASS THE AUX
-              </Text>
-              <Text style={[styles.pitch, { color: C.ink2 }]}>
-                Join a Lounge and hear the same chorus at the same moment.
-              </Text>
-            </View>
+              <Text style={[styles.kicker, { color: C.ink3 }]}>PASS THE AUX</Text>
 
-            <View style={styles.switchGap}>
-              <OnboardingSwitch
-                accessibilityLabel="Sign in or create an account"
-                value={mode}
-                options={MODES}
-                onChange={changeMode}
-                disabled={busy !== null}
-              />
+              {/* The screen's heading, standing where the segmented switch was.
+                  A title that names ONE job is what a screen reader lands on
+                  now, instead of a two-option control that named two. */}
+              <Text
+                accessibilityRole="header"
+                style={[
+                  Type.display(TITLE),
+                  styles.title,
+                  { color: C.ink, lineHeight: Math.round(TITLE * 1.1) },
+                ]}>
+                Welcome back
+              </Text>
+              <Text style={[styles.lede, { color: C.ink2 }]}>
+                Sign in with your email and password. Your profile already exists — there is nothing
+                to set up again.
+              </Text>
             </View>
 
             <View style={styles.fields}>
@@ -264,23 +268,25 @@ export default function SignInScreen() {
                 keyboardType="email-address"
                 error={submitted ? emailProblem : undefined}
               />
+              {/* `secureTextEntry` is what puts the eye toggle in the field —
+                  see `OnboardingField`. There is no second prop to forget. */}
               <OnboardingField
                 label="Password"
                 value={password}
                 onChangeText={setPassword}
-                placeholder={signup ? `At least ${MIN_PASSWORD} characters` : 'Your password'}
+                placeholder="Your password"
                 secureTextEntry
                 autoCapitalize="none"
-                autoComplete={signup ? 'new-password' : 'current-password'}
+                autoComplete="current-password"
                 error={submitted ? passwordProblem : undefined}
               />
             </View>
 
             <View style={styles.ctaGap}>
               <PrimaryCta
-                label={signup ? 'Create account' : 'Sign in'}
+                label="Sign in"
                 loading={busy === 'email'}
-                disabled={busy !== null}
+                disabled={blocked}
                 onPress={() => {
                   void submit();
                 }}
@@ -293,48 +299,56 @@ export default function SignInScreen() {
               <View style={[styles.hair, { backgroundColor: C.rule }]} />
             </View>
 
-            {/* A surface pill, not a second gradient: one filled thing per
-                screen, and on this one it is the button that gets you in. */}
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Continue with Google"
-              accessibilityState={{ busy: busy === 'google', disabled: busy !== null }}
-              disabled={busy !== null}
-              onPress={() => {
-                void continueWithGoogle();
-              }}
-              style={({ pressed }) => [
-                styles.provider,
-                { backgroundColor: pressed ? C.surface2 : C.surface, borderColor: C.rule },
-                busy !== null && busy !== 'google' ? styles.blocked : null,
-              ]}>
-              {busy === 'google' ? (
-                <ActivityIndicator size="small" color={C.ink} />
-              ) : (
-                <>
-                  {/*
-                    `surface2` on `surface`, which is the one place in this
-                    screen that stacking two translucent fills is the point: the
-                    chip has to read as a disc set INTO the button rather than
-                    as a second object on the ground.
-                  */}
-                  <View
-                    style={[
-                      styles.providerChip,
-                      { backgroundColor: C.surface2, borderColor: C.rule },
-                    ]}>
-                    <Text style={[styles.providerGlyph, { color: C.ink2 }]}>G</Text>
-                  </View>
-                  <Text style={[styles.providerLabel, { color: C.ink }]}>Continue with Google</Text>
-                </>
-              )}
-            </Pressable>
+            <View style={styles.providers}>
+              <ProviderButton
+                glyph="G"
+                label="Continue with Google"
+                busy={busy === 'google'}
+                blocked={blocked}
+                onPress={() => {
+                  void continueWith('google');
+                }}
+              />
+              <ProviderButton
+                glyph="S"
+                label="Continue with Spotify"
+                busy={busy === 'spotify'}
+                blocked={blocked}
+                onPress={() => {
+                  void continueWith('spotify');
+                }}
+              />
+              {/*
+                No handler, and no pretend one. `disabled` is the whole state:
+                the tag names the reason on the button itself, and the footnote
+                below spells it out once for anyone who wants the why.
+              */}
+              <ProviderButton glyph="A" label="Continue with Apple Music" tag="iOS only" disabled />
+            </View>
 
             <View style={styles.spacer} />
 
+            <View style={[styles.divide, { backgroundColor: C.rule }]} />
+
+            {/*
+              Create account, given its own block below a rule rather than a
+              text link under the button. It is the second of the two things
+              people come to this screen for, and both previous versions buried
+              it — first as a link, then as half of a switch that dragged
+              profile setup into the sign-in path.
+            */}
+            <Text style={[styles.newHere, { color: C.ink3 }]}>New to Aux?</Text>
+            <SecondaryCta
+              label="Create account"
+              disabled={blocked}
+              onPress={() => {
+                router.push('/(auth)/create-account');
+              }}
+            />
+
             <Text style={[styles.footnote, { color: C.ink3 }]}>
-              No Spotify needed. Aux plays through YouTube by default — link Premium later from
-              Settings if you have it.
+              No Spotify needed — Aux plays through YouTube by default. Apple Music has no sign-in
+              here: Apple ships MusicKit for iOS and the web only.
             </Text>
             <Text style={[styles.terms, { color: C.ink3 }]}>
               By continuing you agree to the terms. We never post anything.
@@ -346,9 +360,81 @@ export default function SignInScreen() {
   );
 }
 
+/* --------------------------------------------------------------- provider */
+
+type ProviderButtonProps = {
+  /**
+   * One letter in the leading chip. Lucide carries no brand marks, and a
+   * near-miss logo is worse than an initial.
+   */
+  glyph: string;
+  label: string;
+  onPress?: () => void;
+  /** This provider's own round trip is running. */
+  busy?: boolean;
+  /** Something else on the screen is running — dim, but do not explain. */
+  blocked?: boolean;
+  /** Permanently unavailable. `tag` is where the reason goes. */
+  disabled?: boolean;
+  /** A short muted reason, right-aligned inside the button. */
+  tag?: string;
+};
+
+/**
+ * A surface pill, not a second gradient: one filled thing per screen, and on
+ * this one it is the button that gets you in.
+ *
+ * Extracted from the single hardcoded Google button this screen used to carry,
+ * because there are three of them now and one is permanently off.
+ */
+function ProviderButton({
+  glyph,
+  label,
+  onPress,
+  busy = false,
+  blocked = false,
+  disabled = false,
+  tag,
+}: ProviderButtonProps) {
+  const C = useColors();
+  const off = disabled || blocked;
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={tag ? `${label} — ${tag}` : label}
+      accessibilityState={{ busy, disabled: off }}
+      disabled={off || busy}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.provider,
+        { backgroundColor: pressed && !off ? C.surface2 : C.surface, borderColor: C.rule },
+        off && !busy ? styles.blocked : null,
+      ]}>
+      {busy ? (
+        <ActivityIndicator size="small" color={C.ink} />
+      ) : (
+        <>
+          {/*
+            `surface2` on `surface`, which is the one place in this screen that
+            stacking two translucent fills is the point: the chip has to read as
+            a disc set INTO the button rather than as a second object on the
+            ground.
+          */}
+          <View style={[styles.providerChip, { backgroundColor: C.surface2, borderColor: C.rule }]}>
+            <Text style={[styles.providerGlyph, { color: C.ink2 }]}>{glyph}</Text>
+          </View>
+          <Text style={[styles.providerLabel, { color: disabled ? C.ink3 : C.ink }]}>{label}</Text>
+          {tag ? <Text style={[styles.providerTag, { color: C.ink3 }]}>{tag}</Text> : null}
+        </>
+      )}
+    </Pressable>
+  );
+}
+
 /* ------------------------------------------------------------------ oauth */
 
-function googleRedirectUri(): string {
+function oauthRedirectUri(): string {
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
     // The origin itself, not a dedicated callback route: the web client has
     // `detectSessionInUrl` on, so whatever route renders at `/` completes the
@@ -365,7 +451,7 @@ function googleRedirectUri(): string {
  * in `@/lib/supabase`, so the callback may carry a PKCE `code` in the query or
  * implicit tokens in the fragment depending on the client default in play.
  */
-async function completeOAuthCallback(url: string): Promise<void> {
+async function completeOAuthCallback(url: string, provider: string): Promise<void> {
   const [beforeHash = '', hash = ''] = url.split('#');
   const query = new URLSearchParams(beforeHash.split('?')[1] ?? '');
   const fragment = new URLSearchParams(hash);
@@ -394,13 +480,13 @@ async function completeOAuthCallback(url: string): Promise<void> {
     query.get('error') ??
     fragment.get('error');
 
-  throw new Error(returned ?? 'Google did not return a session. Please try again.');
+  throw new Error(returned ?? `${provider} did not return a session. Please try again.`);
 }
 
 function authMessage(caught: unknown): string {
   if (caught instanceof Error && caught.message) {
     // Supabase's own copy is already user-facing for the cases that matter
-    // ("Invalid login credentials", "User already registered").
+    // ("Invalid login credentials", "Email not confirmed").
     return caught.message;
   }
   return 'Something went wrong. Check your connection and try again.';
@@ -441,21 +527,23 @@ const styles = StyleSheet.create({
     fontSize: 10,
     letterSpacing: tracking(10, 0.2),
   },
-  pitch: {
+  title: {
+    textAlign: 'center',
+    letterSpacing: tracking(TITLE, -0.03),
+    marginTop: 14,
+  },
+  lede: {
     ...Type.body(14),
     lineHeight: 22,
     textAlign: 'center',
-    marginTop: 14,
+    marginTop: Space.sm,
     // The artboard's own 280. Caps the measure at roughly two even lines
     // instead of one long ragged one.
     maxWidth: 280,
   },
 
-  switchGap: {
-    marginTop: 34,
-  },
   fields: {
-    marginTop: Space.lg,
+    marginTop: 30,
     gap: 10,
   },
   ctaGap: {
@@ -478,6 +566,9 @@ const styles = StyleSheet.create({
     letterSpacing: tracking(10, 0.14),
   },
 
+  providers: {
+    gap: 10,
+  },
   provider: {
     minHeight: PROVIDER_HEIGHT,
     borderRadius: Radii.pill,
@@ -506,9 +597,16 @@ const styles = StyleSheet.create({
     // provider stack have to start on one x or the glyphs stop reading as a
     // column.
     flex: 1,
+    minWidth: 0,
     textAlign: 'left',
     fontFamily: Fonts.semibold,
     fontSize: 14,
+  },
+  providerTag: {
+    ...Type.label(10),
+    fontFamily: Fonts.extrabold,
+    flexShrink: 0,
+    letterSpacing: tracking(10, 0.08),
   },
 
   /** Collapses first when the keyboard takes the bottom half of the screen. */
@@ -517,10 +615,29 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     minHeight: Space.xxl,
   },
-  footnote: {
-    ...Type.body(13),
-    lineHeight: 21,
+  /**
+   * The rule above the create-account block. Its own style rather than `hair`,
+   * which is `flex: 1` because it lives inside the horizontal OR row — reused
+   * here it would collapse to nothing in a column.
+   */
+  divide: {
+    height: Rule.hair,
+    alignSelf: 'stretch',
+    marginBottom: Space.lg,
+  },
+  newHere: {
+    ...Type.label(10),
+    fontFamily: Fonts.extrabold,
+    letterSpacing: tracking(10, 0.14),
     textAlign: 'center',
+    marginBottom: Space.md,
+  },
+
+  footnote: {
+    ...Type.body(12.5),
+    lineHeight: 20,
+    textAlign: 'center',
+    marginTop: Space.xl,
   },
   terms: {
     ...Type.body(11.5),

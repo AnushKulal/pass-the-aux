@@ -29,6 +29,15 @@
  * avatar", but the tile has no handler even in the design (its own notes place
  * the picker on the next screen) and this app has no image picker yet. The tile
  * is decorative here and the hint says what is actually true.
+ *
+ * THE STEP COUNTER NOW SAYS THREE, AND IT USED TO SAY TWO. This is step two of
+ * an email signup — sign in, claim a handle, set up the profile — and that
+ * third screen is not decoration any more. It asks the one question Aux cannot
+ * start without, which music service the audio comes from, so it is a genuine
+ * third step and a counter that stopped at two promised a door that was not the
+ * last one. Nothing else on this screen changes: an account that reaches here
+ * from Settings still shows "Your handle" and no counter at all, because there
+ * is no flow to count.
  */
 
 import { router } from 'expo-router';
@@ -240,8 +249,10 @@ export default function ClaimUsernameScreen() {
             <OnboardingHeader
               // Honest rather than hardcoded: this screen is step 2 during
               // signup and a plain edit screen when opened from Settings, and
-              // "STEP 2 OF 2" is a lie in the second case.
-              kicker={pendingUsernameClaim ? 'Step 2 of 2' : 'Your handle'}
+              // any step counter is a lie in the second case. Three, not two:
+              // profile setup after this one asks for a music service, which is
+              // required, so it counts.
+              kicker={pendingUsernameClaim ? 'Step 2 of 3' : 'Your handle'}
               title="Claim your handle"
               lede="This is how people find you in a Lounge. 3–20 characters, lowercase, numbers and underscores."
               size={TITLE}

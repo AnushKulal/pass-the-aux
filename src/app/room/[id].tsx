@@ -4,76 +4,111 @@
  *
  * Built from design/nocturne/aux-nocturne.dc.html, screen `isSession`:
  * the header at L900-L908, the stage switch at L910-L913, the scrolling body
- * at L915, the orbit at L965-L1005, and the GLASS lobby bar welded to the
- * bottom edge at L1145-L1158. The sheets are L1163-L1180 (queue), L1245-L1284
- * (chat), L1286 (the drawer) and L1439-L1462 (sync diagnostics).
- *
- * STRUCTURAL RULE THAT MUST NOT BE BROKEN: `<YouTubePlayerHost />` is mounted
- * exactly once, here, and stays mounted for as long as the Session is open —
- * even when the active provider is Spotify. A listener whose Spotify device
- * dies mid-Session falls back to YouTube by re-pointing the adapter, and a
- * remount at that moment would mean a black WebView booting from scratch
- * instead of audio resuming in the next second. It lives inside `<NowPlaying>`,
- * which is why `<NowPlaying>` is a FIXED band of this layout and is the one
- * thing the stage switch below does NOT swap out — see deviation 1.
- *
- * That is also why loading and empty are drawn INSIDE the bands rather than as
- * a separate screen swapped in ahead of them: a skeleton that replaces the
- * whole column would unmount the player on its way out. The one exception is
- * the "you cannot open this Session" error, which can only happen before the
- * room row has ever landed — nothing is playing, so there is nothing to lose.
+ * at L915, the track card at L918-L950, the sync line at L952-L961, the orbit
+ * at L965-L1005, and the GLASS lobby bar welded to the bottom edge at
+ * L1145-L1158. The sheets are L1163-L1180 (queue), L1245-L1284 (chat), L1286
+ * (the drawer) and L1439-L1462 (sync diagnostics).
  *
  * ------------------------------------------------------------------ layout
  *
- *   header      back · session name / lounge · MODE · the N LOCKED pill
- *   stage       NowPlaying — artwork, title, scrubber, sync readout
- *   switch      Now playing | Listeners · N
- *   body        now      the transport, then who is on aux
- *               people   the sync orbit, the roster, your own mic and deafen
+ *   header      back · session name / LOUNGE · MODE · the N/N LOCKED pill
+ *   switch      Now playing | Members · N            <- top of the module
+ *   video       the 16:9 player module, when YouTube is the live provider
+ *   body        now      the track card, the transport, the aux hand-off,
+ *                        the sync line, and the way to add a track
+ *               people   the sync orbit and the roster. PEOPLE ONLY.
  *   lobby bar   the drawer handle · MIC · DEAFEN · QUEUE · CHAT · LEAVE
+ *
+ * ------------------------------------------- THE SWITCH MOVED TO THE TOP, AND
+ * ------------------------------------------- THAT REVERSES THIS FILE'S OWN
+ * ------------------------------------------- LOUDEST PREVIOUS RULING
+ *
+ * This file used to carry a deviation reading "THE STAGE SITS ABOVE THE SWITCH,
+ * not inside it", justified because `<NowPlaying>` mounted the YouTube player
+ * host and unmounting that mid-song stops the audio. The consequence was a
+ * Session where the toggle sat halfway down the screen under a player you could
+ * not get rid of, and where picking "Listeners" still left "Nothing on the deck"
+ * pinned above the roster. The user's own screenshot puts the toggle directly
+ * under the header, and their instruction was explicit: the toggle belongs at
+ * the top of the MODULE, and switching to the people tab must show people and
+ * nothing else.
+ *
+ * The constraint was real; the layout it forced was not the only way to satisfy
+ * it. What actually has to survive a tab switch is the PLAYER HOST, not the
+ * card wrapped around it. So the host has been lifted out of `<NowPlaying>` and
+ * given a permanent address of its own — `<VideoStage>` below, the first child
+ * of the body, rendered in both stages and at the same tree position in both,
+ * so React reconciles it instead of remounting. When the people tab is up, or
+ * when the provider is not YouTube, it parks at 1x1 and zero opacity and keeps
+ * playing. Parked, NOT `display:'none'` and NOT unmounted: an Android WebView
+ * laid out GONE may pause its media, and losing the audio is exactly the
+ * failure the old arrangement was avoiding.
+ *
+ * With the host safe, `<NowPlaying>` is ordinary tab content. It mounts with the
+ * now-playing tab and unmounts with it, which is what makes "I do not need to
+ * see the nothing on deck when I switch to the listeners" true rather than
+ * approximately true.
+ *
+ * --------------------------------------------------------- the now tab, in order
+ *
+ * The order below is the screenshot's, top to bottom, and each item is a
+ * SIBLING in one scroller so the sequence is readable in one place:
+ *
+ *   NowPlaying        artwork tile, title, artist, the source chip, the coral
+ *                     scrubber and the two clocks
+ *   TransportControls back 15 · the blue play circle · skip
+ *   PassTheAux        the coral-outlined full-width row with the trailing arrow
+ *   SessionSyncRow    the coral dot, "You are LOCKED +26ms", the (?), Hard seek
+ *   add a track       the way into the search sheet from the player itself
  *
  * ------------------------------------------- where the buried features went
  *
- * The five things the user named as missing or unreachable, and where each one
- * now is. None of them is more than one tap from a Session at rest:
- *
- *   MIC          a permanent cell in the lobby bar, plus the roster's own
- *                voice card, plus the drawer. It is the control people reach
- *                for most and it used to be two taps and a guess deep.
+ *   MIC          a permanent cell in the lobby bar, plus the drawer. THE VOICE
+ *                CARD IS GONE FROM THE ROSTER — the user asked for it to go
+ *                ("i dont need your voice card here") and the bar is where the
+ *                mic belongs. The HANDLERS did not move: `handleMic` and
+ *                `handleDeafen` still drive the bar and the drawer.
  *   DEAFEN       the cell beside it. The artboard spends this bar slot on
  *                SCREEN SHARE, which has no transport in this build; deafen
  *                is a real control and takes the slot rather than a stub.
- *   MUTE ONE     the Listeners TAB — a top-level destination now, not a
- *   PERSON       sheet. Tapping any row mutes that person, for you only.
+ *   MUTE ONE     the Members TAB — a top-level destination, not a sheet.
+ *   PERSON       Tapping any row mutes that person, for you only.
  *   GAME         the drawer, one tap on the handle. `LobbySheetBody` carries
  *   CHANGE       the real catalogue, table and seat queue, and the real three
  *   LOBBY        lobby modes. The handle NAMES them rather than saying
  *                "swipe up for more", because a door nobody opens is the
  *                exact failure being fixed here.
+ *   ADD A TRACK  the empty card's CTA, the queue sheet, the drawer — and now a
+ *                row on the now-playing tab, because the user asked for it to
+ *                be reachable from the player.
  *
  * ----------------------------------------------------- deliberate deviations
  *
- * 1. THE STAGE SITS ABOVE THE SWITCH, not inside it. The artboard's segmented
- *    control swaps the hero card out for the orbit; doing that here would
- *    unmount the YouTube host every time somebody looked at the roster, which
- *    stops the music. `NowPlaying` is therefore a fixed band and the switch
- *    changes only the region beneath it. Hiding it with `display:'none'` was
- *    the other option and was rejected: an Android WebView laid out GONE may
- *    pause its media, and losing audio is not worth a tab animation.
+ * 1. THE EMPTY SESSION DRAWS NO TRANSPORT AND NO SYNC LINE. A Session that had
+ *    finished loading with nothing on the deck used to render a full hero
+ *    reading `Session · 0:00 / 0:00` over five dead circles. `NowPlaying` owns
+ *    an empty face with the CTA in it, and the rows that only make sense
+ *    against a playing track are not drawn at all: disabled controls under
+ *    "nothing on the deck" tell the same lie in miniature. The AUX HAND-OFF is
+ *    the exception and stays — see the comment on it below; who holds the aux
+ *    is not a claim about a track.
  *
- * 2. THE EMPTY SESSION DRAWS NO TRANSPORT. A Session that had finished loading
- *    with nothing on the deck and nothing behind it used to render a full hero
- *    reading `Session · 0:00 / 0:00` over five dead circles — a screen that
- *    looked like it was playing silence. `NowPlaying` now owns an empty face
- *    with the CTA in it (which is what `onAddTrack` is for, and why the old
- *    `QueuePrompt` card in this file is gone), and the transport row is not
- *    drawn at all: five disabled controls under "nothing on the deck" is the
- *    same lie in miniature.
+ * 2. THE AUX HAND-OFF ROW IS INERT FOR A HOST, and it looks it. There is no
+ *    `rooms.host_id` transfer RPC in this build, so "Pass the aux" cannot
+ *    actually pass anything. It is drawn dimmed and marked disabled to
+ *    assistive tech rather than drawn bright and lying, which is what
+ *    `AuxCard`'s `blocked` rule already did — this row inherits that rule
+ *    unchanged. A passenger's half of it is live and calls `useRequestAux`.
  *
  * 3. THE BAR'S HANDLE IS A TAP, NOT A DRAG. The artboard binds pointer-move to
  *    the grabber. A pan responder there competes with the scroller directly
  *    above it for the same vertical gesture, and the drawer it opens is
  *    reachable by pressing the same 40px strip. Kept as a press.
+ *
+ * 4. THE TRANSPORT ROW STILL DRAWS FIVE CELLS where the artboard draws three.
+ *    `onShuffle` and `onRepeat` are wired here and 'transport-controls.tsx' is
+ *    not this pass's file to edit; dropping the props would leave two inert
+ *    ghost circles rather than removing them, which is worse than either.
  *
  * Everything else — the queue, the chat, the drawer and the sync diagnostics —
  * is a floating glass sheet, per L1166.
@@ -83,17 +118,12 @@ import { BlurView } from 'expo-blur';
 import { router, useLocalSearchParams } from 'expo-router';
 import {
   ArrowLeft,
-  HeadphoneOff,
-  Headphones,
-  ListMusic,
-  LogOut,
+  ArrowRight,
   MessageCircle,
-  Mic,
-  MicOff,
+  Plus,
   Radio,
   RotateCw,
   X,
-  type LucideIcon,
 } from 'lucide-react-native';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
@@ -121,11 +151,11 @@ import {
   rungColor,
   type DriftRung,
 } from '@/components/room/drift';
-import { LobbySheetBody } from '@/components/room/lobby-sheet';
-import { NowPlaying } from '@/components/room/now-playing';
+import { LobbySheetBody, SessionDock, useSessionDockReserve } from '@/components/room/lobby-sheet';
+import { NowPlaying, SessionSyncRow } from '@/components/room/now-playing';
 import { ParticipantStrip, SyncOrbit } from '@/components/room/participant-strip';
 import { QueueList } from '@/components/room/queue-list';
-import { AuxCard, TransportControls } from '@/components/room/transport-controls';
+import { TransportControls } from '@/components/room/transport-controls';
 import { AmbientGround } from '@/components/shell/ambient-ground';
 import {
   AuxButton,
@@ -133,6 +163,7 @@ import {
   EmptyState,
   GlassCard,
   SheetTabs,
+  Skeleton,
   useToast,
   type SheetTab,
 } from '@/components/ui';
@@ -155,7 +186,6 @@ import {
   TOUCH_TARGET,
   Type,
   ZIndex,
-  floating,
   sheetShadow,
   tracking,
 } from '@/lib/theme';
@@ -172,25 +202,13 @@ const SEEK_BACK_MS = 15_000;
 /** L915: the Session body runs on a 16px gutter, not the 18px screen gutter. */
 const GUTTER = Space.lg;
 
-/**
- * The lobby bar's own height, and it is a CONSTANT rather than a measurement.
- *
- * The bar is absolutely positioned — it has to be, or the glass would have
- * nothing scrolling behind it to blur and would read as a welded-on footer —
- * so nothing reserves room for it and the last row of either stage would sit
- * underneath it. Measuring with `onLayout` would mean one frame of wrong
- * padding on every mount, so the arithmetic is written down instead:
- *
- *   handle row   12 top + 5 grabber + 5 gap + 12 label + 8 bottom = 42
- *   cell row     60 cell + 8 bottom                               = 68
- *
- * Change either style below and change this with it.
- */
-const BAR_HEIGHT = 110;
 /** L1145: `border-radius:26px 26px 0 0`. `Radii` has no 26. */
 const BAR_RADIUS = 26;
 /** L1147-L1157: `min-height:60px` per cell. */
 const BAR_CELL = 60;
+
+/** L946-L949: the aux hand-off row is a 50px pill, not a 44px button. */
+const PASS_HEIGHT = 50;
 
 /** Which floating sheet is up. */
 type SheetName = 'queue' | 'chat' | 'lobby' | 'sync' | null;
@@ -204,7 +222,6 @@ export default function RoomScreen() {
   const params = useLocalSearchParams<{ id: string }>();
   const roomId = typeof params.id === 'string' && params.id.length > 0 ? params.id : null;
 
-  const insets = useSafeAreaInsets();
   const toast = useToast();
   const { room, track, userId, isHost, isLoading, error, resync } = useRoomSync(roomId);
 
@@ -232,6 +249,13 @@ export default function RoomScreen() {
    * local state under exactly the contract mic and deafen already ship under.
    */
   const [mode, setMode] = useState<LobbyMode>('music');
+  /**
+   * Whether the bottom dock is grown into its lobby panel.
+   *
+   * Lifted out of the dock so the hardware back button can collapse it — see
+   * the note at the render site.
+   */
+  const [dockOpen, setDockOpen] = useState(false);
   /** Muted for this listener only. Never published, never announced. */
   const [mutedIds, setMutedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [requestSent, setRequestSent] = useState(false);
@@ -361,6 +385,10 @@ export default function RoomScreen() {
     and behave correctly before the audio layer arrives, and because their
     RELATIONSHIPS are the part worth getting right now: deafening mutes you,
     and un-deafening does not un-mute you.
+
+    THE ROSTER'S VOICE CARD IS GONE and these two are what is left of it. The
+    handlers did not move with it — the lobby bar and the drawer have always
+    driven the same state, and they are now the only two places that do.
   */
   const handleMic = useCallback(() => {
     setMicOn((on) => {
@@ -420,8 +448,8 @@ export default function RoomScreen() {
    * `visible` false does not unmount it: the host parks itself at 1×1 with zero
    * opacity and keeps playing.
    */
-  const stageVisible = provider === 'youtube';
-  const media = useMemo(() => <YouTubePlayerHost visible={stageVisible} />, [stageVisible]);
+  const videoOnStage = provider === 'youtube' && stage === 'now';
+  const media = useMemo(() => <YouTubePlayerHost visible={videoOnStage} />, [videoOnStage]);
 
   const sessionName = room?.name ?? 'Session';
   const loungeName = lounge.data?.name ?? 'Lounge';
@@ -436,6 +464,15 @@ export default function RoomScreen() {
     !isLoading && !queue.isLoading && Boolean(room) && !room?.track_id && queueLength === 0;
 
   /**
+   * `NowPlaying` is showing its EMPTY face — loaded, and nothing resolved onto
+   * the deck. Derived with exactly that component's own rule so the two can
+   * never disagree, because everything gated on it is a row that would be
+   * lying next to an empty card: the aux readout, the sync line, and a second
+   * "Add a track" standing beside the one already inside the card.
+   */
+  const deckEmpty = !isLoading && !track;
+
+  /**
    * What every scroller in the body has to leave clear of the floating bar.
    *
    * THE NAV CAPSULE IS NOT IN THIS SUM, AND THAT WAS CHECKED RATHER THAN
@@ -447,32 +484,19 @@ export default function RoomScreen() {
    * 126px of dead air under the roster. Anything that DID need the capsule's
    * clearance would have to ask that hook rather than a constant.
    */
-  const barReserve = BAR_HEIGHT + insets.bottom + Space.xxl;
+  /*
+    Asked of the dock rather than recomputed here. `BAR_HEIGHT` described the
+    old bar, and a reservation derived from a component's real height is the
+    only kind that cannot drift away from it.
+  */
+  const barReserve = useSessionDockReserve();
 
   const stageTabs = useMemo<SheetTab[]>(
     () => [
       { key: 'now', label: 'Now playing' },
-      { key: 'people', label: listenerCount > 0 ? `Listeners · ${listenerCount}` : 'Listeners' },
+      { key: 'people', label: listenerCount > 0 ? `Members · ${listenerCount}` : 'Members' },
     ],
     [listenerCount]
-  );
-
-  /**
-   * The roster's own copy of mic and deafen, drawn above the people it applies
-   * to. Memoised because `VoiceControls` sits inside a FlatList header — a
-   * fresh object each render would re-render the whole list on every drift tick.
-   */
-  const voice = useMemo(
-    () => ({
-      micOn,
-      deafened,
-      onToggleMic: handleMic,
-      onToggleDeafen: handleDeafen,
-      onOpenMore: openLobby,
-      moreLabel: 'Lobby controls',
-      moreHint: 'Change the lobby, lobby games, camera, voice settings',
-    }),
-    [micOn, deafened, handleMic, handleDeafen, openLobby]
   );
 
   if (error && !room) {
@@ -511,41 +535,40 @@ export default function RoomScreen() {
         onSync={openSync}
       />
 
-      {/*
-        FIXED BAND, and deliberately outside the stage switch — it holds the
-        YouTube host. See deviation 1 in the file header.
-      */}
-      <View style={styles.stage}>
-        <NowPlaying
-          media={media}
-          showMedia={stageVisible}
-          track={track}
-          timeline={timeline}
-          isLoading={isLoading}
-          driftMs={driftMs}
-          onResync={resync}
-          onMore={openLobby}
-          onSeek={isHost ? handleSeek : undefined}
-          onAddTrack={openAdd}
-          errorMessage={playbackError?.message ?? null}
-        />
-      </View>
-
+      {/* L910-L913. Directly under the header, at the top of the module. */}
       <View style={styles.switch}>
         <SheetTabs tabs={stageTabs} active={stage} onChange={handleStage} variant="segmented" />
       </View>
 
       <View style={styles.body}>
+        {/*
+          THE PLAYER HOST'S PERMANENT ADDRESS. One position in this tree for the
+          whole life of the route, in both stages, so switching tabs reconciles
+          the WebView instead of remounting it. See the file header.
+        */}
+        <VideoStage visible={videoOnStage}>{media}</VideoStage>
+
         {stage === 'now' ? (
           <ScrollView
             style={styles.fill}
             contentContainerStyle={[styles.nowContent, { paddingBottom: barReserve }]}
             showsVerticalScrollIndicator={false}>
+            <NowPlaying
+              videoOnStage={videoOnStage}
+              track={track}
+              timeline={timeline}
+              isLoading={isLoading}
+              onResync={resync}
+              onMore={openLobby}
+              onSeek={isHost ? handleSeek : undefined}
+              onAddTrack={openAdd}
+              errorMessage={playbackError?.message ?? null}
+            />
+
             {/*
               Nothing on the deck and nothing behind it: no transport at all.
-              Five disabled circles under an empty hero tell the same "something
-              is playing" lie the hero itself used to tell — the hero's own CTA
-              is the one move left. See deviation 2.
+              Five disabled circles under an empty card tell the same "something
+              is playing" lie the card itself used to tell. See deviation 1.
             */}
             {nothingQueued ? null : (
               <TransportControls
@@ -563,21 +586,67 @@ export default function RoomScreen() {
               />
             )}
 
-            <AuxCard
-              name={onAux?.displayName ?? null}
-              avatarUrl={onAux?.avatarUrl ?? null}
+            {/*
+              ALWAYS DRAWN, INCLUDING ON THE EMPTY FACE, and that is deliberate
+              — it is the one row here that is not a claim about a track. Who
+              holds the aux is true of the Session whether or not anything is
+              playing, and an empty Session is exactly when a passenger wants to
+              take it. Gating this on a track would have hidden the app's
+              namesake control at the only moment it is obviously useful.
+            */}
+            <PassTheAux
               isHost={isHost}
               isLoading={isLoading && !room}
               requestSent={requestSent}
-              onRequestAux={handleRequestAux}
+              onRequest={handleRequestAux}
             />
+
+            {/*
+              L952-L961. Below the hand-off, not welded under the scrubber: the
+              reading is the last word on this tab, not an annotation on the
+              bar. `onExplain` is the (?) and it opens the real ladder.
+
+              Withheld on the empty face: "You are LOCKED +0ms" measured against
+              nothing is the same lie the 0:00 scrubber used to tell.
+            */}
+            {deckEmpty ? null : (
+              <SessionSyncRow
+                waiting={isLoading && !track}
+                driftMs={driftMs}
+                onResync={resync}
+                onExplain={openSync}
+              />
+            )}
+
+            {/*
+              The user asked for add-a-track to be reachable from the now
+              playing tab. `bordered`, not `pri`: the blue on this tab belongs
+              to the play circle, and a second filled blue control below it
+              would argue about which one is the point of the screen. Withheld
+              on the empty face, where `NowPlaying`'s own CTA is already the
+              loudest thing on the screen and a second one would just be it
+              again, quieter.
+            */}
+            {deckEmpty ? null : (
+              <AuxButton
+                label={queueLength > 0 ? `Add a track · ${queueLength} queued` : 'Add a track'}
+                variant="bordered"
+                size="md"
+                icon={Plus}
+                align="center"
+                onPress={openAdd}
+                fullWidth
+              />
+            )}
           </ScrollView>
         ) : (
           /*
-            The orbit AND the roster under it, which is exactly what the
-            artboard's members tab is (L965-L1005). Tapping any row mutes that
-            person for this listener only — the per-person mute the user could
-            not find, now one tap from a Session at rest.
+            PEOPLE ONLY, and that is the whole point of this branch. The orbit
+            and the roster under it, which is exactly what the artboard's
+            members tab is (L965-L1005) — no track card, no "nothing on the
+            deck", and no voice card: `voice` is deliberately not passed, so
+            `SyncOrbit` draws its header without one. Tapping any row mutes
+            that person for this listener only.
           */
           <SyncOrbit
             roomId={roomId}
@@ -587,25 +656,51 @@ export default function RoomScreen() {
             timeline={timeline}
             mutedIds={mutedIds}
             onSelectPerson={toggleMemberMute}
-            voice={voice}
             contentBottomInset={barReserve}
           />
         )}
       </View>
 
-      <LobbyBar
-        modeLabel={modeLabel}
+      {/*
+        `SessionDock`, not the `LobbyBar` that was here.
+
+        The bar this replaces had the handle and the five controls but no way to
+        open anything with them: the lobby was reachable only by tapping a
+        drawer icon that opened a separate sheet. What was asked for was the
+        thing the artboard draws — a handle you can SWIPE UP, which grows the
+        bar itself into the lobby panel, with change-lobby and the games inside
+        it. `SessionDock` is that, and it was written in `lobby-sheet.tsx` and
+        then never imported, so none of it shipped.
+
+        It is also a correction: `LobbyBar` used `floating()`, whose shadow
+        falls downward, off the bottom of the screen where nobody could see it.
+        A dock is lit by the page it covers, so `SessionDock` uses
+        `sheetShadow()` and the lift finally reads.
+
+        `expanded` is held here rather than inside the dock so Android's
+        hardware back can collapse it — an expanded dock is a layer the user
+        opened, and back must close that layer instead of dropping them out of
+        the Session and stopping the music.
+      */}
+      <SessionDock
         playing={room?.is_playing === true}
-        micLive={micOn && !deafened}
+        isHost={isHost}
+        micOn={micOn && !deafened}
         deafened={deafened}
         queueCount={queueLength}
-        bottomInset={insets.bottom}
-        onDrawer={openLobby}
         onMic={handleMic}
         onDeafen={handleDeafen}
         onQueue={openQueue}
         onChat={openChat}
+        onAddTrack={openAdd}
         onLeave={handleBack}
+        people={roster}
+        currentUserId={userId}
+        onNotice={notice}
+        mode={mode}
+        onModeChange={setMode}
+        expanded={dockOpen}
+        onExpandedChange={setDockOpen}
       />
 
       <Sheet
@@ -732,6 +827,54 @@ function Shell({ children }: { children: ReactNode }) {
   );
 }
 
+// -------------------------------------------------------------- video stage
+
+/**
+ * L1010: the design's video surface, 16:9 inside the card's own corner — and
+ * the reason this screen can have a tab switch at the top at all.
+ *
+ * It holds the YouTube player host, which must stay mounted for as long as the
+ * Session is open. A listener whose Spotify device dies mid-Session falls back
+ * to YouTube by re-pointing the adapter, and a remount at that moment would
+ * mean a black WebView booting from scratch instead of audio resuming in the
+ * next second. So this component is rendered in BOTH stages at the same tree
+ * position, and `visible` only changes its geometry:
+ *
+ *   visible   a 16:9 module above the tab content
+ *   parked    1x1, zero opacity, out of the layout — and STILL LAID OUT, which
+ *             is the point. `display:'none'` would be the obvious way to hide
+ *             it and it is the one way that must not be used: an Android
+ *             WebView laid out GONE may pause its media.
+ *
+ * The fill stays a literal black rather than a token — this is a letterbox
+ * behind a WebView, and a theme-aware "surface" behind video reads as a
+ * rendering fault the instant the frame is narrower than the box.
+ *
+ * NO SHADOW ON PURPOSE, matching the artboard: Android drops a view's own
+ * boxShadow when that view also clips, so a `raised()` here would lift on iOS
+ * and web and silently do nothing on Android — a divergence for a decoration.
+ */
+const VideoStage = memo(function VideoStage({
+  visible,
+  children,
+}: {
+  visible: boolean;
+  children: ReactNode;
+}) {
+  const C = useColors();
+
+  return (
+    <View
+      style={[
+        visible ? styles.video : styles.videoParked,
+        visible ? { borderColor: C.rule } : null,
+        visible ? PointerEvents.auto : PointerEvents.none,
+      ]}>
+      {children}
+    </View>
+  );
+});
+
 // ------------------------------------------------------------------- header
 
 type HeadProps = {
@@ -745,7 +888,14 @@ type HeadProps = {
   onSync: (() => void) | null;
 };
 
-/** L900-L908. Back, what this is, and how many people are actually together. */
+/**
+ * L900-L908. Back, what this is, and how many people are actually together.
+ *
+ * The second line is a TRACKED UPPERCASE KICKER rather than sentence-case
+ * prose. It carries `NIGHT SHIFT · MUSIC` — a lounge name and a mode, which are
+ * labels and not a sentence — and at 9px the uppercase setting is what stops it
+ * competing with the 16px session name directly above it.
+ */
 const Head = memo(function Head({ name, meta, locked, total, onBack, onSync }: HeadProps) {
   const C = useColors();
 
@@ -777,22 +927,26 @@ const Head = memo(function Head({ name, meta, locked, total, onBack, onSync }: H
 });
 
 /**
- * L903: the sync readout — a coral BADGE that is also a button, and it used to
- * refuse to answer which of those it was.
+ * L903: the sync readout — a coral BADGE that is also a button.
  *
  * THE READING STAYS CORAL. How many people are actually together is a state of
  * the world, not something anyone does, so the resting pill is `liveWash`
- * behind a `liveMid` edge with a `liveText` count. That half was always right.
+ * behind a `liveMid` edge with a `liveText` count.
  *
- * THE PRESS MOVED TO THE ACTION ACCENT. The whole pill is a Pressable that
- * opens the sync diagnostics, and it used to press by DEEPENING the coral
+ * IT READS `3/5 locked` NOW, NOT `3 locked`. A bare numerator is not a
+ * measurement: three people in sync is excellent in a Session of three and bad
+ * in a Session of nine, and the denominator was sitting right underneath it in
+ * the listening line the whole time. The second line keeps the head-count and
+ * is set uppercase to match the header kicker beside it.
+ *
+ * THE PRESS GOES TO THE ACTION ACCENT. The whole pill is a Pressable that opens
+ * the sync diagnostics, and it used to press by DEEPENING the coral
  * (`liveWash` → `liveMid`): one element painted in the state accent at rest and
- * in a louder state accent while you were operating it, with nothing anywhere
- * on it saying "this is a thing you can do". Pressed now goes to `pill` with
- * `pillInk` on it. At rest the pill is coral and only coral; under a finger it
- * is blue and only blue. There is no instant at which it carries both accents,
- * which is the rule — and the transition itself is the affordance the coral-on-
- * coral version never had.
+ * in a louder state accent while you were operating it. Pressed now goes to
+ * `pill` with `pillInk` on it. At rest the pill is coral and only coral; under
+ * a finger it is blue and only blue. There is no instant at which it carries
+ * both accents, and the transition itself is the affordance the coral-on-coral
+ * version never had.
  *
  * Flat `pill` rather than the `glow` blue: `glow` is 28% alpha in the light
  * palette, and white ink on a 28% blue over a near-white ground is unreadable.
@@ -828,10 +982,10 @@ const SyncPill = memo(function SyncPill({
       {({ pressed }) => (
         <>
           <Text style={[styles.syncCount, { color: pressed ? C.pillInk : C.liveText }]}>
-            {locked} locked
+            {locked}/{total} locked
           </Text>
           <Text style={[styles.syncTotal, { color: pressed ? C.onCream2 : C.ink3 }]}>
-            {total === 1 ? '1 listening' : `${total} listening`}
+            {total === 1 ? '1 LISTENING' : `${total} LISTENING`}
           </Text>
         </>
       )}
@@ -839,184 +993,101 @@ const SyncPill = memo(function SyncPill({
   );
 });
 
-// ---------------------------------------------------------------- lobby bar
+// ------------------------------------------------------------ aux hand-off
 
-type LobbyBarProps = {
-  modeLabel: string;
-  /** Something is actually playing — the one thing that turns the edge coral. */
-  playing: boolean;
-  micLive: boolean;
-  deafened: boolean;
-  queueCount: number;
-  bottomInset: number;
-  onDrawer: () => void;
-  onMic: () => void;
-  onDeafen: () => void;
-  onQueue: () => void;
-  onChat: () => void;
-  onLeave: () => void;
+type PassTheAuxProps = {
+  isHost: boolean;
+  /** True until the room row has landed — draws the row's own skeleton. */
+  isLoading: boolean;
+  /** Latches after a request so the button cannot be spammed into the chat. */
+  requestSent: boolean;
+  onRequest: () => void;
 };
 
 /**
- * L1145-L1158. The Session's permanent controls, and the reason nothing on this
- * screen is buried any more.
+ * L946-L949: the aux hand-off, and it is CORAL.
  *
- * IT IS GLASS, which means `C.nav` and not `C.dock`. The two chrome fills do
- * different jobs and are not interchangeable: `dock` is near-opaque because the
- * mini player sits directly ON album art with no blur under it, while this bar
- * has a real `BlurView` beneath it and wants the translucent value — handing it
- * `dock` would blur the wall and then paint over the result.
+ * This row replaces `AuxCard` on this screen, which drew the same decision as
+ * an avatar plus a small blue pill inside a glass card. The user's screenshot
+ * draws it the way the artboard always did — one coral-outlined pill the full
+ * width of the column with an arrow at the end — and a wide row with a
+ * destination arrow reads as "this hands something over" in a way a 90px
+ * button beside a face does not. Who is currently on aux has not been dropped:
+ * a passenger still reads it in the transport notice directly above, which
+ * names them ("X is on aux. Controls are theirs.").
  *
- * The edge goes CORAL while something is playing, per the artboard's own dock
- * (L891, `border:1px solid var(--aux-live-m)`), and back to `chromeBorder` when
- * it is not. Coral is a state, and "there is music happening in here" is the
- * closest thing this bar has to one.
+ * IT IS CORAL AND NOT BLUE, WHICH REVERSES THE RULING IN 'transport-controls.tsx'
+ * — that file's `AuxCard` comment argues the hand-off buttons are ACTIONS and
+ * so must be blue, with the coral spent on the state beside them. Blue is
+ * CREATE and TRANSPORT; coral is STATE and LIVE-ENTRY, and taking the aux is
+ * the purest live-entry this app has. Same correction that put JOIN and SOLO
+ * back in coral on the home feed.
  *
- * THE SHADOW LIVES ON AN OUTER VIEW. The glass clips its children to the top
- * corners, and Android throws a view's own `boxShadow` away along with whatever
- * `overflow:'hidden'` clips — the bar would silently lose its lift on one
- * platform only. Same fix as 'add-track-sheet.tsx'.
- *
- * The edge is on the TOP only, deliberately against `floating()`'s usual advice
- * to border a floating object all the way round: this one is welded to the
- * bottom of the frame, so a bottom edge would be drawn under the home indicator
- * and the side edges would end in mid-air.
+ * A HOST'S ROW IS INERT, AND IT LOOKS IT. There is no `rooms.host_id` transfer
+ * RPC in this build, so "Pass the aux" has nothing to call. It is dimmed and
+ * marked disabled to assistive tech rather than drawn bright and lying — the
+ * same rule `AuxCard` shipped (`blocked = isHost ? !onPassAux : requestSent`),
+ * carried over unchanged. The moment a transfer RPC exists this becomes a live
+ * control and nothing else about the row has to change.
  */
-const LobbyBar = memo(function LobbyBar({
-  modeLabel,
-  playing,
-  micLive,
-  deafened,
-  queueCount,
-  bottomInset,
-  onDrawer,
-  onMic,
-  onDeafen,
-  onQueue,
-  onChat,
-  onLeave,
-}: LobbyBarProps) {
+const PassTheAux = memo(function PassTheAux({
+  isHost,
+  isLoading,
+  requestSent,
+  onRequest,
+}: PassTheAuxProps) {
   const C = useColors();
-  const { scheme } = useTheme();
 
-  return (
-    <View
-      // Load-bearing: this layer spans the full width and sits over the body,
-      // so without `box-none` the transparent margin either side of a
-      // maxWidth-clamped bar would swallow taps along the bottom of the
-      // scroller. A full-bleed overlay has already eaten every tap in this app
-      // once.
-      style={[styles.barLayer, PointerEvents.boxNone]}>
-      <View style={[styles.barShell, floating(C)]}>
-        <BlurView
-          intensity={scheme === 'dark' ? 40 : 60}
-          tint={scheme === 'dark' ? 'dark' : 'light'}
-          // Android does not blur at all without this; the tint alone would
-          // leave a flat translucent slab with nothing happening behind it.
-          experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined}
-          style={[styles.barGlass, { borderTopColor: playing ? C.liveMid : C.chromeBorder }]}>
-          {/*
-            The tint rides ON TOP of the blur rather than being handed to
-            BlurView as a background: underneath, it becomes the thing being
-            blurred and the whole bar reads as fog.
-          */}
-          <View style={[StyleSheet.absoluteFill, { backgroundColor: C.nav }]} />
+  if (isLoading) {
+    return <Skeleton width="100%" height={PASS_HEIGHT} radius={Radii.pill} />;
+  }
 
-          {/*
-            The drawer handle, and it NAMES what is behind it. The artboard says
-            "SWIPE UP FOR MORE"; a door labelled "more" is exactly how the game
-            and change-lobby went missing, so this one lists them instead.
-          */}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Open the lobby controls"
-            accessibilityHint="Change the lobby, lobby games, camera, voice settings"
-            onPress={onDrawer}
-            style={({ pressed }) => [styles.barHandle, pressed ? styles.dim : null]}>
-            <View style={[styles.barGrabber, { backgroundColor: C.rule3 }]} />
-            <Text numberOfLines={1} style={[styles.barHandleLabel, { color: C.ink3 }]}>
-              {modeLabel} · GAMES · CHANGE LOBBY
-            </Text>
-          </Pressable>
-
-          <View style={[styles.barCells, { paddingBottom: bottomInset }]}>
-            <BarCell
-              icon={micLive ? Mic : MicOff}
-              label={micLive ? 'MIC ON' : deafened ? 'DEAFENED' : 'MIC OFF'}
-              // Coral: an open mic is audio flowing, which is a state.
-              tone={micLive ? 'live' : 'quiet'}
-              hint={micLive ? 'Mute your microphone' : 'Unmute your microphone'}
-              onPress={onMic}
-            />
-            <BarCell
-              icon={deafened ? HeadphoneOff : Headphones}
-              label={deafened ? 'UNDEAFEN' : 'DEAFEN'}
-              // `danger`, never coral: deafened is the room cut off, the exact
-              // opposite of the thing coral means — and coral here would read
-              // identically to the open mic standing next to it.
-              tone={deafened ? 'danger' : 'quiet'}
-              hint={deafened ? 'Start hearing the Session again' : 'Stop hearing the Session'}
-              onPress={onDeafen}
-            />
-            <BarCell
-              icon={ListMusic}
-              label={queueCount > 0 ? `QUEUE ${queueCount}` : 'QUEUE'}
-              hint="Open the queue"
-              onPress={onQueue}
-            />
-            <BarCell
-              icon={MessageCircle}
-              label="CHAT"
-              hint="Open the Session chat"
-              onPress={onChat}
-            />
-            <BarCell
-              icon={LogOut}
-              label="LEAVE"
-              tone="danger"
-              hint="Leave the Session"
-              onPress={onLeave}
-            />
-          </View>
-        </BlurView>
-      </View>
-    </View>
-  );
-});
-
-/** `quiet` is every cell that is only a door; the other two report a state. */
-type CellTone = 'quiet' | 'live' | 'danger';
-
-const BarCell = memo(function BarCell({
-  icon: Icon,
-  label,
-  tone = 'quiet',
-  hint,
-  onPress,
-}: {
-  icon: LucideIcon;
-  label: string;
-  tone?: CellTone;
-  /** The spoken name. The 9px label is a caption, not a sentence. */
-  hint: string;
-  onPress: () => void;
-}) {
-  const C = useColors();
-  const color = tone === 'live' ? C.liveText : tone === 'danger' ? C.danger : C.ink2;
+  const label = isHost ? 'Pass the aux' : requestSent ? 'Requested' : 'Take the aux';
+  const blocked = isHost || requestSent;
+  const hint = isHost
+    ? 'Handing the aux to someone else is not available yet'
+    : requestSent
+      ? 'You have already asked. Ask again in a minute.'
+      : 'Asks for the aux in the Session chat';
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={hint}
-      onPress={onPress}
-      style={({ pressed }) => [styles.barCell, pressed ? { backgroundColor: C.surface2 } : null]}>
-      <Icon size={20} strokeWidth={2} color={color} />
-      <Text numberOfLines={1} style={[styles.barCellLabel, { color }]}>
+      accessibilityLabel={label}
+      accessibilityHint={hint}
+      accessibilityState={{ disabled: blocked }}
+      disabled={blocked}
+      onPress={onRequest}
+      style={({ pressed }) => [
+        styles.pass,
+        { backgroundColor: pressed ? C.liveMid : C.liveWash, borderColor: C.liveMid },
+        blocked ? styles.inert : null,
+      ]}>
+      <Text numberOfLines={1} style={[styles.passLabel, { color: C.liveText }]}>
         {label}
       </Text>
+      <ArrowRight size={17} strokeWidth={2} color={C.liveText} />
     </Pressable>
   );
 });
+
+// ---------------------------------------------------------------- lobby bar
+
+/*
+  `LobbyBar` and its `BarCell` stood here, and they are gone rather than kept
+  beside their replacement.
+
+  `SessionDock` (src/components/room/lobby-sheet.tsx) does everything this did
+  and the thing it could not: the handle SWIPES UP and grows the bar into the
+  lobby panel, instead of a drawer icon opening a separate sheet. Both were
+  built in the same pass and only the old one was wired, which is why none of
+  the new behaviour shipped.
+
+  Deleted, not deprecated: this file having two docks one import apart is
+  exactly how the wrong one stayed on screen, and a second copy is an
+  invitation to fix the one nobody can see.
+*/
+
 
 // ------------------------------------------------------------------- sheets
 
@@ -1144,6 +1215,10 @@ const LADDER: readonly { rung: DriftRung; head: string; body: string }[] = [
  * here cannot drift away from the arithmetic the controller runs. `solid`
  * because this card sits inside a `BlurView`, where a 5.5%-white fill has
  * nothing to sit on and dissolves into the glass.
+ *
+ * This is also what the (?) on the now-playing tab opens, which is why the
+ * sheet has to answer the question that glyph asks rather than only listing
+ * numbers.
  */
 const DriftLadder = memo(function DriftLadder() {
   const C = useColors();
@@ -1171,11 +1246,14 @@ const DriftLadder = memo(function DriftLadder() {
 });
 
 /**
- * The one action in a sheet full of readings, so it is BLUE.
+ * The one action in a sheet full of readings.
  *
- * `NowPlaying`'s sync row carries the same re-measure; this is the copy for the
- * person who came here to find out why their number is bad, which is why it is
- * the last thing under the readings rather than the first thing above them.
+ * BLUE, WHERE THE `Hard seek` PILL ON THE NOW-PLAYING TAB IS CORAL, and the two
+ * are not in disagreement even though they call the same `resync`. Out there
+ * the control sits inside a live readout and is the way back INTO the position
+ * everyone else is at, which is what coral owns. In here it is the recovery
+ * button at the bottom of a diagnostics panel, framed by a paragraph explaining
+ * what went wrong — the same register as `Retry`, and the register blue owns.
  */
 const ResyncFooter = memo(function ResyncFooter({ onResync }: { onResync: () => void }) {
   const C = useColors();
@@ -1270,6 +1348,9 @@ const styles = StyleSheet.create({
   dim: {
     opacity: 0.6,
   },
+  inert: {
+    opacity: 0.45,
+  },
 
   // --------------------------------------------------------------- header
   /** L900: `padding:12px 16px 10px`, `gap:11px`. */
@@ -1290,10 +1371,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     letterSpacing: tracking(16, -0.015),
   },
+  /** L901's second line, set as the kicker it actually is. */
   headSub: {
-    ...Type.body(10),
-    letterSpacing: tracking(10, 0.07),
-    marginTop: 1,
+    ...Type.label(9),
+    letterSpacing: tracking(9, 0.12),
+    textTransform: 'uppercase',
+    marginTop: 2,
   },
   headSpacer: {
     width: TOUCH_TARGET,
@@ -1314,34 +1397,77 @@ const styles = StyleSheet.create({
     letterSpacing: tracking(11, 0.05),
   },
   syncTotal: {
-    ...Type.body(9),
+    ...Type.label(9),
     letterSpacing: tracking(9, 0.07),
   },
 
-  // ---------------------------------------------------------------- stage
-  stage: {
-    flexShrink: 0,
-    paddingHorizontal: GUTTER,
-  },
-  /** L910: the switch sits `0 16px 12px` under whatever is above it. */
+  // ---------------------------------------------------------------- module
+  /**
+   * L910: the switch sits `0 16px 12px`. NO TOP PADDING — the header above it
+   * already ends on its own 10px, and this control is the top of the module.
+   */
   switch: {
     flexShrink: 0,
     paddingHorizontal: GUTTER,
-    paddingTop: Space.md,
     paddingBottom: Space.md,
   },
   body: {
     flex: 1,
     minHeight: 0,
   },
+  /**
+   * L1010: 16:9 on the card's own corner, inside the body gutter.
+   *
+   * No `width`: the body is a flex column, so this stretches to the column
+   * minus its own margins on its own. Writing `width:'100%'` here would be 100%
+   * of the column and the margins would push it 32px past the right edge.
+   */
+  video: {
+    aspectRatio: 16 / 9,
+    marginHorizontal: GUTTER,
+    marginBottom: Space.md,
+    borderRadius: 24,
+    borderWidth: Rule.hair,
+    backgroundColor: '#000000',
+    overflow: 'hidden',
+  },
+  /** Mounted and audible, out of the layout, effectively invisible. */
+  videoParked: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: 1,
+    height: 1,
+    opacity: 0,
+  },
   nowContent: {
     flexGrow: 1,
     paddingHorizontal: GUTTER,
-    gap: Space.md,
+    gap: Space.md + 2,
   },
   errorSlot: {
     paddingHorizontal: GUTTER,
     paddingTop: Space.xxl,
+  },
+
+  // ----------------------------------------------------------- aux hand-off
+  /** L947: `min-height:50px;padding:0 16px;border-radius:999px`. */
+  pass: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Space.sm + 2,
+    minHeight: PASS_HEIGHT,
+    paddingHorizontal: GUTTER,
+    borderRadius: Radii.pill,
+    borderWidth: Rule.hair,
+  },
+  /** L947: `font:800 12px;letter-spacing:.03em`, and NOT uppercased. */
+  passLabel: {
+    flexShrink: 1,
+    fontFamily: Fonts.extrabold,
+    fontSize: 12,
+    letterSpacing: tracking(12, 0.03),
   },
 
   // ------------------------------------------------------------ lobby bar

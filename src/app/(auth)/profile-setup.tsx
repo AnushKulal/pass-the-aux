@@ -6,40 +6,73 @@
  * slot beside it, one card holding the name and the bio, the activity toggle,
  * and a CTA that changes its own copy when it cannot be pressed.
  *
- * Two things have to be true before the app opens up: there is a photo, and
- * there is a line of bio. Until both are, the button renders as a flat surface
- * pill naming what is missing, and the shell's lounge rail and tab bar do not
- * render at all (see `(tabs)/_layout`).
+ * ═════════════════════════════════════════════════════════════════════════════
+ * THE GATE IS A MUSIC SERVICE. IT USED TO BE A PHOTO AND A BIO, AND THAT WAS
+ * BACKWARDS.
  *
- * THREE DELIBERATE DEVIATIONS FROM THE ARTBOARD:
+ * This file's previous header argued the inversion at length: "THE GATE IS
+ * PHOTO + BIO, NOT A LINKED PROVIDER … inverting it here would let people
+ * through a door the shell still holds shut", and dropped the provider section
+ * entirely. The reasoning was circular — the shell held that door shut only
+ * because this screen told it to — and the requirement it defended was the
+ * wrong one. A photo and a line about you are how people present themselves.
+ * Neither is needed to hear a song. What Aux genuinely cannot proceed without
+ * is somewhere for the audio to come from, which is exactly what the design
+ * gates on ("LINK ONE TO PLAY — REQUIRED") and exactly what that pass deleted.
  *
- * 1. THE GATE IS PHOTO + BIO, NOT A LINKED PROVIDER. The design gates on
- *    "LINK ONE TO PLAY — REQUIRED" and calls the photo and bio optional. This
- *    app's gate lives in `useLocalProfile` and is read by `(tabs)/_layout`;
- *    inverting it here would let people through a door the shell still holds
- *    shut. The provider section is therefore absent rather than decorative —
- *    its rows are a `sc-for` over computed state that the design file itself
- *    truncates, and Spotify linking lives in Settings > Connections, which is
- *    behind this very gate. The footnote says so instead.
- * 2. NO SEPARATE CHECKLIST TICKS. The previous version put a `Done` tick on
- *    each of three cards. The disabled CTA now names the unmet condition
- *    outright, which says the same thing once, at the moment it matters, in the
- *    place the reader is already looking.
- * 3. The screen SCROLLS. The artboard is a fixed column with a flex spacer,
+ * So the provider section is back, it is required, and the photo and the bio
+ * are optional. `useLocalProfile().complete` is now `musicService !== null`;
+ * see `@/lib/providers`.
+ * ═════════════════════════════════════════════════════════════════════════════
+ *
+ * AND MOST PEOPLE NEVER SEE THE QUESTION. Signing in already answers it —
+ * Google means YouTube, Spotify means Spotify (see `musicServiceForUser` in
+ * `@/lib/auth`). When the session settled it, this screen SHOWS the answer with
+ * a tick instead of asking something it already knows. Only an email-and-
+ * password account is asked, because only that account has not said.
+ *
+ * BE HONEST ABOUT YOUTUBE. Signing in with Google does not link a YouTube
+ * account, because there is no YouTube account to link: playback here is the
+ * IFrame player and it never asks anyone to sign in. "Google settles YouTube"
+ * is a fact about the QUESTION being answered, not about an OAuth grant, and
+ * the settled card says so in as many words rather than implying a connection
+ * that does not exist.
+ *
+ * APPLE MUSIC IS DRAWN AND DISABLED. MusicKit is iOS and web only, there is no
+ * Expo module for it, and Supabase has no apple-music auth provider — so there
+ * is neither a sign-in to offer nor an adapter to write. It is shown as a
+ * locked row rather than omitted, because a missing option reads as an app that
+ * forgot Apple Music and a locked one reads as an app that knows.
+ *
+ * TWO REMAINING DEVIATIONS FROM THE ARTBOARD:
+ *
+ * 1. NO SEPARATE CHECKLIST TICKS on the optional cards. The disabled CTA names
+ *    the one unmet condition outright, which says the same thing once, at the
+ *    moment it matters, where the reader is already looking.
+ * 2. The screen SCROLLS. The artboard is a fixed column with a flex spacer,
  *    which only fits because it was drawn on one 402x874 frame — with a
  *    keyboard up on a small phone the bio well would be off-screen.
  *
- * TODO(schema): `profiles` has no `bio`, photo, profile-video or
- * activity-visibility column yet, so everything except the display name is held
- * locally by `useLocalProfile` (AsyncStorage). The migration those fields need
- * is written out in `src/lib/providers.tsx`. `expo-image-picker` is not a
+ * TODO(schema): `profiles` has no `music_service`, `bio`, photo, profile-video
+ * or activity-visibility column yet, so everything except the display name is
+ * held locally by `useLocalProfile` (AsyncStorage). The migration those fields
+ * need is written out in `src/lib/providers.tsx`. `expo-image-picker` is not a
  * dependency either, so the photo tile and the video slot fill a placeholder
  * rather than opening a picker — wiring a real picker means setting `photoUri`
  * / `videoUri` alongside the flag and changing nothing else here.
  */
 
 import { useRouter } from 'expo-router';
-import { Camera, Video } from 'lucide-react-native';
+import {
+  Apple,
+  Camera,
+  Check,
+  Disc3,
+  Lock,
+  Play,
+  Video,
+  type LucideIcon,
+} from 'lucide-react-native';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated from 'react-native-reanimated';
@@ -67,6 +100,12 @@ import {
   tracking,
 } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
+import {
+  MUSIC_SERVICE_SUPPORTED,
+  sourcePreferenceForService,
+  usePlayback,
+  type MusicService,
+} from '@/playback/store';
 
 /** The artboard's 18px side padding — the same gutter every app screen uses. */
 const GUTTER = 18;
@@ -84,10 +123,72 @@ const INSET_HEIGHT = 42;
 
 const BIO_MAX = 160;
 
+/** The provider rows — design L206-214: a 34px glyph chip inside a 62px row. */
+const SERVICE_ROW = 62;
+const SERVICE_CHIP = 34;
+const SERVICE_TICK = 22;
+const SERVICE_DOT = 18;
+/** The settled card's tick. */
+const SETTLED_TICK = 26;
+
 /** The switch, straight off the artboard: a 44x26 track with an 18px knob. */
 const SWITCH_WIDTH = 44;
 const SWITCH_HEIGHT = 26;
 const KNOB = 18;
+
+type ServiceOption = {
+  id: MusicService;
+  label: string;
+  caption: string;
+  icon: LucideIcon;
+};
+
+/**
+ * The three services, in the order the design lists them.
+ *
+ * The glyphs are GENERIC, not brand marks: the lucide build in this repo ships
+ * no Spotify or YouTube logo, and a hand-drawn approximation of a trademark is
+ * worse than an honest abstraction. A play triangle, a disc and an apple read
+ * correctly beside their own labels.
+ */
+const SERVICES: readonly ServiceOption[] = [
+  {
+    id: 'youtube',
+    label: 'YouTube',
+    caption: 'No account, nothing to link. This is what Aux plays by default.',
+    icon: Play,
+  },
+  {
+    id: 'spotify',
+    label: 'Spotify',
+    caption: 'Link it from Settings to hear the master on Premium.',
+    icon: Disc3,
+  },
+  {
+    id: 'apple-music',
+    label: 'Apple Music',
+    caption: 'MusicKit is iPhone and web only. Not buildable here yet.',
+    icon: Apple,
+  },
+];
+
+/**
+ * What the settled card says, per service.
+ *
+ * Both halves are literally true and neither claims a link that does not exist
+ * — see the file header. Keyed by the two services an identity provider can
+ * actually settle; Apple Music is not one of them and never will be here.
+ */
+const SETTLED: Record<'youtube' | 'spotify', { title: string; note: string }> = {
+  youtube: {
+    title: 'YouTube is your source',
+    note: 'You signed in with Google, so this is already settled. There is nothing to link either way: Aux plays YouTube through an embedded player that never asks anyone to sign in.',
+  },
+  spotify: {
+    title: 'Spotify is your service',
+    note: 'You signed in with Spotify, so this is already settled. Letting Aux drive playback is a separate one-tap link in Settings and needs Premium — until then you hear the same YouTube audio as everyone else.',
+  },
+};
 
 export default function ProfileSetupScreen() {
   const C = useColors();
@@ -114,6 +215,26 @@ export default function ProfileSetupScreen() {
     seeded.current = true;
     setName(profile.display_name ?? '');
   }, [profile]);
+
+  /**
+   * Answering the required question.
+   *
+   * Writes BOTH halves, because they are two different facts: the draft records
+   * what this person said their service is (the gate), and the playback store
+   * records how audio should therefore be routed. `setSourcePreference` rather
+   * than `adoptServiceDefault` — this is an explicit answer, so it is allowed to
+   * overwrite an earlier one, which is what makes changing your mind here work.
+   */
+  const pickService = useCallback(
+    (service: MusicService) => {
+      // Belt and braces: the row is already disabled, but nothing in this app
+      // should be able to select a service with no adapter behind it.
+      if (!MUSIC_SERVICE_SUPPORTED[service]) return;
+      local.update({ musicService: service });
+      usePlayback.getState().setSourcePreference(sourcePreferenceForService(service));
+    },
+    [local]
+  );
 
   const togglePhoto = useCallback(() => {
     local.update({ hasPhoto: !local.hasPhoto, photoUri: local.hasPhoto ? null : local.photoUri });
@@ -145,12 +266,16 @@ export default function ProfileSetupScreen() {
 
   if (local.hydrating) return null;
 
-  /** The unmet half of the gate, named on the button that is waiting for it. */
-  const blockedLabel = !local.hasPhoto
-    ? local.hasBio
-      ? 'Add a photo'
-      : 'Add a photo and one line'
-    : 'Add one line about you';
+  /*
+    A provider can only ever settle 'youtube' or 'spotify', but the value is
+    typed across all three services, so look it up and fall back rather than
+    assert — an assertion here would be a crash the day the union grows.
+  */
+  const settled =
+    local.musicService === 'spotify' || local.musicService === 'youtube'
+      ? SETTLED[local.musicService]
+      : null;
+  const showSettled = local.serviceFromProvider && settled !== null;
 
   return (
     <KeyboardAvoidingView
@@ -163,12 +288,52 @@ export default function ProfileSetupScreen() {
         showsVerticalScrollIndicator={false}>
         <OnboardingHeader
           kicker="Your profile"
-          title="How people see you"
-          lede="A photo and one line are what open the Feed."
+          title="Where your music comes from"
+          lede={
+            showSettled
+              ? 'Your sign-in already settled that. Everything below is optional.'
+              : 'Pick one service. That is the only thing Aux needs — a photo and a line are optional.'
+          }
           size={26}
         />
 
-        {/* ------------------------------------------------------- media row */}
+        {/* ---------------------------------------------- the required answer */}
+        <View style={styles.sectionRow}>
+          <Text style={[styles.section, { color: C.ink3 }]}>MUSIC</Text>
+          {/*
+            CORAL, and that is the accent rule rather than emphasis for its own
+            sake: this tag reports a condition that is true of the form right
+            now. It is not a thing you press, so it does not take the blue.
+          */}
+          <Text style={[styles.required, { color: C.liveText }]}>
+            {showSettled ? 'DONE' : 'REQUIRED'}
+          </Text>
+        </View>
+
+        {showSettled && settled ? (
+          <View style={[styles.settled, { backgroundColor: C.liveWash, borderColor: C.liveMid }]}>
+            <Done size={SETTLED_TICK} />
+            <View style={styles.serviceCopy}>
+              <Text style={[styles.serviceLabel, { color: C.ink }]}>{settled.title}</Text>
+              <Text style={[styles.settledNote, { color: C.ink2 }]}>{settled.note}</Text>
+            </View>
+          </View>
+        ) : (
+          <View accessibilityRole="radiogroup" style={styles.services}>
+            {SERVICES.map((option) => (
+              <ServiceRow
+                key={option.id}
+                option={option}
+                selected={local.musicService === option.id}
+                onSelect={pickService}
+              />
+            ))}
+          </View>
+        )}
+
+        {/* --------------------------------------------- everything optional */}
+        <Text style={[styles.section, styles.sectionAlone, { color: C.ink3 }]}>OPTIONAL</Text>
+
         <View style={styles.media}>
           <Pressable
             accessibilityRole="button"
@@ -231,11 +396,7 @@ export default function ProfileSetupScreen() {
                   backgroundColor: pressed ? C.surface : 'transparent',
                 },
               ]}>
-              <Video
-                size={17}
-                strokeWidth={2}
-                color={local.hasVideo ? C.liveText : C.ink3}
-              />
+              <Video size={17} strokeWidth={2} color={local.hasVideo ? C.liveText : C.ink3} />
               <Text
                 numberOfLines={1}
                 style={[styles.slotLabel, { color: local.hasVideo ? C.liveText : C.ink3 }]}>
@@ -249,7 +410,7 @@ export default function ProfileSetupScreen() {
           </View>
         </View>
 
-        {/* -------------------------------------------------- name and bio */}
+        {/* --------------------------------------------------- name and bio */}
         {/*
           One card holding both, and the fields inside it are `inset` for a
           reason that is not taste: a translucent field card on a translucent
@@ -273,8 +434,7 @@ export default function ProfileSetupScreen() {
             {/* The handle, shown and not editable: it is claimed one screen
                 earlier and changing it here would need the availability check
                 that screen owns. */}
-            <View
-              style={[styles.handle, { backgroundColor: C.bgRecessed, borderColor: C.rule }]}>
+            <View style={[styles.handle, { backgroundColor: C.bgRecessed, borderColor: C.rule }]}>
               <Text numberOfLines={1} style={[styles.handleLabel, { color: C.ink2 }]}>
                 @{profile?.username ?? '…'}
               </Text>
@@ -296,7 +456,11 @@ export default function ProfileSetupScreen() {
 
         {/* --------------------------------------------------------- activity */}
         <View
-          style={[styles.card, styles.activity, { backgroundColor: C.surface, borderColor: C.rule }]}>
+          style={[
+            styles.card,
+            styles.activity,
+            { backgroundColor: C.surface, borderColor: C.rule },
+          ]}>
           <View style={styles.activityCopy}>
             <Text style={[styles.activityTitle, { color: C.ink }]}>Show when I&apos;m active</Text>
             <Text style={[styles.activityNote, { color: C.ink3 }]}>
@@ -307,7 +471,7 @@ export default function ProfileSetupScreen() {
           <Pressable
             accessibilityRole="switch"
             accessibilityState={{ checked: local.showActivity }}
-            accessibilityLabel="Show when I'm active"
+            accessibilityLabel="Show when I am active"
             onPress={() => local.update({ showActivity: !local.showActivity })}
             style={styles.switchTarget}>
             {/*
@@ -333,8 +497,7 @@ export default function ProfileSetupScreen() {
         </View>
 
         <Text style={[styles.footnote, { color: C.ink3 }]}>
-          Aux plays through YouTube by default. Link Spotify Premium any time from Settings →
-          Connections.
+          You can change how Aux picks a source any time from Settings → Connections.
         </Text>
 
         <View style={styles.spacer} />
@@ -342,11 +505,11 @@ export default function ProfileSetupScreen() {
         <PrimaryCta
           compact
           label="Save profile & enter aux"
-          disabledLabel={blockedLabel}
+          disabledLabel="Pick a music service"
           accessibilityLabel={
             local.complete
               ? 'Save profile and enter Aux'
-              : `Save profile and enter Aux, unavailable: ${blockedLabel}`
+              : 'Save profile and enter Aux, unavailable: pick a music service'
           }
           disabled={!local.complete}
           loading={saving}
@@ -358,6 +521,93 @@ export default function ProfileSetupScreen() {
     </KeyboardAvoidingView>
   );
 }
+
+/* -------------------------------------------------------------------- parts */
+
+/**
+ * One service in the picker.
+ *
+ * BLUE ON THE SELECTED ROW, not coral, and that is the accent rule read the
+ * same way `OnboardingSwitch` and the Connections segmented control read it: a
+ * row you pick is a thing you DO. Coral is reserved on this screen for the
+ * settled card above, which reports a fact nobody chose here.
+ *
+ * The glyph chip is `surface2` on `surface` — the one place in this row where
+ * stacking two translucent fills is the point, because the chip has to read as
+ * a disc set INTO the row rather than as a second object floating on it. Same
+ * recipe as the provider button on Sign in.
+ */
+function ServiceRow({
+  option,
+  selected,
+  onSelect,
+}: {
+  option: ServiceOption;
+  selected: boolean;
+  onSelect: (service: MusicService) => void;
+}) {
+  const C = useColors();
+  const supported = MUSIC_SERVICE_SUPPORTED[option.id];
+  const Glyph = option.icon;
+
+  return (
+    <Pressable
+      accessibilityRole="radio"
+      accessibilityState={{ selected, disabled: !supported }}
+      accessibilityLabel={
+        supported
+          ? `${option.label}. ${option.caption}`
+          : `${option.label}, unavailable. ${option.caption}`
+      }
+      disabled={!supported}
+      onPress={() => onSelect(option.id)}
+      style={({ pressed }) => [
+        styles.service,
+        {
+          borderColor: selected ? C.pill : C.rule,
+          backgroundColor: selected || pressed ? C.surface2 : C.surface,
+        },
+        supported ? null : styles.blocked,
+        pressed && supported ? styles.held : null,
+      ]}>
+      <View
+        style={[
+          styles.serviceChip,
+          {
+            backgroundColor: selected ? C.pill : C.surface2,
+            borderColor: selected ? C.pill : C.rule,
+          },
+        ]}>
+        <Glyph size={16} strokeWidth={2} color={selected ? C.pillInk : C.ink2} />
+      </View>
+
+      <View style={styles.serviceCopy}>
+        <Text style={[styles.serviceLabel, { color: C.ink }]}>{option.label}</Text>
+        <Text style={[styles.serviceNote, { color: C.ink3 }]}>{option.caption}</Text>
+      </View>
+
+      {/*
+        Three end states, and the locked one is deliberately NOT the danger
+        colour: Apple Music being unbuildable here is a fact about the platform,
+        not a failure the reader caused or can do anything about.
+      */}
+      {!supported ? (
+        <View style={[styles.serviceTag, { borderColor: C.rule }]}>
+          <Lock size={11} strokeWidth={2.2} color={C.ink3} />
+          <Text style={[styles.serviceTagLabel, { color: C.ink3 }]}>IPHONE</Text>
+        </View>
+      ) : selected ? (
+        <View style={[styles.serviceTick, { backgroundColor: C.pill }]}>
+          <Check size={13} strokeWidth={3} color={C.pillInk} />
+        </View>
+      ) : (
+        <View style={[styles.serviceDot, { borderColor: C.rule3 }]} />
+      )}
+    </Pressable>
+  );
+}
+
+/* ------------------------------------------------------------------ styles */
 
 const styles = StyleSheet.create({
   root: {
@@ -371,10 +621,113 @@ const styles = StyleSheet.create({
     paddingHorizontal: GUTTER,
   },
 
+  sectionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: Space.xl,
+    marginBottom: 10,
+  },
+  section: {
+    ...Type.label(10),
+    fontFamily: Fonts.extrabold,
+    letterSpacing: tracking(10, 0.16),
+  },
+  sectionAlone: {
+    marginTop: Space.xxl,
+    marginBottom: 2,
+  },
+  required: {
+    ...Type.label(9.5),
+    fontFamily: Fonts.extrabold,
+    letterSpacing: tracking(9.5, 0.14),
+  },
+
+  services: {
+    gap: Space.sm,
+  },
+  service: {
+    minHeight: SERVICE_ROW,
+    borderRadius: Radii.lg,
+    borderWidth: Rule.hair,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    paddingHorizontal: 13,
+    paddingVertical: 11,
+  },
+  serviceChip: {
+    width: SERVICE_CHIP,
+    height: SERVICE_CHIP,
+    flexShrink: 0,
+    borderRadius: Radii.pill,
+    borderWidth: Rule.hair,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  serviceCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  serviceLabel: {
+    fontFamily: Fonts.semibold,
+    fontSize: 14,
+    letterSpacing: tracking(14, -0.01),
+  },
+  serviceNote: {
+    ...Type.body(10.5),
+    lineHeight: 15,
+    marginTop: 2,
+  },
+  serviceTick: {
+    width: SERVICE_TICK,
+    height: SERVICE_TICK,
+    flexShrink: 0,
+    borderRadius: Radii.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  serviceDot: {
+    width: SERVICE_DOT,
+    height: SERVICE_DOT,
+    flexShrink: 0,
+    borderRadius: Radii.pill,
+    borderWidth: Rule.hair,
+  },
+  serviceTag: {
+    flexShrink: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: Radii.pill,
+    borderWidth: Rule.hair,
+    paddingHorizontal: Space.sm,
+    paddingVertical: 4,
+  },
+  serviceTagLabel: {
+    ...Type.label(9),
+    fontFamily: Fonts.extrabold,
+    letterSpacing: tracking(9, 0.1),
+  },
+
+  settled: {
+    borderRadius: Radii.lg,
+    borderWidth: Rule.hair,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 11,
+    padding: 13,
+  },
+  settledNote: {
+    ...Type.body(11.5),
+    lineHeight: 17,
+    marginTop: 4,
+  },
+
   media: {
     flexDirection: 'row',
     gap: 11,
-    marginTop: Space.lg,
+    marginTop: 10,
   },
   tile: {
     flexShrink: 0,
@@ -523,5 +876,8 @@ const styles = StyleSheet.create({
   },
   held: {
     opacity: 0.9,
+  },
+  blocked: {
+    opacity: 0.55,
   },
 });

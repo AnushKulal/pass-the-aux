@@ -7,11 +7,19 @@
  *
  * NOCTURNE MOVES THE PRIMARY ACTION TO BLUE, AND THAT IS THE WHOLE ACCENT RULE:
  *   coral (`live`) says "this is happening right now"
- *   blue  (`pri`)  says "you do this"
- * A Join button on a live session is BLUE with a CORAL badge beside it. No one
- * element is ever painted in both. `pri` is the new default answer for a CTA;
- * `live` survives for the handful of controls that toggle a live STATE (record,
- * go live) rather than perform an action.
+ *   blue  (`pri`)  says "you make this happen"
+ * No one element is ever painted in both.
+ *
+ * THIS PARAGRAPH USED TO END "A Join button on a live session is BLUE with a
+ * CORAL badge beside it", AND THAT WAS WRONG. Blue is not "any action" — it is
+ * CREATE and CONTROL: start, submit, play, skip. Joining does not create
+ * anything; it enters a state that already exists without you, so it belongs to
+ * the state accent. The design's artboards draw Join and Solo coral, and the
+ * blue version is what shipped to a phone and came straight back.
+ *
+ * `pri` is the default answer for a CTA that makes something happen. `live` is
+ * the answer for entering or toggling a live state — Join, Solo, record, go
+ * live. See the note on `live` in '@/lib/theme' for the full ruling.
  *
  * - `pri`         — the gradient pill. `priTint` over `pill`, white label, on a
  *                   BLUE GLOW rather than a grey drop shadow. Matches

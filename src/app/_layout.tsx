@@ -127,6 +127,14 @@ function RootNavigator({ fontsSettled }: { fontsSettled: boolean }) {
             The Session below is the one deliberate exception.
           */
           animation: 'fade',
+          /*
+            iOS only — Android and web ignore it — but on iOS a `fade` stack
+            transition defaults to 500ms, which is nearly twice the top of the
+            200-320ms band the design works in and reads as the app hesitating.
+            `Duration.enter` puts a module change in the same tempo as the tab
+            cross-fade in `(tabs)/_layout` and as every screen's own entrance.
+          */
+          animationDuration: Duration.enter,
         }}>
         <Stack.Screen name="(auth)" options={{ animation: 'fade' }} />
         <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
@@ -134,8 +142,20 @@ function RootNavigator({ fontsSettled }: { fontsSettled: boolean }) {
           A Session is a place you drop INTO — the one destination that is not a
           sibling of the rest. It keeps the vertical rise so that arriving in a
           party feels unlike any other navigation in the app.
+
+          Longer than the fades on purpose: this one covers real distance, and
+          `Duration.sheet` is what everything else that rises from the bottom
+          edge already takes.
         */}
-        <Stack.Screen name="room/[id]" options={{ animation: 'slide_from_bottom' }} />
+        <Stack.Screen
+          name="room/[id]"
+          options={{ animation: 'slide_from_bottom', animationDuration: Duration.sheet }}
+        />
+        {/*
+          Inherits the fade. It is an OAuth interstitial that redirects out of
+          itself almost immediately, so anything with direction would be a
+          gesture the user never gets to finish reading.
+        */}
         <Stack.Screen name="spotify-callback" />
         <Stack.Screen name="+not-found" options={{ animation: 'fade' }} />
       </Stack>

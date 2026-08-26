@@ -63,12 +63,23 @@ export type ScreenProps = {
    */
   reserveDock?: boolean;
   /**
-   * Paint the app ground behind this screen. Almost always right — but it is a
-   * prop because the ambient blobs are mounted ONCE behind the navigator, and
-   * an opaque `bg` on every screen would cover them. Pass `false` on any screen
-   * that should show the drifting ground through it, and make sure the
-   * navigator's own scene background is transparent too, or this just moves the
-   * problem one layer out.
+   * Paint the app ground behind this screen.
+   *
+   * THE RULE IS POSITIONAL, NOT AESTHETIC: inside `(tabs)` this must be
+   * `false`, everywhere else it must be `true`. The ambient blobs are mounted
+   * ONCE behind the tab navigator, so an opaque `bg` here covers them for that
+   * whole screen — and a covered ground is the failure that takes the glass
+   * with it, because a 5.5%-white card over flat `bg` composites to a grey
+   * plate with nothing behind it (see `GlassCard`). Routes outside the group
+   * have no blobs to reveal and need the fill.
+   *
+   * `true` by default because a missing fill outside the group is instantly
+   * visible, where the reverse mistake is not: a screen INSIDE the group that
+   * forgets to opt out looks completely normal and has simply lost its light.
+   * That is the one to check first when a screen's cards look flat.
+   *
+   * Whichever way this goes, the navigator's own scene background has to agree,
+   * or the problem just moves one layer out.
    */
   ground?: boolean;
 };

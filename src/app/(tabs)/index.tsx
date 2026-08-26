@@ -1,42 +1,78 @@
 /**
  * The Feed — the screen the app opens on, and the first thing anyone judges.
  *
- * Built from `design/nocturne/aux-nocturne.dc.html` L231-L320 (`isFeed`): a
- * pinned masthead of identity + greeting + settings, then a scroll body of
- * search, the LOUNGE RAIL, the live list, and a "Start a Session" promo that
- * closes the screen.
+ * Built from `design/nocturne/aux-nocturne.dc.html` L231-L320 (`isFeed`) and,
+ * this pass, from the user's own capture of that prototype running. Top to
+ * bottom it is exactly what that screenshot shows:
  *
- * FOUR DELIBERATE DEVIATIONS FROM THAT ARTBOARD, ALL FOR THE SAME REASON —
- * the mock is a static picture of a full app and this screen has real states:
+ *   the masthead   — gradient identity avatar with its presence dot, a small
+ *                    grey greeting over the bold name, a quiet settings gear
+ *   the search     — one full-width recessed pill with a magnifier
+ *   Your lounges   — a heading with a BLUE "See all", then a rail of cards that
+ *                    bleeds off the right edge; each card a coral bar down its
+ *                    left side, the name in bold caps, "128 MEMBERS" in grey
+ *                    beside "4 LISTENING" in coral
+ *   Live now       — a heading with "4 PEOPLE LISTENING RIGHT NOW" in coral,
+ *                    then the column of glass cards `NowPlayingCard` draws
  *
- * 1. THE NOW-PLAYING HERO SURVIVES. The artboard has no hero card; it opens
- *    straight onto search. But the hero is how you get BACK into a Session you
- *    are already in, and it is the only surface that reports sync. Deleting it
- *    to match a picture would delete a feature. It sits directly under the
- *    search pill, where the artboard's eye lands first anyway.
- * 2. The waveform is gone. It belonged to design/v2; nocturne has no waveform
- *    anywhere (zero matches for `wave` in the artboard file) and draws playback
- *    as the 4-6px coral gradient bar that `ProgressBar` now is. 64 hand-laid
- *    bars and a measured clip box went with it.
- * 3. The header's messages icon is gone. The nav capsule owns Messages and its
- *    unread badge now, and the artboard's header carries a settings gear
- *    instead — which is load-bearing, because settings has no nav slot.
+ * === THE ACCENT RULE ON THIS SCREEN, WITH THE CORRECTION IT NOW CARRIES ===
+ *
+ * An earlier pass ruled that every button was blue because "blue is action",
+ * and pushed Join to blue. That ruling is reversed. Coral owns state AND
+ * live-entry, because entering something that is live is the one action whose
+ * subject is the state itself. On this screen:
+ *
+ *   BLUE  — the "See all" link and the create FAB in the nav capsule, plus the
+ *           "You're on aux" button on the closing card, which is a CREATE.
+ *   CORAL — the live dots, the rail stripes, every LISTENING count, the
+ *           progress fills, JOIN / SOLO, and the resume card's own CTA.
+ *
+ * === FOUR DELIBERATE DEVIATIONS, ALL FOR THE SAME REASON — the screenshot is
+ * a picture of one state and this screen has several ===
+ *
+ * 1. THE HERO CARD IS NOW A RESUME CARD, AND ONLY APPEARS WHEN THE SESSION IS
+ *    MINE. It used to also render somebody ELSE'S live Session as a full-width
+ *    hero, and then filter that person out of the list below — so the busiest
+ *    row on the Feed was promoted out of the Feed. That is why the screenshot
+ *    has no hero: nothing there is yours. What the hero was actually load
+ *    bearing for is getting BACK into a Session you are already in and reading
+ *    your own sync, and neither of those has anywhere else to live, so that
+ *    half stays. Somebody else's Session is now just a row with a coral JOIN
+ *    on it, which is what the design draws. `useMySessions` is unchanged.
+ * 2. THE SEARCH FIELD IS A REAL INPUT AND IT SITS OUTSIDE THE SCROLLER. The
+ *    artboard scrolls it away with the body; as a `ListHeaderComponent` a
+ *    controlled `TextInput` drops the keyboard mid-word every time the list
+ *    re-renders, which is the lesson `(tabs)/explore.tsx` already paid for. So
+ *    it is pinned under the masthead. What it searches is documented on
+ *    `SearchField` — read that before assuming it reaches a backend.
+ * 3. The waveform is gone. It belonged to design/v2; nocturne has no waveform
+ *    anywhere and draws playback as the coral gradient bar `ProgressBar` is.
  * 4. "See all" points at `/lounges`, not Explore. The artboard sends it to
  *    Explore, but in this app `/lounges` is "the lounges I am in" and it lost
- *    its nav cell when Messages took the slot. This link is now the only way
- *    to that screen, which makes the rail below it load-bearing rather than
+ *    its nav cell when Messages took the slot. This link is the only way to
+ *    that screen, which makes the rail below it load-bearing rather than
  *    decoration.
  *
  * Everything here is still push-driven: the rows arrive over Realtime presence,
- * and the only queries are the two slow-moving lists behind them (my lounges,
- * my Sessions). Rows are filtered to lounges I am actually a member of, which
- * falls out of `useMyLounges` driving both the subscription and the list.
+ * and the queries are the three slow-moving lists behind them (my lounges, the
+ * member counts on them, my Sessions). Rows are filtered to lounges I am
+ * actually a member of, which falls out of `useMyLounges` driving both the
+ * subscription and the list.
  */
 
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { ChevronRight, Play, Plus, Search, Settings, Users, WifiOff } from 'lucide-react-native';
+import {
+  ChevronRight,
+  Play,
+  Plus,
+  Search,
+  Settings,
+  Users,
+  WifiOff,
+  X,
+} from 'lucide-react-native';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   FlatList,
@@ -45,6 +81,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
   type ListRenderItemInfo,
   type StyleProp,
@@ -76,7 +113,7 @@ import {
   Skeleton,
   StatusPill,
 } from '@/components/ui';
-import { livePositionMs } from '@/features/presence/presence-client';
+import { loungeKeys, useMyLounges as useMyLoungeSummaries } from '@/features/lounges/queries';
 import {
   useBroadcastPresence,
   type LocalNowPlaying,
@@ -101,6 +138,7 @@ import {
   Space,
   TOUCH_TARGET,
   Type,
+  pressedSoft,
   raisedLarge,
   tracking,
 } from '@/lib/theme';
@@ -133,11 +171,21 @@ const GUTTER = 18;
   `styles.content` no longer carries a `paddingBottom` at all.
 */
 
-/** The hero's artwork well. The artboard's largest art tile is 54; a hero earns 78. */
+/** The resume card's artwork well. The artboard's largest art tile is 54; a hero earns 78. */
 const ART = 78;
 
-/** L256/L268: a 172px lounge card and a 108px dashed NEW tile, 12 apart. */
-const RAIL_CARD = 172;
+/** L245: `min-height:50px` on the search pill. */
+const SEARCH_HEIGHT = 50;
+
+/**
+ * L256/L268: a 108px dashed NEW tile, 12 apart from cards the artboard sets at
+ * 172. The card is WIDER here — 200 — because its meta line now carries the two
+ * readouts the user's screenshot asks for side by side ("128 MEMBERS" beside
+ * "4 LISTENING"), and at 172 the second one wraps or truncates on the first
+ * lounge with a three-digit membership. The rail bleeds off the frame either
+ * way, so the only thing 172 was buying was a sliver more of the next card.
+ */
+const RAIL_CARD = 200;
 const RAIL_NEW = 108;
 const RAIL_GAP = 12;
 
@@ -152,11 +200,11 @@ const RAIL_GAP = 12;
 const RAIL_TAIL = 20;
 
 /**
- * The rail card's floor: 16 padding, a 34 stripe or two 17px lines of name, 14,
- * the 13.5px meta line, 16 padding. See the note on `styles.railCard` for why
- * this is a number and not `flex: 1`.
+ * The rail card's floor: 16 padding, two 16px lines of name, 14, the 13px meta
+ * line, 16 padding. See the note on `styles.railCard` for why this is a number
+ * and not `flex: 1`.
  */
-const RAIL_HEIGHT = 100;
+const RAIL_HEIGHT = 96;
 
 /** The rail's own corner. `GlassCard` owns 24 internally; the dashed tile has no card to inherit it from. */
 const CARD_RADIUS = 24;
@@ -318,32 +366,89 @@ function Masthead({
   );
 }
 
+// --------------------------------------------------------------------- search
+
 /**
- * The search pill (L245-248) — as a BUTTON, not an input.
+ * The search pill (L245-248) — a REAL input, and it is worth being precise
+ * about what it can and cannot reach.
  *
- * The artboard binds this to the same `{{ search }}` state Explore uses, and
- * Explore is where the real query, the real results and the invite-code field
- * already live. So this keeps the artboard's shape and hands the tap to the
- * screen that can answer it, rather than growing a second search implementation
- * on the Feed. It is announced as a button, so nothing about it is a pretence.
+ * WHAT IT SEARCHES: everything the Feed already holds — the names of the
+ * lounges on the rail, and the people, tracks, artists and lounges on the live
+ * rows. That is a genuine filter over real data, applied locally with no round
+ * trip, and it is instant because presence has already pushed all of it.
+ *
+ * WHAT IT DOES NOT SEARCH, AND THIS IS THE REPORTED GAP: there is no server-
+ * side search endpoint for people or tracks in this app at all, and the one
+ * search that does exist — `usePublicLounges` behind `(tabs)/explore.tsx` —
+ * takes its query from its own local state and reads no route param. So the
+ * "Search every lounge" action below a no-results state opens Explore but
+ * CANNOT carry the typed text with it; the field there starts empty. Giving
+ * Explore a `q` param is a one-line change in a file this pass does not own.
+ * Nothing here fabricates a result to cover that.
+ *
+ * A WELL, NOT GLASS. The user's screenshot draws this recessed, and the kit's
+ * doctrine agrees: an input is cut INTO the page (`bgRecessed`, darker than the
+ * ground) while a card sits ON it. That contrast is also what lets the glass
+ * cards below read as glass — a screen of nothing but translucent surfaces has
+ * nothing to be translucent against. `(tabs)/explore.tsx` deliberately makes
+ * the opposite call for its own pill, where the field is chrome in a column of
+ * chrome rather than the one input on a page of cards.
  */
-function SearchLink({ onPress }: { onPress: () => void }) {
+function SearchField({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+}) {
   const C = useColors();
+  const [focused, setFocused] = useState(false);
+
+  const onFocus = useCallback(() => setFocused(true), []);
+  const onBlur = useCallback(() => setFocused(false), []);
+  const clear = useCallback(() => onChange(''), [onChange]);
 
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="Search lounges, people and tracks"
-      onPress={onPress}
-      style={({ pressed }) => [
+    <View
+      style={[
         styles.search,
-        { backgroundColor: pressed ? C.surface2 : C.surface, borderColor: C.rule },
+        pressedSoft(C),
+        { backgroundColor: C.bgRecessed, borderColor: focused ? C.rule3 : C.rule },
       ]}>
       <Search size={18} strokeWidth={2} color={C.ink3} />
-      <Text numberOfLines={1} style={[styles.searchLabel, { color: C.ink3 }]}>
-        Search lounges, people, tracks
-      </Text>
-    </Pressable>
+
+      <TextInput
+        value={value}
+        onChangeText={onChange}
+        onFocus={onFocus}
+        onBlur={onBlur}
+        placeholder="Search lounges, people, tracks"
+        // Explicit: RN's platform default is a mid grey that measures under 3:1
+        // on this ground, and `ink3` is the token that was raised to clear AA.
+        placeholderTextColor={C.ink3}
+        autoCapitalize="none"
+        autoComplete="off"
+        autoCorrect={false}
+        returnKeyType="search"
+        accessibilityLabel="Search lounges, people and tracks"
+        // Blue, matching Explore's field: a caret marks something you are
+        // DOING. Coral here would announce a live state and spend the accent
+        // that means it.
+        selectionColor={C.pill}
+        style={[styles.searchInput, { color: C.ink }]}
+      />
+
+      {value.length > 0 ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Clear search"
+          onPress={clear}
+          hitSlop={12}
+          style={({ pressed }) => [pressed && styles.pressed]}>
+          <X size={17} strokeWidth={2.4} color={C.ink3} />
+        </Pressable>
+      ) : null}
+    </View>
   );
 }
 
@@ -381,7 +486,9 @@ function SectionHeader({
           <Text style={[styles.sectionLinkLabel, { color: C.priTint }]}>{action.label}</Text>
         </Pressable>
       ) : count ? (
-        <Text style={[styles.sectionCount, { color: C.liveText }]}>{count}</Text>
+        <Text numberOfLines={1} style={[styles.sectionCount, { color: C.liveText }]}>
+          {count}
+        </Text>
       ) : null}
     </View>
   );
@@ -389,31 +496,47 @@ function SectionHeader({
 
 // --------------------------------------------------------------- lounge rail
 
-/** A lounge, plus what presence currently says about it. */
+/** A lounge, plus what the roster and presence currently say about it. */
 type RailLounge = {
   id: string;
   name: string;
-  /** People from this lounge on the Feed right now. */
+  /** From the membership query. Null while it is still in flight — never guessed. */
+  members: number | null;
+  /** People from this lounge audible on the Feed right now. */
   online: number;
   /** How many of them are in a Session you could walk into. */
   live: number;
 };
 
 /**
- * One rail card (L256-267).
+ * One rail card (L256-267), as the user's screenshot draws it: a coral bar down
+ * the left edge, the name in bold caps, and under it the membership in grey
+ * beside the live count in coral.
  *
- * The 4px stripe is the card's whole live signal, so it only goes coral when
- * the lounge actually has a Session running — a quiet lounge painted in the
- * accent is the exact lie the two-colour system exists to prevent. Quiet gets
- * `rule3`, which is an edge, not a state.
+ * THE BAR IS CORAL ON EVERY CARD, AND THAT REVERSES A RULING HERE. It used to
+ * go `rule3` on a quiet lounge, on the argument that "a quiet lounge painted in
+ * the accent is the exact lie the two-colour system exists to prevent". Both
+ * the artboard (L257 hardcodes `--aux-live`) and the screenshot paint every
+ * stripe coral, and they are right for a reason the old note missed: the stripe
+ * is the lounge's own mark, not a claim about it. What carries the live signal
+ * is the GLOW — `0 0 12px var(--aux-live-m)` only when there is actually a
+ * Session running — so a live card's stripe is LIT and a quiet one's is not,
+ * and the coral count beside it appears only when someone is really listening.
+ * Nothing is painted in an accent it has not earned; the accent just stopped
+ * being the only thing carrying the message.
  */
 function LoungeRailCard({ lounge, onOpen }: { lounge: RailLounge; onOpen: () => void }) {
   const C = useColors();
   const live = lounge.live > 0;
 
-  const label = live
-    ? `${lounge.name}, ${lounge.live} live`
-    : `${lounge.name}, ${lounge.online} listening`;
+  const label = [
+    lounge.name,
+    lounge.members === null ? null : `${lounge.members} members`,
+    lounge.online > 0 ? `${lounge.online} listening` : null,
+    live ? 'live session' : null,
+  ]
+    .filter(Boolean)
+    .join(', ');
 
   return (
     <Pressable
@@ -422,25 +545,31 @@ function LoungeRailCard({ lounge, onOpen }: { lounge: RailLounge; onOpen: () => 
       onPress={onOpen}
       style={({ pressed }) => [pressed && styles.pressed]}>
       <GlassCard style={styles.railCard}>
-        <View style={styles.railTop}>
-          <View
-            style={[
-              styles.railBar,
-              live
-                ? {
-                    backgroundColor: C.live,
-                    /*
-                      `0 0 12px var(--aux-live-m)` (L257). Centred, so `bloom()`
-                      cannot stand in — every recipe in the theme offsets its
-                      shadow downward and this has to sit around the stripe.
-                    */
-                    boxShadow: [
-                      { offsetX: 0, offsetY: 0, blurRadius: 12, color: C.liveMid },
-                    ],
-                  }
-                : { backgroundColor: C.rule3 },
-            ]}
-          />
+        {/*
+          A full-height stripe rather than the artboard's 34px stub — the
+          screenshot runs it the whole way down the card's left edge, which is
+          what makes a row of cards read as a shelf of spines. `alignSelf:
+          'stretch'` keeps it inside the card's padding rather than against the
+          radius, where `GlassCard`'s unclipped corner would let it poke out.
+        */}
+        <View
+          style={[
+            styles.railBar,
+            { backgroundColor: C.live },
+            live
+              ? {
+                  /*
+                    Centred, so `bloom()` cannot stand in — every recipe in the
+                    theme offsets its shadow downward and this has to sit
+                    around the stripe.
+                  */
+                  boxShadow: [{ offsetX: 0, offsetY: 0, blurRadius: 12, color: C.liveMid }],
+                }
+              : null,
+          ]}
+        />
+
+        <View style={styles.railBody}>
           {/*
             Two lines, and that is what `RAIL_HEIGHT` is sized for. A third line
             would make one card taller than its neighbours, and a horizontal row
@@ -449,15 +578,22 @@ function LoungeRailCard({ lounge, onOpen }: { lounge: RailLounge; onOpen: () => 
           <Text numberOfLines={2} style={[styles.railName, { color: C.ink }]}>
             {lounge.name}
           </Text>
-        </View>
 
-        <View style={styles.railMeta}>
-          <Text numberOfLines={1} style={[styles.railMembers, { color: C.ink3 }]}>
-            {lounge.online > 0 ? `${lounge.online} on` : 'quiet'}
-          </Text>
-          {live ? (
-            <Text style={[styles.railLive, { color: C.liveText }]}>{`${lounge.live} live`}</Text>
-          ) : null}
+          <View style={styles.railMeta}>
+            {lounge.members === null ? null : (
+              <Text numberOfLines={1} style={[styles.railMembers, { color: C.ink3 }]}>
+                {`${lounge.members} ${lounge.members === 1 ? 'member' : 'members'}`}
+              </Text>
+            )}
+            {lounge.online > 0 ? (
+              <Text
+                numberOfLines={1}
+                style={[
+                  styles.railLive,
+                  { color: C.liveText },
+                ]}>{`${lounge.online} listening`}</Text>
+            ) : null}
+          </View>
         </View>
       </GlassCard>
     </Pressable>
@@ -506,7 +642,9 @@ function LoungeRail({
 }: {
   lounges: RailLounge[];
   onOpen: (loungeId: string) => void;
-  onCreate: () => void;
+  /** Null while a search is filtering the rail — an outline of a card that does
+   * not exist yet is not a search result. */
+  onCreate: (() => void) | null;
 }) {
   return (
     <ScrollView
@@ -517,65 +655,45 @@ function LoungeRail({
       {lounges.map((lounge) => (
         <LoungeRailCard key={lounge.id} lounge={lounge} onOpen={() => onOpen(lounge.id)} />
       ))}
-      <NewLoungeTile onPress={onCreate} />
+      {onCreate ? <NewLoungeTile onPress={onCreate} /> : null}
     </ScrollView>
   );
 }
 
-// ------------------------------------------------------------------- the hero
+// ------------------------------------------------------------- the resume card
 
 /**
- * What the hero card is showing.
+ * A Session I am already inside.
  *
- * `mine` is a Session I am already inside — the card becomes the way back into
- * it, and the readout reports my own sync rather than a head count. `join` is
- * somebody else's, reconstructed entirely from their presence beat.
+ * Only this shape survives. The card used to have a second one — somebody
+ * else's Session, reconstructed from their presence beat — and rendering it
+ * meant pulling that person out of the list below, so the single most
+ * interesting row on the Feed was the one row the Feed did not show. It is a
+ * row again, with a coral JOIN on it. See the file header.
  */
-type Hero =
-  | {
-      kind: 'mine';
-      roomId: string;
-      loungeId: string;
-      loungeName: string;
-      who: string;
-      title: string;
-      artist: string;
-      artworkUrl: string | null;
-      durationMs: number;
-      timeline: RoomTimeline;
-    }
-  | {
-      kind: 'join';
-      roomId: string;
-      loungeId: string;
-      loungeName: string;
-      who: string;
-      title: string;
-      artist: string;
-      artworkUrl: string | null;
-      durationMs: number;
-      entry: FeedEntry;
-    };
+type Resume = {
+  roomId: string;
+  loungeId: string;
+  loungeName: string;
+  title: string;
+  artist: string;
+  artworkUrl: string | null;
+  durationMs: number;
+  timeline: RoomTimeline;
+};
 
 /**
- * The hook: what is playing right now that you can walk into.
+ * The way back into the Session you are in, and the only surface that reports
+ * your sync.
  *
- * THE ACCENT RULE, DRAWN OUT, because this one card carries every register:
- *   the LIVE badge is coral        — a state of the world
- *   the progress bar is coral      — something is playing, which is also state
- *   the lounge link is `priTint`   — an action, at link volume
- *   the Join CTA is the blue pill  — the action this card is asking for
- * No element is painted in both. Repainting the CTA coral because the session
- * is live is the mistake this comment exists to prevent.
+ * CORAL, TOP TO BOTTOM, and that is the corrected rule doing its work: the LIVE
+ * badge, the progress fill, the IN SYNC readout and the CTA all describe or
+ * enter the same live thing. The lounge link is the one thing that is neither,
+ * so it takes no accent at all — it used to be `priTint`, and blue on this
+ * screen now belongs to "See all" and the create FAB alone.
  */
-function HeroCard({
-  hero,
-  listeners,
-  onOpenRoom,
-  onOpenLounge,
-}: {
-  hero: Hero;
-  listeners: number;
+function ResumeCard({ resume, onOpenRoom, onOpenLounge }: {
+  resume: Resume;
   onOpenRoom: (roomId: string) => void;
   onOpenLounge: (loungeId: string) => void;
 }) {
@@ -584,62 +702,48 @@ function HeroCard({
   const driftMs = usePlayback((state) => state.driftMs);
   const isSynced = usePlayback((state) => state.isSynced);
 
-  const mine = hero.kind === 'mine';
-
   /*
     `expectedPositionMs` measures from the room's start stamp and keeps counting
     past the end of the track — the room row simply has not been advanced yet —
     so the readout is clamped to the duration rather than reporting 9:31 of a
-    3:12 song. `livePositionMs` already clamps itself.
+    3:12 song.
   */
-  const raw = mine ? expectedPositionMs(hero.timeline, nowMs) : livePositionMs(hero.entry, nowMs);
+  const raw = expectedPositionMs(resume.timeline, nowMs);
+  const positionMs = resume.durationMs > 0 ? Math.min(resume.durationMs, Math.max(0, raw)) : 0;
+  const progress = resume.durationMs > 0 ? positionMs / resume.durationMs : 0;
 
-  const positionMs = hero.durationMs > 0 ? Math.min(hero.durationMs, Math.max(0, raw)) : 0;
-  const progress = hero.durationMs > 0 ? positionMs / hero.durationMs : 0;
-
-  /*
-    The centre readout is the only place the two kinds diverge in meaning: my
-    own Session can report the sync the controller is actually measuring, while
-    somebody else's can only honestly report how many of my lounge-mates are in
-    it. IN SYNC is a state, so it — and only it — takes the coral.
-  */
-  const synced = mine && isSynced;
-  const centre = mine
-    ? isSynced
-      ? 'IN SYNC'
-      : `${driftMs > 0 ? '+' : ''}${Math.round(driftMs)}MS`
-    : `${listeners} LISTENING`;
+  const centre = isSynced ? 'IN SYNC' : `${driftMs > 0 ? '+' : ''}${Math.round(driftMs)}MS`;
 
   return (
-    <GlassCard style={[styles.hero, raisedLarge(C)]}>
-      <View style={styles.heroHead}>
+    <GlassCard style={[styles.resume, raisedLarge(C)]}>
+      <View style={styles.resumeHead}>
         <StatusPill label="live" tone="liveWash" dot live />
 
         <Pressable
           accessibilityRole="link"
-          accessibilityLabel={`Open ${hero.loungeName}`}
-          onPress={() => onOpenLounge(hero.loungeId)}
+          accessibilityLabel={`Open ${resume.loungeName}`}
+          onPress={() => onOpenLounge(resume.loungeId)}
           style={({ pressed }) => [styles.loungeLink, pressed && styles.pressed]}>
-          <Text numberOfLines={1} style={[styles.loungeLinkLabel, { color: C.priTint }]}>
-            {hero.loungeName}
+          <Text numberOfLines={1} style={[styles.loungeLinkLabel, { color: C.ink2 }]}>
+            {resume.loungeName}
           </Text>
-          <ChevronRight size={14} strokeWidth={2.5} color={C.priTint} />
+          <ChevronRight size={14} strokeWidth={2.5} color={C.ink3} />
         </Pressable>
       </View>
 
-      <View style={styles.heroTop}>
+      <View style={styles.resumeTop}>
         {/*
           A WELL, not a plate. Artwork inverted in this direction: a dark recess
           carrying a faint `artInk` monogram. Any code assuming a bright tile —
           dark ink on it, a light border — is now wrong.
         */}
         <View style={[styles.art, { backgroundColor: C.artwork, borderColor: C.rule }]}>
-          <Text style={[styles.artGlyph, { color: C.artInk }]}>{glyphFor(hero.title)}</Text>
+          <Text style={[styles.artGlyph, { color: C.artInk }]}>{glyphFor(resume.title)}</Text>
 
           {/* Over the glyph, so the letter doubles as the error fallback. */}
-          {hero.artworkUrl ? (
+          {resume.artworkUrl ? (
             <Image
-              source={{ uri: hero.artworkUrl }}
+              source={{ uri: resume.artworkUrl }}
               style={StyleSheet.absoluteFill}
               contentFit="cover"
               cachePolicy="memory-disk"
@@ -649,16 +753,16 @@ function HeroCard({
           ) : null}
         </View>
 
-        <View style={styles.heroInfo}>
-          <Text numberOfLines={1} style={[styles.heroKicker, { color: C.ink3 }]}>
-            {mine ? "you're on aux" : `@${hero.who} is on aux`}
+        <View style={styles.resumeInfo}>
+          <Text numberOfLines={1} style={[styles.resumeKicker, { color: C.ink3 }]}>
+            you&apos;re on aux
           </Text>
-          <Text numberOfLines={1} style={[styles.heroTitle, { color: C.ink }]}>
-            {hero.title}
+          <Text numberOfLines={1} style={[styles.resumeTitle, { color: C.ink }]}>
+            {resume.title}
           </Text>
-          {hero.artist ? (
-            <Text numberOfLines={1} style={[styles.heroArtist, { color: C.ink2 }]}>
-              {hero.artist}
+          {resume.artist ? (
+            <Text numberOfLines={1} style={[styles.resumeArtist, { color: C.ink2 }]}>
+              {resume.artist}
             </Text>
           ) : null}
         </View>
@@ -667,24 +771,32 @@ function HeroCard({
       {/*
         6px rather than the list's 4: this is the one bar on the screen anyone
         reads a position off, and the coral bleed under it is what makes it
-        register as running rather than drawn. No thumb — nobody scrubs another
-        room's playhead from the Feed.
+        register as running rather than drawn. No thumb — nobody scrubs a room's
+        playhead from the Feed.
       */}
-      <ProgressBar progress={progress} height={6} glow style={styles.heroBar} />
+      <ProgressBar progress={progress} height={6} glow style={styles.resumeBar} />
 
       <View style={styles.readout}>
         <Text style={[styles.readoutSide, { color: C.ink2 }]}>{timecode(positionMs)}</Text>
-        <Text style={[styles.readoutCentre, { color: synced ? C.liveText : C.ink2 }]}>
+        <Text style={[styles.readoutCentre, { color: isSynced ? C.liveText : C.ink2 }]}>
           {centre}
         </Text>
-        <Text style={[styles.readoutSide, { color: C.ink2 }]}>{timecode(hero.durationMs)}</Text>
+        <Text style={[styles.readoutSide, { color: C.ink2 }]}>
+          {timecode(resume.durationMs)}
+        </Text>
       </View>
 
-      <View style={styles.heroAction}>
+      <View style={styles.resumeAction}>
+        {/*
+          CORAL, not blue, and this is the correction the file header records:
+          walking back into a Session is live-entry, which is the one action the
+          state colour owns. `live` gives the coral fill under `onLive` — a warm
+          near-black, because white on coral fails.
+        */}
         <AuxButton
-          label={mine ? 'Back to session' : 'Join session'}
-          onPress={() => onOpenRoom(hero.roomId)}
-          variant="pri"
+          label="Back to session"
+          onPress={() => onOpenRoom(resume.roomId)}
+          variant="live"
           size="lg"
           shape="pill"
           align="center"
@@ -706,8 +818,10 @@ function HeroCard({
  * the answer to a busy one are the same verb, so the screen offers it once,
  * in one place, and only changes what it says above the button.
  *
- * The blue corner bleed is `GlassCard glow="pri"` — blue because this card is
- * something you DO. A coral bleed here would claim the room is already live.
+ * The blue corner bleed is `GlassCard glow="pri"`, and the button is blue too —
+ * both correct under the corrected rule, which gives blue to CREATE. Starting a
+ * Session is the one thing on this screen that makes something new rather than
+ * entering something that already exists.
  */
 function StartSessionCard({
   roster,
@@ -756,9 +870,7 @@ function StartSessionCard({
                 card it is a shade darker than the fill, which is what separates
                 them; a `surface` ring would composite twice and go pale.
               */
-              <View
-                key={person.userId}
-                style={[styles.stackRing, { borderColor: C.bg }]}>
+              <View key={person.userId} style={[styles.stackRing, { borderColor: C.bg }]}>
                 <Avatar uri={person.avatarUrl} name={person.displayName} size={26} />
               </View>
             ))}
@@ -772,6 +884,17 @@ function StartSessionCard({
 // ------------------------------------------------------------------ list parts
 
 const keyExtractor = (entry: FeedEntry) => entry.userId;
+
+/** Everything the Feed already knows about a person, lowercased once per test. */
+function matchesQuery(entry: FeedEntry, q: string): boolean {
+  return (
+    entry.username.toLowerCase().includes(q) ||
+    entry.displayName.toLowerCase().includes(q) ||
+    entry.loungeName.toLowerCase().includes(q) ||
+    (entry.trackTitle?.toLowerCase().includes(q) ?? false) ||
+    (entry.artist?.toLowerCase().includes(q) ?? false)
+  );
+}
 
 /**
  * Every module enters the same way: translateY(8) → 0 over 280ms on the
@@ -803,40 +926,17 @@ function useModuleEnter() {
   }));
 }
 
-/**
- * The hero's own loading twin — badge row, artwork well, two lines, the bar,
- * the readout, the CTA. The hero is the tallest thing on the screen, so
- * leaving it out of the skeleton is what makes the Feed jump when data lands.
- */
-function HeroSkeleton() {
-  return (
-    <GlassCard style={styles.hero}>
-      <View style={styles.heroHead}>
-        <Skeleton width={62} height={24} radius={Radii.pill} />
-        <Skeleton width={84} height={14} />
-      </View>
+/*
+  THERE IS NO SKELETON FOR THE RESUME CARD ANY MORE, AND THAT IS DELIBERATE.
 
-      <View style={styles.heroTop}>
-        <Skeleton width={ART} height={ART} />
-        <View style={styles.skeletonInfo}>
-          <Skeleton width="46%" height={10} />
-          <Skeleton width="82%" height={20} />
-          <Skeleton width="60%" height={12} />
-        </View>
-      </View>
-
-      <Skeleton width="100%" height={6} style={styles.heroBar} />
-
-      <View style={styles.readout}>
-        <Skeleton width={34} height={11} />
-        <Skeleton width={62} height={11} />
-        <Skeleton width={34} height={11} />
-      </View>
-
-      <Skeleton width="100%" height={54} radius={Radii.pill} style={styles.heroAction} />
-    </GlassCard>
-  );
-}
+  There used to be one, on the reasoning that the hero was the tallest thing on
+  the screen and leaving it out of the skeleton made the Feed jump when data
+  landed. That held while the card rendered for anybody's live Session. Now it
+  renders only when the Session is MINE, which is the minority case by a long
+  way — so a full-height placeholder on every cold start would be a phantom
+  promising a card that usually never arrives, which is a worse lie than a
+  reflow. The rail and the rows still have theirs.
+*/
 
 /** The rail at the geometry it will have once it arrives. */
 function RailSkeleton() {
@@ -854,7 +954,7 @@ function RowsSkeleton() {
   return (
     <View>
       {SKELETON_ROWS.map((row) => (
-        <GlassCard key={row} variant="row" style={styles.skeletonRow}>
+        <GlassCard key={row} style={styles.skeletonRow}>
           <Skeleton width={52} height={52} />
           <View style={styles.skeletonRowInfo}>
             <Skeleton width="58%" height={13} />
@@ -877,6 +977,7 @@ export default function FeedScreen() {
   const dockReserve = useDockReserve();
 
   const [refreshing, setRefreshing] = useState(false);
+  const [query, setQuery] = useState('');
 
   // Read once at mount. Re-reading the clock every render would flip the
   // greeting mid-scroll at 11:59, which is the one moment anyone would notice.
@@ -899,12 +1000,29 @@ export default function FeedScreen() {
   const lounges = useMyLounges(profile?.id);
   const sessions = useMySessions(profile?.id);
 
+  /*
+    THE MEMBERSHIP COUNTS, AND WHY THIS IS NOT A NEW QUERY.
+
+    The rail's grey readout is "128 MEMBERS", which presence cannot produce:
+    `entries` is deduplicated by PERSON, so it counts people showing on the
+    Feed, never a roster. The Lounges tab already fetches the real rosters
+    through `useMyLounges` in '@/features/lounges/queries' — same cache key, so
+    opening either screen warms the other and this costs nothing the second
+    time. Aliased on import because the presence module exports a hook of the
+    same name; the presence one still drives the subscriptions and the order.
+  */
+  const summaries = useMyLoungeSummaries();
+
   const loungeList = useMemo<LoungeRef[]>(() => lounges.data ?? [], [lounges.data]);
   const sessionList = useMemo<ActiveSession[]>(() => sessions.data ?? [], [sessions.data]);
   const loungeIds = useMemo(() => loungeList.map((lounge) => lounge.id), [loungeList]);
   const loungeNames = useMemo(
     () => new Map(loungeList.map((lounge) => [lounge.id, lounge.name])),
     [loungeList]
+  );
+  const memberCounts = useMemo(
+    () => new Map((summaries.data ?? []).map((row) => [row.lounge.id, row.memberCount])),
+    [summaries.data]
   );
 
   /**
@@ -939,8 +1057,8 @@ export default function FeedScreen() {
 
   useBroadcastPresence(identity, loungeIds, localNowPlaying);
 
-  // My own row is redundant: the hero card already says where I am, and a Feed
-  // that leads with yourself is a mirror, not a party.
+  // My own row is redundant: the resume card already says where I am, and a
+  // Feed that leads with yourself is a mirror, not a party.
   const { entries, ready } = useLoungePresence(loungeList, profile?.id);
 
   const openRoom = useCallback(
@@ -965,42 +1083,34 @@ export default function FeedScreen() {
     setRefreshing(true);
     try {
       // The Feed itself is pushed over the socket and needs nothing. What can
-      // go stale is the lounge and Session lists behind it, and the clock
-      // offset every progress bar is measured against.
+      // go stale is the lounge lists behind it — the subscription set, the
+      // rosters the rail counts, and my Sessions — plus the clock offset every
+      // progress bar is measured against.
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: MY_LOUNGES_KEY }),
+        queryClient.invalidateQueries({ queryKey: loungeKeys.mine(profile?.id ?? null) }),
         queryClient.invalidateQueries({ queryKey: [MY_SESSIONS_KEY] }),
         syncClock(),
       ]);
     } finally {
       setRefreshing(false);
     }
-  }, [queryClient]);
+  }, [queryClient, profile?.id]);
 
   const showSkeleton = lounges.isPending || (!ready && !lounges.isError);
 
-  /**
-   * The head count on the hero is "people from your lounges who are in that
-   * Session", which is the only one presence can honestly produce — the room's
-   * own participant list is not on the socket.
-   */
-  const listenersByRoom = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const entry of entries) {
-      if (entry.roomId === null) continue;
-      counts.set(entry.roomId, (counts.get(entry.roomId) ?? 0) + 1);
-    }
-    return counts;
-  }, [entries]);
+  /** Trimmed and lowercased once, and the only thing the search branches on. */
+  const q = query.trim().toLowerCase();
+  const searching = q.length > 0;
 
   /**
-   * The rail's counts, folded out of the same presence stream the list uses
-   * rather than fetched.
+   * The rail's live counts, folded out of the same presence stream the list
+   * uses rather than fetched.
    *
    * `entries` is deduplicated by PERSON — somebody in three of my lounges is
-   * tagged with one of them — so these are "people showing on the Feed under
-   * this lounge", not its membership. That is what the labels say: "3 on", not
-   * "3 members". A member count would need its own query per lounge.
+   * tagged with one of them — so `online` is "people showing on the Feed under
+   * this lounge", which is exactly what the coral "N LISTENING" claims.
+   * `members` is the real roster and comes from the query above.
    */
   const railLounges = useMemo<RailLounge[]>(
     () =>
@@ -1012,73 +1122,67 @@ export default function FeedScreen() {
           online += 1;
           if (entry.roomId !== null) live += 1;
         }
-        return { id: lounge.id, name: lounge.name, online, live };
+        return {
+          id: lounge.id,
+          name: lounge.name,
+          members: memberCounts.get(lounge.id) ?? null,
+          online,
+          live,
+        };
       }),
-    [entries, loungeList]
+    [entries, loungeList, memberCounts]
   );
 
-  const hero = useMemo<Hero | null>(() => {
-    // A Session I am already inside wins the card: it becomes the way back in.
+  const visibleRail = useMemo(
+    () => (q ? railLounges.filter((lounge) => lounge.name.toLowerCase().includes(q)) : railLounges),
+    [q, railLounges]
+  );
+
+  const resume = useMemo<Resume | null>(() => {
     const mine =
       (playbackRoomId ? sessionList.find((s) => s.roomId === playbackRoomId) : undefined) ??
       sessionList.find((s) => s.timeline.isPlaying) ??
       sessionList[0];
 
-    if (mine) {
-      const attached = playbackRoomId === mine.roomId;
-      const track =
-        attached && playbackTrack
-          ? {
-              title: playbackTrack.title,
-              artist: playbackTrack.artist,
-              artworkUrl: playbackTrack.artwork_url,
-              durationMs: playbackTrack.duration_ms,
-            }
-          : mine.track;
+    if (!mine) return null;
 
-      return {
-        kind: 'mine',
-        roomId: mine.roomId,
-        loungeId: mine.loungeId,
-        loungeName: loungeNames.get(mine.loungeId) ?? mine.name,
-        who: 'you',
-        title: track?.title ?? mine.name,
-        artist: track?.artist ?? '',
-        artworkUrl: track?.artworkUrl ?? null,
-        durationMs: track?.durationMs ?? 0,
-        timeline: attached && playbackTimeline ? playbackTimeline : mine.timeline,
-      };
-    }
-
-    const joinable = entries.find((e) => e.roomId !== null && e.trackTitle !== null);
-    if (!joinable || joinable.roomId === null) return null;
+    const attached = playbackRoomId === mine.roomId;
+    const track =
+      attached && playbackTrack
+        ? {
+            title: playbackTrack.title,
+            artist: playbackTrack.artist,
+            artworkUrl: playbackTrack.artwork_url,
+            durationMs: playbackTrack.duration_ms,
+          }
+        : mine.track;
 
     return {
-      kind: 'join',
-      roomId: joinable.roomId,
-      loungeId: joinable.loungeId,
-      loungeName: joinable.loungeName,
-      who: joinable.username,
-      title: joinable.trackTitle ?? joinable.loungeName,
-      artist: joinable.artist ?? '',
-      artworkUrl: joinable.artworkUrl,
-      durationMs: joinable.durationMs,
-      entry: joinable,
+      roomId: mine.roomId,
+      loungeId: mine.loungeId,
+      loungeName: loungeNames.get(mine.loungeId) ?? mine.name,
+      title: track?.title ?? mine.name,
+      artist: track?.artist ?? '',
+      artworkUrl: track?.artworkUrl ?? null,
+      durationMs: track?.durationMs ?? 0,
+      timeline: attached && playbackTimeline ? playbackTimeline : mine.timeline,
     };
-  }, [entries, loungeNames, playbackRoomId, playbackTimeline, playbackTrack, sessionList]);
+  }, [loungeNames, playbackRoomId, playbackTimeline, playbackTrack, sessionList]);
 
   /**
-   * Live cards first, then the flat rows — the design's two loops. The hero's
-   * own person is dropped so the same beat is not drawn twice.
+   * Live rows first, then the rest.
+   *
+   * `useLoungePresence` already sorts this way; the partition is repeated here
+   * so the Feed's order is a property of the Feed rather than of a hook three
+   * files away — and so a filtered list cannot come back interleaved.
    */
   const rows = useMemo(() => {
-    const heroUser = hero && hero.kind === 'join' ? hero.entry.userId : null;
-    const visible = entries.filter((entry) => entry.userId !== heroUser);
+    const visible = q ? entries.filter((entry) => matchesQuery(entry, q)) : entries;
     return [
       ...visible.filter((entry) => entry.roomId !== null),
       ...visible.filter((entry) => entry.roomId === null),
     ];
-  }, [entries, hero]);
+  }, [entries, q]);
 
   const renderItem = useCallback(
     ({ item, index }: ListRenderItemInfo<FeedEntry>) => (
@@ -1087,10 +1191,17 @@ export default function FeedScreen() {
     []
   );
 
-  /** The count beside "Live now" — coral, because it reports the world, not a control. */
+  /**
+   * The count beside "Live now" — coral, because it reports the world, not a
+   * control, and it reports the WHOLE world even while a search is narrowing
+   * what is on screen. A count that shrank as you typed would be describing the
+   * filter rather than the party.
+   */
   const liveCount = useMemo(() => {
     const live = entries.filter((entry) => entry.roomId !== null).length;
-    return live > 0 ? `${live} on aux` : `${entries.length} online`;
+    if (live > 0) return `${live} ${live === 1 ? 'person' : 'people'} listening right now`;
+    if (entries.length > 0) return `${entries.length} online`;
+    return undefined;
   }, [entries]);
 
   const name = profile?.display_name || profile?.username || 'You';
@@ -1104,6 +1215,18 @@ export default function FeedScreen() {
   const broadcasting = Boolean(profile?.show_activity) && localNowPlaying !== null;
 
   /*
+    What the two sections do while a search is running.
+
+    A heading over nothing is worse than no heading, so each one appears only if
+    it has something under it — and when neither does, the whole header
+    collapses to one empty state rather than two labelled voids.
+  */
+  const railRendered = !showSkeleton && !lounges.isError && visibleRail.length > 0;
+  const showLounges = !searching || visibleRail.length > 0;
+  const showLive = showSkeleton || rows.length > 0;
+  const nothingFound = searching && visibleRail.length === 0 && rows.length === 0;
+
+  /*
     Composed inline rather than behind a `useMemo`.
 
     A FlatList reconciles its header by element TYPE, so a fresh element each
@@ -1114,52 +1237,59 @@ export default function FeedScreen() {
   */
   const header = (
     <View>
-      <SearchLink onPress={openExplore} />
-
-      {hero ? (
-        <HeroCard
-          hero={hero}
-          listeners={listenersByRoom.get(hero.roomId) ?? 1}
-          onOpenRoom={openRoom}
-          onOpenLounge={openLounge}
-        />
-      ) : showSkeleton ? (
-        <HeroSkeleton />
+      {/* Hidden while searching: the Session you are in is not a search result. */}
+      {resume && !searching ? (
+        <ResumeCard resume={resume} onOpenRoom={openRoom} onOpenLounge={openLounge} />
       ) : null}
 
-      <SectionHeader
-        title="Your lounges"
-        action={{ label: 'See all', onPress: openMyLounges }}
-      />
-
-      {showSkeleton ? (
-        <RailSkeleton />
-      ) : lounges.isError ? (
+      {nothingFound ? (
         <EmptyState
-          icon={WifiOff}
-          title="Could not load your lounges"
-          description="Check your connection."
-          primary={{ label: 'Try again', onPress: () => void onRefresh() }}
+          icon={Search}
+          title={`Nothing matching "${query.trim()}"`}
+          description="This looks through your lounges and whoever is on right now. Explore searches every public lounge."
+          primary={{ label: 'Search every lounge', onPress: openExplore }}
         />
-      ) : loungeList.length === 0 ? (
-        <EmptyState
-          icon={Users}
-          title="No lounges yet"
-          description="Create one, or join with a code."
-          primary={{ label: 'Find a lounge', onPress: openExplore }}
-          secondary={{ label: 'Create one', onPress: createLounge }}
-        />
-      ) : (
-        <LoungeRail lounges={railLounges} onOpen={openLounge} onCreate={createLounge} />
-      )}
+      ) : null}
 
-      {showSkeleton || rows.length > 0 ? (
+      {showLounges ? (
+        <>
+          <SectionHeader title="Your lounges" action={{ label: 'See all', onPress: openMyLounges }} />
+
+          {showSkeleton ? (
+            <RailSkeleton />
+          ) : lounges.isError ? (
+            <EmptyState
+              icon={WifiOff}
+              title="Could not load your lounges"
+              description="Check your connection."
+              primary={{ label: 'Try again', onPress: () => void onRefresh() }}
+            />
+          ) : loungeList.length === 0 ? (
+            <EmptyState
+              icon={Users}
+              title="No lounges yet"
+              description="Create one, or join with a code."
+              primary={{ label: 'Find a lounge', onPress: openExplore }}
+              secondary={{ label: 'Create one', onPress: createLounge }}
+            />
+          ) : (
+            <LoungeRail
+              lounges={visibleRail}
+              onOpen={openLounge}
+              onCreate={searching ? null : createLounge}
+            />
+          )}
+        </>
+      ) : null}
+
+      {showLive ? (
         <SectionHeader
           title="Live now"
           count={showSkeleton ? undefined : liveCount}
           // The rail already paid 20px of clearance for its own shadow, so this
-          // header takes the remainder of the artboard's 24 rather than all of it.
-          style={styles.sectionAfterRail}
+          // header takes the remainder of the artboard's 24 rather than all of
+          // it — but only when a rail is actually what is above it.
+          style={railRendered || showSkeleton ? styles.sectionAfterRail : undefined}
         />
       ) : null}
     </View>
@@ -1183,6 +1313,18 @@ export default function FeedScreen() {
           onSettings={openSettings}
         />
 
+        {/*
+          PINNED, not scrolled. The artboard has the field inside the scroll
+          body; as a `ListHeaderComponent` a controlled TextInput remounts
+          whenever the list re-renders and drops the keyboard mid-word, which is
+          the bug `(tabs)/explore.tsx` documents having already hit. Presence
+          re-renders this list constantly, so the Feed would hit it harder than
+          any other screen.
+        */}
+        <View style={styles.searchWrap}>
+          <SearchField value={query} onChange={setQuery} />
+        </View>
+
         <FlatList
           data={showSkeleton ? [] : rows}
           keyExtractor={keyExtractor}
@@ -1190,18 +1332,19 @@ export default function FeedScreen() {
           ListHeaderComponent={header}
           ListEmptyComponent={showSkeleton ? <RowsSkeleton /> : null}
           ListFooterComponent={
-            showSkeleton ? null : (
+            showSkeleton || searching ? null : (
               <StartSessionCard
                 roster={entries.slice(0, 4)}
-                quiet={rows.length === 0 && hero === null}
+                quiet={rows.length === 0 && resume === null}
                 onStart={startSession}
               />
             )
           }
-          // The masthead is a sibling now rather than part of the header, so the
-          // list is one of two children in a column and has to claim the rest of
-          // it explicitly — without this it sizes to its content and stops
-          // scrolling once the Feed is longer than the screen.
+          // The masthead and the search field are siblings now rather than part
+          // of the header, so the list is one of three children in a column and
+          // has to claim the rest of it explicitly — without this it sizes to
+          // its content and stops scrolling once the Feed is longer than the
+          // screen.
           style={styles.flex}
           /*
             The dock reservation is inline because it depends on the device's
@@ -1210,6 +1353,8 @@ export default function FeedScreen() {
           */
           contentContainerStyle={[styles.content, { paddingBottom: dockReserve }]}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -1231,7 +1376,7 @@ const styles = StyleSheet.create({
   },
   /* `paddingBottom` is applied at the call site — see the note at the FlatList. */
   content: {
-    paddingTop: Space.xs,
+    paddingTop: Space.md,
     paddingHorizontal: GUTTER,
     flexGrow: 1,
   },
@@ -1264,19 +1409,29 @@ const styles = StyleSheet.create({
 
   /* --------------------------------------------------------------- search */
 
-  /** L245: a 50px pill of glass. The edge is what makes it an object at 5.5% fill. */
+  /** Pays the gutter itself: the field sits outside the list's content padding. */
+  searchWrap: {
+    paddingHorizontal: GUTTER,
+    paddingTop: Space.sm,
+  },
+  /** L245: a 50px pill, cut INTO the page rather than raised off it. */
   search: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    minHeight: 50,
+    minHeight: SEARCH_HEIGHT,
     paddingHorizontal: Space.lg,
     borderRadius: Radii.pill,
     borderWidth: Rule.hair,
   },
-  searchLabel: {
-    ...Type.body(15),
+  searchInput: {
     flex: 1,
+    minWidth: 0,
+    ...Type.body(15),
+    // RN centres a single-line input on its own line box; a 1.5 line height
+    // then pushes the text off the pill's optical centre on Android.
+    lineHeight: undefined,
+    paddingVertical: 0,
   },
 
   /* -------------------------------------------------------------- section */
@@ -1315,6 +1470,7 @@ const styles = StyleSheet.create({
     ...Type.heading(10),
     letterSpacing: tracking(10, 0.09),
     textTransform: 'uppercase',
+    flexShrink: 0,
   },
 
   /* ----------------------------------------------------------- lounge rail */
@@ -1347,26 +1503,26 @@ const styles = StyleSheet.create({
   railCard: {
     width: RAIL_CARD,
     minHeight: RAIL_HEIGHT,
-    /* Pins the meta row to the bottom edge when the name only takes one line. */
-    justifyContent: 'space-between',
-  },
-  railTop: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 9,
+    alignItems: 'stretch',
+    gap: 11,
   },
   railBar: {
     width: 4,
-    height: 34,
+    alignSelf: 'stretch',
     borderRadius: Radii.pill,
+  },
+  railBody: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: 'space-between',
   },
   railName: {
     fontFamily: Fonts.extrabold,
-    fontSize: 14,
-    lineHeight: 17,
-    letterSpacing: tracking(14, -0.01),
-    flex: 1,
-    minWidth: 0,
+    fontSize: 13,
+    lineHeight: 16,
+    letterSpacing: tracking(13, 0.05),
+    textTransform: 'uppercase',
   },
   railMeta: {
     flexDirection: 'row',
@@ -1384,6 +1540,7 @@ const styles = StyleSheet.create({
     ...Type.heading(10),
     letterSpacing: tracking(10, 0.07),
     textTransform: 'uppercase',
+    flexShrink: 0,
   },
   railNew: {
     width: RAIL_NEW,
@@ -1400,12 +1557,12 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
 
-  /* ----------------------------------------------------------- hero card */
+  /* ---------------------------------------------------------- resume card */
 
-  hero: {
+  resume: {
     marginTop: Space.md,
   },
-  heroHead: {
+  resumeHead: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -1426,7 +1583,7 @@ const styles = StyleSheet.create({
     letterSpacing: tracking(11, 0.04),
     flexShrink: 1,
   },
-  heroTop: {
+  resumeTop: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 15,
@@ -1445,24 +1602,24 @@ const styles = StyleSheet.create({
     fontSize: 30,
     lineHeight: 34,
   },
-  heroInfo: {
+  resumeInfo: {
     flex: 1,
     minWidth: 0,
   },
-  heroKicker: {
+  resumeKicker: {
     ...Type.label(10.5),
     letterSpacing: tracking(10.5, 0.14),
   },
-  heroTitle: {
+  resumeTitle: {
     ...Type.display(21),
     letterSpacing: tracking(21, -0.025),
     marginTop: 5,
   },
-  heroArtist: {
+  resumeArtist: {
     ...Type.body(13),
     marginTop: 2,
   },
-  heroBar: {
+  resumeBar: {
     /* The bar's own bleed needs air; at Space.md the coral touches the artist line. */
     marginTop: Space.lg,
   },
@@ -1479,7 +1636,7 @@ const styles = StyleSheet.create({
   readoutCentre: {
     ...readout(11.5),
   },
-  heroAction: {
+  resumeAction: {
     marginTop: Space.lg,
   },
 
@@ -1527,15 +1684,11 @@ const styles = StyleSheet.create({
 
   /* ---------------------------------------------------------- skeletons */
 
-  skeletonInfo: {
-    flex: 1,
-    gap: Space.sm,
-  },
   skeletonRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
-    marginBottom: 9,
+    marginBottom: Space.md,
   },
   skeletonRowInfo: {
     flex: 1,

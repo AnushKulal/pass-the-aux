@@ -1,19 +1,30 @@
 /**
- * Who is in the Session, where each of them actually is, and the voice controls
- * that belong to being in a room with them.
+ * Who is in the Session, and where each of them actually is.
  *
  * From `design/nocturne/aux-nocturne.dc.html` — the roster card at L996–L1004
  * (round avatar, name over metadata, right-aligned drift readout, a mic glyph
- * at the thumb end), the per-member audio sheet at L1360–L1375, and the mic /
- * deafen tiles at L1153 and L1294.
+ * at the thumb end) and the per-member audio sheet at L1360–L1375.
  *
- * Three things are exported, because all three are the roster:
+ * THIS FILE IS THE MEMBERS TAB AND IT DRAWS PEOPLE. NOTHING ELSE. Two things
+ * that were not people have been taken out of it in this pass, and both were
+ * put here for reasons that were true at the time:
  *
- *   `VoiceControls` — YOUR mic and YOUR deafen, as two tiles the size of a
- *   thumb. It rides at the top of both lists and is exported on its own so a
- *   screen can also put it above the fold, which is the point: these controls
- *   used to live one tap deep inside a lobby sheet that had to be found first,
- *   and a control nobody finds is a control that does not exist.
+ *   `VoiceControls` — YOUR mic and YOUR deafen, as two tiles at the top of
+ *   both lists. Its own docstring argued the case: the controls "used to live
+ *   one tap deep inside a lobby sheet that had to be found first, and a
+ *   control nobody finds is a control that does not exist". That argument was
+ *   correct and it has been ANSWERED rather than overturned — mic is now the
+ *   first cell of the session dock, permanently on screen and zero taps deep,
+ *   and deafen is a tile in the panel one swipe above it. The user asked for
+ *   the card to go ("i dont need your voice card here"); what they were
+ *   objecting to was a control panel sitting on top of a list of people. Both
+ *   controls are closer to hand now than the card ever put them.
+ *
+ *   The ORBIT'S TITLE BLOCK — `track.title` over `track.artist`, with the
+ *   player's own empty state underneath. See the note where it used to be, in
+ *   `SyncOrbit`'s header.
+ *
+ * What is left is the two rosters, and they are the same people twice:
  *
  *   `ParticipantStrip` — the drift chart. One raised card per listener: avatar,
  *   name over rung, a ±400ms deviation plot against a centre axis, the drift
@@ -48,19 +59,16 @@
  * well, not a card over glass, and its `rule` edge is already what gives it
  * shape there.
  *
- * WHICH ACCENT MEANS WHAT HERE, since this file toggles four audio states and
- * three of them could plausibly claim the same colour:
+ * WHICH ACCENT MEANS WHAT HERE. Two of the states this file used to paint
+ * left with the voice card; the rule that governed all of them has not
+ * changed, and the dock is written against the same one:
  *
- *   CORAL is audio FLOWING — your mic is open, someone is on aux, someone is in
- *   sync. It is the direction's "this is happening right now" and nothing else
- *   may take it.
- *   `danger` is audio CUT — you are deafened, or you have muted someone. Both
- *   are subtractive, both are states a person needs to notice and undo, and
- *   neither is "happening".
- *   Neutral (`surface2` + `ink2`) is the resting state — mic off. Muting
- *   yourself is the ordinary, most common way to sit in a room; painting it
- *   `danger` would make the default state read as an error and spend the
- *   destruction colour on nothing.
+ *   CORAL is audio FLOWING — someone is on aux, someone is speaking, someone
+ *   is in sync. It is the direction's "this is happening right now" and
+ *   nothing else may take it.
+ *   `danger` is audio CUT — you have muted someone. It is subtractive, it is a
+ *   state a person needs to notice and undo, and it is not "happening".
+ *   Neutral (`surface2` + `ink2`) is the resting state.
  *
  * BLUE APPEARS EXACTLY ONCE in this file — the retry button on the error
  * notice, which is the only genuine call to action here. Every other control is
@@ -88,18 +96,7 @@
  * needs to change.
  */
 
-import {
-  ChevronRight,
-  HeadphoneOff,
-  Headphones,
-  Mic,
-  MicOff,
-  SlidersHorizontal,
-  Users,
-  Volume2,
-  VolumeX,
-  type LucideIcon,
-} from 'lucide-react-native';
+import { Users, Volume2, VolumeX } from 'lucide-react-native';
 import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   FlatList,
@@ -112,7 +109,7 @@ import {
   type ListRenderItemInfo,
 } from 'react-native';
 
-import { Avatar, CircleIconButton, EmptyState, Skeleton, StatusPill } from '@/components/ui';
+import { Avatar, CircleIconButton, EmptyState, Skeleton } from '@/components/ui';
 import {
   Fonts,
   PointerEvents,
@@ -160,8 +157,6 @@ const TICK_MS = 250;
  * target back to 44 with hitSlop, which costs no layout.
  */
 const MUTE_BUTTON = 36;
-/** The mic / deafen tiles. Design L1294 runs 86px; 76 is what fits two-up here. */
-const VOICE_TILE = 76;
 
 /** The dial and its rings. */
 const DIAL_HEIGHT = 340;
@@ -233,202 +228,6 @@ function readingFor(isMe: boolean, isSynced: boolean, driftMs: number, C: Palett
   };
 }
 
-// -------------------------------------------------------------- your voice
-
-export type VoiceControlsProps = {
-  /** Your microphone is open and the room can hear you. */
-  micOn: boolean;
-  /** You have stopped hearing the room — which also stops it hearing you. */
-  deafened: boolean;
-  onToggleMic: () => void;
-  onToggleDeafen: () => void;
-  /**
-   * The rest of the lobby: voice settings, chat, the game table, screen share.
-   * The row is only drawn when a screen supplies the handler — a chevron that
-   * goes nowhere is worse than no chevron.
-   *
-   * The two tiles above it are the controls people reach for constantly; this
-   * is the door to everything they reach for once. Keeping that door labelled
-   * with what is behind it is why `moreHint` names the rooms rather than saying
-   * "more options".
-   */
-  onOpenMore?: () => void;
-  moreLabel?: string;
-  moreHint?: string;
-};
-
-/**
- * Your own mic and deafen, at the top of the roster.
- *
- * WHY IT IS HERE AND NOT ONLY IN THE LOBBY SHEET. Mic and deafen were reachable
- * before this pass, but only after opening a sheet called "Lobby" and finding a
- * list row inside it — two taps and a guess. They belong beside the people they
- * apply to, which is this list, so this is where they now live. The lobby rows
- * stay where they are; nothing was moved, one copy was added at the surface.
- *
- * DEAFEN IS `danger`, NOT CORAL. Coral in this direction means audio is
- * flowing, and deafened is the exact opposite — the room is cut off. Coral
- * would also put deafen in the same colour as an open mic directly beside it,
- * two tiles that mean opposite things reading identically.
- *
- * IT IS A CARD, AND ITS FILL IS THE OPAQUE ONE. This used to read `surface`
- * with a note saying the translucent fill was safe "because there is nowhere
- * it belongs that needs" the opaque one. That was simply untrue: this card is
- * rendered from the header of both rosters, and `ParticipantStrip` is mounted
- * inside the Session's sync `<Sheet>` — a `BlurView` — where 5.5% white has
- * nothing to sit on at all. There is no prop and no branch, because there is
- * no placement where the translucent fill would be the better answer: over a
- * plain ground `surfaceSolid` resolves to the same colour.
- */
-export const VoiceControls = memo(function VoiceControls({
-  micOn,
-  deafened,
-  onToggleMic,
-  onToggleDeafen,
-  onOpenMore,
-  moreLabel = 'Lobby',
-  moreHint = 'Voice settings, chat, game table, screen share',
-}: VoiceControlsProps) {
-  const C = useColors();
-
-  /*
-    DERIVED, not read straight off `micOn`. Deafening is supposed to force the
-    mic off upstream, but if those two flags ever disagree the honest reading is
-    the quieter one: someone who cannot hear the room is not talking to it.
-  */
-  const live = micOn && !deafened;
-
-  return (
-    <View style={[styles.voice, { backgroundColor: C.surfaceSolid, borderColor: C.rule }, raised(C)]}>
-      <View style={styles.voiceHead}>
-        <Text style={[styles.voiceKicker, { color: C.ink3 }]}>Your voice</Text>
-        <StatusPill
-          label={deafened ? 'Deafened' : live ? 'Mic live' : 'Mic off'}
-          tone={live ? 'liveWash' : 'outline'}
-          dot={live}
-          live={live}
-        />
-      </View>
-
-      <View style={styles.voiceTiles}>
-        <VoiceToggle
-          icon={live ? Mic : MicOff}
-          label={live ? 'Mic live' : 'Mic off'}
-          caption={deafened ? 'Undeafen to talk' : live ? 'Tap to mute yourself' : 'Tap to talk'}
-          tone={live ? 'flowing' : 'idle'}
-          checked={live}
-          accessibilityLabel={live ? 'Mute your microphone' : 'Unmute your microphone'}
-          onPress={onToggleMic}
-        />
-        <VoiceToggle
-          icon={deafened ? HeadphoneOff : Headphones}
-          label={deafened ? 'Deafened' : 'Deafen'}
-          caption={deafened ? 'You hear nobody' : 'Silence the whole room'}
-          tone={deafened ? 'cut' : 'idle'}
-          checked={deafened}
-          accessibilityLabel={deafened ? 'Stop being deafened' : 'Deafen yourself'}
-          onPress={onToggleDeafen}
-        />
-      </View>
-
-      {onOpenMore ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={moreLabel}
-          accessibilityHint={moreHint}
-          onPress={onOpenMore}
-          style={({ pressed }) => [
-            styles.voiceMore,
-            { borderTopColor: C.ruleSoft },
-            pressed ? styles.dim : null,
-          ]}>
-          <SlidersHorizontal size={17} strokeWidth={2} color={C.ink2} />
-          <View style={styles.voiceMoreMeta}>
-            <Text numberOfLines={1} style={[styles.voiceMoreLabel, { color: C.ink }]}>
-              {moreLabel}
-            </Text>
-            <Text numberOfLines={1} style={[styles.voiceMoreHint, { color: C.ink3 }]}>
-              {moreHint}
-            </Text>
-          </View>
-          <ChevronRight size={17} strokeWidth={2} color={C.ink3} />
-        </Pressable>
-      ) : null}
-    </View>
-  );
-});
-
-type VoiceToggleTone =
-  /** Audio is flowing: coral. */
-  | 'flowing'
-  /** Audio is cut: `danger`. */
-  | 'cut'
-  /** The resting state. */
-  | 'idle';
-
-type VoiceToggleProps = {
-  icon: LucideIcon;
-  label: string;
-  caption: string;
-  tone: VoiceToggleTone;
-  checked: boolean;
-  accessibilityLabel: string;
-  onPress: () => void;
-};
-
-/**
- * One tile in the pair. Hand-built rather than an `AuxButton` because a button
- * carries one label and this carries two — the state on top, what a tap does
- * underneath — and because the fill IS the state readout, which a button
- * variant would decide for itself.
- *
- * The idle tile takes `surface2`, not `surface`. That was originally because
- * the card under it was itself 5.5% white and the two composited to an
- * indistinct ~11%; the card is `surfaceSolid` now, and the conclusion survives
- * the change of premise — 9% white over the resolved solid is a defined step
- * up from it, where 5.5% would barely separate from the card at all. Same
- * reason the kit's chips take `chip`/`surface2` inside a card.
- */
-const VoiceToggle = memo(function VoiceToggle({
-  icon: Icon,
-  label,
-  caption,
-  tone,
-  checked,
-  accessibilityLabel,
-  onPress,
-}: VoiceToggleProps) {
-  const C = useColors();
-
-  const skin =
-    tone === 'flowing'
-      ? { bg: C.liveWash, border: C.liveMid, fg: C.liveText }
-      : tone === 'cut'
-        ? { bg: C.dangerWash, border: C.dangerBorder, fg: C.danger }
-        : { bg: C.surface2, border: C.rule, fg: C.ink2 };
-
-  return (
-    <Pressable
-      accessibilityRole="switch"
-      accessibilityLabel={accessibilityLabel}
-      accessibilityState={{ checked }}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.voiceTile,
-        { backgroundColor: skin.bg, borderColor: skin.border },
-        pressed ? styles.dim : null,
-      ]}>
-      <Icon size={20} strokeWidth={2} color={skin.fg} />
-      <Text numberOfLines={1} style={[styles.voiceTileLabel, { color: skin.fg }]}>
-        {label}
-      </Text>
-      <Text numberOfLines={1} style={[styles.voiceTileCaption, { color: C.ink3 }]}>
-        {caption}
-      </Text>
-    </Pressable>
-  );
-});
-
 // ------------------------------------------------------------ drift chart
 
 /**
@@ -456,8 +255,6 @@ type RosterProps = {
    * what it has always been.
    */
   onOpenPerson?: (userId: string) => void;
-  /** Your own mic and deafen, drawn above the roster. See `VoiceControls`. */
-  voice?: VoiceControlsProps;
   contentBottomInset?: number;
 };
 
@@ -481,7 +278,6 @@ export function ParticipantStrip({
   onOpenPerson,
   mutedIds,
   speakingIds,
-  voice,
   contentBottomInset = 0,
 }: ParticipantStripProps) {
   const C = useColors();
@@ -530,7 +326,6 @@ export function ParticipantStrip({
       ListHeaderComponent={
         <>
           {header}
-          {voice ? <VoiceControls {...voice} /> : null}
           <View style={styles.hintRow}>
             {/*
               The sentence tracks what a tap actually does, because the row has
@@ -702,8 +497,8 @@ const DriftRow = memo(function DriftRow({
  *
  * Two rules, and the second is the one that matters: your OWN row never mutes,
  * because muting yourself locally would silence audio you were never hearing in
- * the first place. Your mic is in `VoiceControls` at the top of the list, which
- * is the control that actually exists for you.
+ * the first place. Your mic is the first cell of the session dock, which is the
+ * control that actually exists for you.
  */
 function rowPress(
   userId: string,
@@ -756,8 +551,8 @@ const MemberMuteButton = memo(function MemberMuteButton({
 
   /*
     Your own row keeps the SPACE but loses the control. Muting yourself locally
-    would silence audio you were never hearing, and your mic is in
-    `VoiceControls` at the top of the list — but drop the 36px and your drift
+    would silence audio you were never hearing, and your mic is the first cell
+    of the session dock — but drop the 36px and your drift
     readout stops lining up with everyone else's, which on the one screen whose
     job is comparing numbers is worse than a blank.
   */
@@ -889,7 +684,6 @@ export function SyncOrbit({
   speakingIds,
   onSelectPerson,
   onOpenPerson,
-  voice,
   contentBottomInset = 0,
 }: SyncOrbitProps) {
   const C = useColors();
@@ -945,7 +739,6 @@ export function SyncOrbit({
       ListHeaderComponent={
         <>
           {header}
-          {voice ? <VoiceControls {...voice} /> : null}
 
           <View style={styles.hintRow}>
             <Text style={[styles.hint, { color: C.ink3 }]}>Distance from centre is drift</Text>
@@ -1032,14 +825,31 @@ export function SyncOrbit({
             </View>
           </View>
 
-          <View style={styles.orbitTitleBlock}>
-            <Text numberOfLines={2} style={[styles.orbitTitle, { color: C.ink }]}>
-              {track?.title ?? 'Nothing playing'}
-            </Text>
-            <Text numberOfLines={1} style={[styles.orbitArtist, { color: C.ink2 }]}>
-              {track?.artist ?? 'Queue a track to start the Session'}
-            </Text>
-          </View>
+          {/*
+            THE TITLE BLOCK THAT USED TO SIT HERE IS GONE. It drew
+            `track.title` over `track.artist`, falling back to "Nothing
+            playing" / "Queue a track to start the Session" — the player's
+            empty state, rendered underneath the roster, on the tab whose whole
+            job is WHO IS HERE. Three things were wrong with it and only the
+            third is about taste:
+
+              · It was a second now-playing readout on a screen that already
+                has one. `NowPlaying` is a FIXED band above the stage switch
+                (see the Session's file header, deviation 1) and does not swap
+                out when this tab is selected, so the title was on screen twice
+                whenever anything was playing.
+              · Its empty face made the Listeners tab announce that the queue
+                was empty. A person tapping "Listeners · 6" is asking about six
+                people; answering with "Queue a track" is answering a question
+                nobody asked, in the space where the answer should have been.
+              · It pushed the roster — the actual content — a further 60px down
+                a list that already opens with a 340px dial.
+
+            `track` is still a prop and still used: the dial's core carries its
+            initial and the Session's clock, which is not a now-playing readout
+            but the REFERENCE POINT every listener on the dial is plotted
+            against. Remove that and the orbit is measuring nothing.
+          */}
         </>
       }
       ListEmptyComponent={
@@ -1268,74 +1078,6 @@ const styles = StyleSheet.create({
     letterSpacing: tracking(10, 0.09),
   },
 
-  // ----------------------------------------------------------- your voice
-  voice: {
-    borderWidth: Rule.hair,
-    borderRadius: Radii.xl,
-    padding: Space.md,
-    gap: Space.md,
-    marginBottom: Space.xs,
-  },
-  voiceHead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Space.sm,
-    paddingHorizontal: Space.xs,
-  },
-  voiceKicker: {
-    ...Type.label(10),
-    letterSpacing: tracking(10, 0.11),
-  },
-  voiceTiles: {
-    flexDirection: 'row',
-    gap: Space.sm + 1,
-  },
-  voiceTile: {
-    flex: 1,
-    minHeight: VOICE_TILE,
-    justifyContent: 'center',
-    gap: Space.xs + 1,
-    paddingHorizontal: Space.md,
-    paddingVertical: Space.sm,
-    borderWidth: Rule.hair,
-    borderRadius: Radii.lg,
-  },
-  voiceTileLabel: {
-    ...Type.heading(11),
-    letterSpacing: tracking(11, 0.05),
-    textTransform: 'uppercase',
-  },
-  voiceTileCaption: {
-    ...Type.body(10),
-    lineHeight: 13,
-  },
-  voiceMore: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space.md,
-    minHeight: TOUCH_TARGET,
-    /** The card's own padding is the gutter; this row only owes the rule above it. */
-    marginHorizontal: -Space.md,
-    paddingHorizontal: Space.md + Space.xs,
-    paddingTop: Space.sm,
-    marginBottom: -Space.xs,
-    borderTopWidth: Rule.hair,
-  },
-  voiceMoreMeta: {
-    flex: 1,
-    minWidth: 0,
-    gap: 1,
-  },
-  voiceMoreLabel: {
-    fontFamily: Fonts.semibold,
-    fontSize: 14,
-    letterSpacing: tracking(14, -0.005),
-  },
-  voiceMoreHint: {
-    ...Type.body(11),
-  },
-
   // ---------------------------------------------------------- drift chart
   row: {
     flexDirection: 'row',
@@ -1488,19 +1230,6 @@ const styles = StyleSheet.create({
     borderRadius: 4.5,
   },
 
-  orbitTitleBlock: {
-    paddingTop: Space.xs,
-    paddingBottom: Space.sm,
-  },
-  orbitTitle: {
-    ...Type.display(20),
-    lineHeight: 22,
-    letterSpacing: tracking(20, -0.025),
-  },
-  orbitArtist: {
-    ...Type.body(13),
-    marginTop: 3,
-  },
   orbitRowMeta: {
     flex: 1,
     minWidth: 0,

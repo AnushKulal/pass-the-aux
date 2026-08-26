@@ -47,13 +47,42 @@
  * over a blur has nothing to sit on and loses its edge entirely. On a plain
  * ground `surfaceSolid` is the resolved composite of the same colour, so this
  * costs nothing anywhere else.
+ *
+ * TWO CONTROLS NOW, AND THE SECOND ONE IS WHY THE USER WAS STILL ANGRY.
+ *
+ * `ChangeLobbyPanel` above is the FULL answer: three rows, each with the
+ * promise its mode makes and a footnote about who may switch. Reaching it cost
+ * a tap on a bar, a tap on a tile, and a read — and the user's complaint was
+ * never that the panel was wrong, it was "why is it so hard", which is a
+ * complaint about DISTANCE, not about content.
+ *
+ * `LobbyModeSwitch` is the same three modes as a segmented control, sized to
+ * sit at the top of the session dock's expanded panel. One swipe on the dock
+ * and the mode switch is already on screen, lit, with the current mode
+ * showing. The full panel stays exactly where it is for the person who wants
+ * to know what "Movie night" actually promises before they drag six listeners
+ * into it.
+ *
+ * IT IS `SheetTabs`, NOT A HAND-BUILT ROW. This is the app's fourth selection
+ * control and the argument in the header above — three selection controls in
+ * two accents is drift — applies twice as hard to a fifth implementation of
+ * the same pill. `SheetTabs` already paints the selected segment in the blue
+ * gradient, already announces `tablist`/`tab` with a selected state, and
+ * already cross-fades rather than snapping. Reusing it is the whole reason the
+ * accent argument above stays true without being re-litigated here.
+ *
+ * A PASSENGER'S TAP IS NOT SWALLOWED SILENTLY. `SheetTabs` has no disabled
+ * state and is not getting one for this: the tap runs `onChange`, the owner's
+ * guard refuses it, and a toast says why. The segment does not move, which is
+ * the honest readout — nothing changed. A greyed-out control would have said
+ * the same thing with less information and one more prop.
  */
 
 import { Film, MonitorUp, Music4, type LucideIcon } from 'lucide-react-native';
-import { memo } from 'react';
+import { memo, useCallback, useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { StatusPill } from '@/components/ui';
+import { SheetTabs, StatusPill, type SheetTab } from '@/components/ui';
 import { Radii, Rule, Space, TOUCH_TARGET, Type, raised, tracking } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
@@ -149,6 +178,53 @@ export const ChangeLobbyPanel = memo(function ChangeLobbyPanel({
   );
 });
 
+// ------------------------------------------------------------ mode switch
+
+export type LobbyModeSwitchProps = {
+  mode: LobbyMode;
+  /** Only the person on aux may switch. See the header for why it is not disabled. */
+  canChange: boolean;
+  onChange: (mode: LobbyMode) => void;
+};
+
+/**
+ * The three modes as one segmented control, for the top of the session dock.
+ *
+ * The caption underneath changes with WHO IS READING IT rather than with the
+ * mode, because the two sentences answer the two different questions a person
+ * has in front of this control. A host is about to move six people and wants
+ * to know what that costs them — nothing, the queue is kept. A passenger is
+ * about to tap a control that will not move and deserves to know that before
+ * they tap it rather than in a toast afterwards.
+ */
+export const LobbyModeSwitch = memo(function LobbyModeSwitch({
+  mode,
+  canChange,
+  onChange,
+}: LobbyModeSwitchProps) {
+  const C = useColors();
+
+  // `SheetTabs` takes a mutable array, and rebuilding it every render would
+  // re-render all three segments on every drift tick of the screen above.
+  const tabs = useMemo<SheetTab[]>(
+    () => LOBBY_MODES.map((entry) => ({ key: entry.id, label: entry.name })),
+    []
+  );
+
+  const handleChange = useCallback((key: string) => onChange(key as LobbyMode), [onChange]);
+
+  return (
+    <View style={styles.switch}>
+      <SheetTabs tabs={tabs} active={mode} onChange={handleChange} variant="segmented" />
+      <Text numberOfLines={1} style={[styles.switchNote, { color: C.ink3 }]}>
+        {canChange
+          ? 'EVERYONE COMES WITH YOU · THE QUEUE IS KEPT'
+          : 'ONLY THE PERSON ON AUX CAN CHANGE THE LOBBY'}
+      </Text>
+    </View>
+  );
+});
+
 type ModeRowProps = {
   def: ModeDef;
   current: boolean;
@@ -206,6 +282,20 @@ const ModeRow = memo(function ModeRow({ def, current, canChange, onChange }: Mod
 });
 
 const styles = StyleSheet.create({
+  switch: {
+    gap: Space.sm,
+  },
+  /**
+   * A tracked caption, not a sentence. It sits directly under a 54px control
+   * inside a dock panel that is already dense — body copy there would read as
+   * a paragraph the control had grown, where 9px tracked reads as a label on
+   * the thing above it.
+   */
+  switchNote: {
+    ...Type.label(9),
+    letterSpacing: tracking(9, 0.1),
+    paddingHorizontal: Space.xs,
+  },
   list: {
     gap: Space.sm,
   },

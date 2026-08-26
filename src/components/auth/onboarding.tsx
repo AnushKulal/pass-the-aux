@@ -7,16 +7,31 @@
  * This is that set, once.
  *
  * Built from design/nocturne/aux-nocturne.dc.html: the field card (L122-125,
- * L161), the inset input pair (L193-196), the segmented mode switch (L117-120)
- * and the gradient CTA with its disabled twin (L127, L223-224). It is
- * deliberately NOT in '@/components/ui': every piece here is shaped by the
- * signed-out flow (a 54px gradient pill, a kicker that lives inside the field,
- * a tick that only ever means "done"), and the kit already has
- * general-purpose answers for screens that want one.
+ * L161), the inset input pair (L193-196) and the gradient CTA with its disabled
+ * twin (L127, L223-224). It is deliberately NOT in '@/components/ui': every
+ * piece here is shaped by the signed-out flow (a 54px gradient pill, a kicker
+ * that lives inside the field, a tick that only ever means "done"), and the kit
+ * already has general-purpose answers for screens that want one.
+ *
+ * TWO CHANGES, BOTH REVERSING EARLIER DECISIONS IN THIS FILE:
+ *
+ * 1. `OnboardingSwitch` IS GONE. It existed for exactly one caller — the
+ *    Sign in / Create account segmented control on `(auth)/sign-in` — and its
+ *    own doc argued that stating both modes up front was better than hiding
+ *    signup behind a link. The user has ruled otherwise: signing in and
+ *    creating an account are now two screens, because they are two different
+ *    things and one of them must never run the profile setup the other does.
+ *    A segmented control that flips a form between those two is precisely the
+ *    shape that made them look interchangeable. With the caller gone the
+ *    component is dead code, and dead code in a shared kit is an invitation to
+ *    put the switch back.
+ * 2. A PASSWORD FIELD REVEALS ITSELF. `OnboardingField` grows an eye toggle
+ *    whenever `secureTextEntry` is set, so every screen with a password gets
+ *    it without opting in — see the field below.
  */
 
 import { LinearGradient } from 'expo-linear-gradient';
-import { Check } from 'lucide-react-native';
+import { Check, Eye, EyeOff } from 'lucide-react-native';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -64,8 +79,21 @@ const INSET_HEIGHT = 42;
 /** The bio well — design L196, `height:56`. */
 const INSET_AREA_HEIGHT = 56;
 const CTA_HEIGHT = 54;
-/** The mode switch's segments — design L118, `min-height:46`. */
-const SEGMENT_HEIGHT = 46;
+
+/**
+ * The password reveal button.
+ *
+ * The disc is 28 so the card variant's row stays exactly `CARD_INPUT` tall —
+ * a taller button would make the password card 4px deeper than the email card
+ * sitting 10px above it, which is visible in a stack of two. `hitSlop` takes
+ * the TARGET to 44 without moving the layout, the same trick the claim screen's
+ * back tile uses.
+ */
+const EYE = 28;
+const EYE_HIT = (TOUCH_TARGET - EYE) / 2;
+const EYE_GLYPH = 18;
+/** The inset variant has room for the real thing, so it gets a real 44 box. */
+const EYE_INSET = TOUCH_TARGET;
 
 /**
  * The screen entrance.
@@ -207,6 +235,14 @@ export type OnboardingFieldProps = {
   placeholder?: string;
   error?: string;
   variant?: OnboardingFieldVariant;
+  /**
+   * Masks the value AND puts an eye toggle in the field.
+   *
+   * The toggle is not opt-in. Every password in this app is typed on a phone
+   * keyboard with no visible feedback, and a field you cannot check is a field
+   * people get wrong twice; making it a second prop would just mean some
+   * screens forget it.
+   */
   secureTextEntry?: boolean;
   autoCapitalize?: 'none' | 'sentences';
   autoComplete?: string;
@@ -247,6 +283,16 @@ export function OnboardingField({
    * now only about the `inset` variant.
    */
   const [focused, setFocused] = useState(false);
+
+  /**
+   * Whether the password is currently legible.
+   *
+   * Local to the field and reset on unmount, which is the right lifetime: a
+   * revealed password is a deliberate act for the next few seconds, never a
+   * setting to remember.
+   */
+  const [revealed, setRevealed] = useState(false);
+  const masked = secureTextEntry && !revealed;
 
   /**
    * Focus and failure must not paint the same edge.
@@ -309,8 +355,15 @@ export function OnboardingField({
       onChangeText={onChangeText}
       placeholder={placeholder}
       placeholderTextColor={C.ink3}
-      secureTextEntry={secureTextEntry}
+      secureTextEntry={masked}
       autoCapitalize={autoCapitalize}
+      /*
+        Keyed off the PROP, not off `masked`, and that is load-bearing rather
+        than tidy: Android's keyboard reattaches when `secureTextEntry` flips,
+        and if autocorrect switches on at the same moment it can swallow the
+        text already in the field. A password never wants autocorrect anyway,
+        revealed or not.
+      */
       autoCorrect={!secureTextEntry}
       keyboardType={keyboardType}
       maxLength={maxLength}
@@ -327,15 +380,60 @@ export function OnboardingField({
       selectionColor={C.pill}
       style={
         card
-          ? [styles.cardInput, { color: C.ink }, multiline ? styles.cardArea : null]
+          ? [
+              styles.cardInput,
+              { color: C.ink },
+              multiline ? styles.cardArea : null,
+              // Shares the row with the eye, so it has to be allowed to shrink.
+              secureTextEntry ? styles.cardInputShared : null,
+            ]
           : [
               multiline ? styles.insetArea : styles.inset,
               { backgroundColor: C.bgRecessed, color: C.ink, borderColor: edge },
+              // The eye floats over the right end of the well; without the
+              // reserved gutter a long password types straight under it.
+              secureTextEntry ? styles.insetShared : null,
               ring,
             ]
       }
     />
   );
+
+  /**
+   * Show / hide.
+   *
+   * A REAL BUTTON, not a glyph with a tap handler: it announces itself as a
+   * button, its name changes with what pressing it will do, and it reports the
+   * current state so a screen reader is not left guessing. It also does not
+   * submit anything — the only submit path in this flow is `PrimaryCta`, and
+   * `onSubmitEditing` is not wired on these inputs.
+   *
+   * The card variant nests this inside the card's own focus-the-input
+   * Pressable, and the two platforms resolve that differently on purpose. On
+   * native the inner control captures the touch and the outer never fires,
+   * which is right — the keyboard stays up because both screens set
+   * `keyboardShouldPersistTaps="handled"`. On web the click also bubbles to the
+   * card, whose handler puts the caret back in the input after the button has
+   * taken DOM focus. Either way the peek does not cost you your place.
+   */
+  const reveal = secureTextEntry ? (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={revealed ? 'Hide password' : 'Show password'}
+      accessibilityState={{ selected: revealed }}
+      hitSlop={card ? EYE_HIT : 0}
+      onPress={() => setRevealed((current) => !current)}
+      style={({ pressed }) => [
+        card ? styles.eye : styles.eyeInset,
+        pressed ? styles.held : null,
+      ]}>
+      {revealed ? (
+        <EyeOff size={EYE_GLYPH} strokeWidth={2} color={C.ink2} />
+      ) : (
+        <Eye size={EYE_GLYPH} strokeWidth={2} color={C.ink3} />
+      )}
+    </Pressable>
+  ) : null;
 
   const message = error ? (
     // `danger`, matching the edge and the ring above and the kit's `TextField`.
@@ -356,7 +454,14 @@ export function OnboardingField({
           onPress={() => input.current?.focus()}
           style={[styles.card, { backgroundColor: C.surface, borderColor: edge }, ring]}>
           {label ? <Text style={[styles.cardKicker, { color: C.ink3 }]}>{label}</Text> : null}
-          {field}
+          {reveal ? (
+            <View style={styles.cardRow}>
+              {field}
+              {reveal}
+            </View>
+          ) : (
+            field
+          )}
         </Pressable>
         {message}
       </View>
@@ -366,7 +471,14 @@ export function OnboardingField({
   return (
     <View>
       {label ? <Text style={[styles.kicker, { color: C.ink3 }]}>{label}</Text> : null}
-      {field}
+      {reveal ? (
+        <View>
+          {field}
+          {reveal}
+        </View>
+      ) : (
+        field
+      )}
       {message}
     </View>
   );
@@ -409,82 +521,6 @@ export function Done({ size = 24, ring = false }: { size?: number; ring?: boolea
         },
       ]}>
       <Check size={Math.round(size * 0.5)} strokeWidth={3} color={C.onLive} />
-    </View>
-  );
-}
-
-/* ------------------------------------------------------------ mode switch */
-
-export type OnboardingSwitchOption<T extends string> = { value: T; label: string };
-
-export type OnboardingSwitchProps<T extends string> = {
-  value: T;
-  options: readonly OnboardingSwitchOption<T>[];
-  onChange: (next: T) => void;
-  disabled?: boolean;
-  /** Names the group for a screen reader — "Sign in or create an account". */
-  accessibilityLabel?: string;
-};
-
-/**
- * The segmented control — design L117-120.
- *
- * Lives here rather than in '@/components/ui' for one concrete reason: the
- * selected segment is the SAME gradient-over-glow recipe as `PrimaryCta` below,
- * only at 46px instead of 54 with a correspondingly tighter glow (`0 6px 18px`
- * against `0 10px 26px`). Keeping the two in one file is what stops those two
- * numbers from drifting apart.
- *
- * Blue on the selected segment is the accent rule, not decoration: a segment is
- * a thing you pick, and picking is an action.
- */
-export function OnboardingSwitch<T extends string>({
-  value,
-  options,
-  onChange,
-  disabled = false,
-  accessibilityLabel,
-}: OnboardingSwitchProps<T>) {
-  const C = useColors();
-
-  return (
-    <View
-      accessibilityRole="tablist"
-      accessibilityLabel={accessibilityLabel}
-      style={[styles.switch, { backgroundColor: C.surface, borderColor: C.rule }]}>
-      {options.map((option) => {
-        const selected = option.value === value;
-
-        return (
-          <Pressable
-            key={option.value}
-            accessibilityRole="tab"
-            accessibilityLabel={option.label}
-            accessibilityState={{ selected, disabled }}
-            disabled={disabled}
-            onPress={() => onChange(option.value)}
-            style={[
-              styles.segment,
-              selected
-                ? { boxShadow: [{ offsetX: 0, offsetY: 6, blurRadius: 18, color: C.glow }] }
-                : null,
-              disabled ? styles.blocked : null,
-            ]}>
-            {selected ? (
-              <LinearGradient
-                colors={[C.priTint, C.pill]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 0, y: 1 }}
-                style={[StyleSheet.absoluteFill, styles.segmentFill]}
-              />
-            ) : null}
-
-            <Text style={[styles.segmentLabel, { color: selected ? C.pillInk : C.ink2 }]}>
-              {option.label}
-            </Text>
-          </Pressable>
-        );
-      })}
     </View>
   );
 }
@@ -587,6 +623,57 @@ export function PrimaryCta({
   );
 }
 
+export type SecondaryCtaProps = {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+  /** When the visible label is shorter than the action. */
+  accessibilityLabel?: string;
+};
+
+/**
+ * The other real action on the screen.
+ *
+ * Sign in has two things a person might have come to do, and only one of them
+ * can wear the gradient — "one filled thing per screen" is what makes the
+ * filled thing mean anything. So this is the same 54px pill drawn as a surface
+ * with a hairline, and the only accent it spends is on its LABEL.
+ *
+ * That label is BLUE, and that is the accent rule read exactly: creating an
+ * account is the canonical blue act. It is deliberately not a text link either
+ * — the previous sign-in screen buried "Create account" in one, which made the
+ * second of the two things people come here to do the quietest object on the
+ * page. A bordered pill is quieter than the gradient and louder than prose,
+ * which is precisely the rank it should hold.
+ */
+export function SecondaryCta({
+  label,
+  onPress,
+  disabled = false,
+  accessibilityLabel,
+}: SecondaryCtaProps) {
+  const C = useColors();
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.cta,
+        styles.ctaFlat,
+        { backgroundColor: pressed ? C.surface2 : C.surface, borderColor: C.rule },
+        disabled ? styles.blocked : null,
+      ]}>
+      <Text numberOfLines={1} style={[styles.ctaLabel, { color: C.pill }]}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 export type SecondaryLinkProps = {
   label: string;
   onPress: () => void;
@@ -655,6 +742,18 @@ const styles = StyleSheet.create({
     height: INSET_AREA_HEIGHT,
     lineHeight: 20,
   },
+  /** The input and the eye, sharing the card's one content row. */
+  cardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.sm,
+  },
+  cardInputShared: {
+    flex: 1,
+    // Without this a long value refuses to shrink and pushes the eye out past
+    // the card's right edge, where the card's own radius clips it.
+    minWidth: 0,
+  },
 
   inset: {
     height: INSET_HEIGHT,
@@ -675,9 +774,30 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 19,
   },
+  insetShared: {
+    paddingRight: EYE_INSET,
+  },
   error: {
     ...Type.body(12.5),
     marginTop: Space.sm,
+  },
+
+  eye: {
+    width: EYE,
+    height: EYE,
+    flexShrink: 0,
+    borderRadius: Radii.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  eyeInset: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: EYE_INSET,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   done: {
@@ -685,34 +805,6 @@ const styles = StyleSheet.create({
     borderRadius: Radii.pill,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-
-  switch: {
-    flexDirection: 'row',
-    gap: 6,
-    padding: 5,
-    borderRadius: Radii.pill,
-    borderWidth: Rule.hair,
-  },
-  segment: {
-    flex: 1,
-    minHeight: SEGMENT_HEIGHT,
-    borderRadius: Radii.pill,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  /*
-    `absoluteFill` carries no radius of its own, so without this the gradient
-    paints a square behind a round segment and the corners of the capsule fill
-    in with blue.
-  */
-  segmentFill: {
-    borderRadius: Radii.pill,
-  },
-  segmentLabel: {
-    fontFamily: Fonts.extrabold,
-    fontSize: 12,
-    letterSpacing: tracking(12, 0.04),
   },
 
   cta: {

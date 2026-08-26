@@ -80,9 +80,19 @@ export default function IntroScreen() {
     };
   }, []);
 
-  const leave = useCallback(() => {
+  /**
+   * Mark the intro seen and go somewhere, and WHERE now matters.
+   *
+   * Both buttons on this screen used to call one handler that went to sign-in,
+   * which was harmless while sign-in also carried a Create account tab. It is a
+   * bug now that creating an account is its own route: this screen only ever
+   * renders on a FIRST LAUNCH, so "Get started" was sending brand-new users to
+   * a form for an account they do not have, and the door out of that — the
+   * secondary link — went to exactly the same place.
+   */
+  const leave = useCallback((to: '/(auth)/create-account' | '/(auth)/sign-in') => {
     void AsyncStorage.setItem(SEEN_KEY, '1').catch(() => undefined);
-    router.replace('/(auth)/sign-in');
+    router.replace(to);
   }, []);
 
   /**
@@ -149,8 +159,11 @@ export default function IntroScreen() {
         </Animated.View>
       </View>
 
-      <PrimaryCta label="Get started" onPress={leave} />
-      <SecondaryLink label="I already have an account" onPress={leave} />
+      <PrimaryCta label="Get started" onPress={() => leave('/(auth)/create-account')} />
+      <SecondaryLink
+        label="I already have an account"
+        onPress={() => leave('/(auth)/sign-in')}
+      />
     </SafeAreaView>
   );
 }

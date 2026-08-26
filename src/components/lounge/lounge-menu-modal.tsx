@@ -13,6 +13,22 @@
  * silently never appear and the action would either fire unguarded or not at
  * all. One Modal behaves identically on all three platforms.
  *
+ * THAT ARGUMENT HAS NOW BEEN GENERALISED into `ConfirmDialog` in
+ * '@/components/ui', which is the app's themed replacement for `Alert.alert`
+ * everywhere else — the sign-out on the profile tab was still painting the
+ * stock Android box, which is what the user reported. This sheet deliberately
+ * does NOT adopt it, and the reason is structural rather than stylistic: the
+ * sheet is itself a Modal, so a `ConfirmDialog` opened from here would be a
+ * Modal inside a Modal, stacking a second scrim over the first and darkening
+ * the page twice for one question. Swapping the sheet's own body is the
+ * cheaper, steadier move and it is already drawn in this direction's chrome.
+ *
+ * What DID change is that the two now speak with one voice: same order (the
+ * `danger` action, then a quiet ghost Cancel under it), same shape of copy (a
+ * question, then one line saying what actually happens), and the same
+ * assertive live region on that copy — a sheet that silently swaps its body
+ * for a confirmation announces nothing at all to a screen reader otherwise.
+ *
  * THE SHEET FLOATS, which is the shape change from the direction this file was
  * written for. It used to be a slab welded to the bottom of the frame: square
  * corners, full bleed, a 2px rule along its top edge and a flat `bg` fill.
@@ -249,14 +265,27 @@ export function LoungeMenuModal({
 
             {confirming ? (
               <View style={styles.body}>
-                <Text style={[styles.confirmTitle, { color: C.ink }]}>
-                  {confirming === 'delete' ? 'Delete this lounge?' : 'Leave this lounge?'}
-                </Text>
-                <Text style={[styles.note, { color: C.ink2 }]}>
-                  {confirming === 'delete'
-                    ? 'This cannot be undone and the invite code is retired.'
-                    : 'You will lose access to its Sessions and chat. You can rejoin later with an invite code.'}
-                </Text>
+                {/*
+                  The question is a live region, matching `ConfirmDialog`.
+                  Swapping the sheet's body is invisible to a screen reader —
+                  focus stays wherever it was, on a button that has just been
+                  unmounted — so without this the confirmation is announced by
+                  nothing. Scoped to the COPY rather than the whole branch so
+                  the loading spinner appearing on the danger button below does
+                  not re-read the entire confirmation.
+                */}
+                <View accessibilityRole="alert" accessibilityLiveRegion="assertive">
+                  <Text
+                    accessibilityRole="header"
+                    style={[styles.confirmTitle, { color: C.ink }]}>
+                    {confirming === 'delete' ? 'Delete this lounge?' : 'Leave this lounge?'}
+                  </Text>
+                  <Text style={[styles.note, styles.confirmNote, { color: C.ink2 }]}>
+                    {confirming === 'delete'
+                      ? 'This cannot be undone and the invite code is retired.'
+                      : 'You will lose access to its Sessions and chat. You can rejoin later with an invite code.'}
+                  </Text>
+                </View>
 
                 <AuxButton
                   label={confirming === 'delete' ? 'Delete this lounge' : 'Leave this lounge'}
@@ -488,6 +517,14 @@ const styles = StyleSheet.create({
   },
   note: {
     ...Type.body(12),
+  },
+  /*
+    The body's own `gap` used to space the confirm title off its note. Wrapping
+    the two in the live region took them out of that flow, so the same 16px is
+    restated here — the layout is unchanged, only its parent is.
+  */
+  confirmNote: {
+    marginTop: Space.lg,
   },
   footnote: {
     ...Type.body(11),

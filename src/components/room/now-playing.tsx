@@ -1,39 +1,70 @@
 /**
- * The Session stage: the artwork, the title, the scrubber and the sync readout.
+ * The Session's track card: the artwork, the title, the source chip and the
+ * scrubber. Plus the sync line that lives underneath it.
  *
  * Built from design/nocturne/aux-nocturne.dc.html, screen `isSession`: the hero
- * card at L918-L950 (82px art well, 21px title, provider chip, the 6px coral
- * scrubber with its thumb) and the sync row at L952-L961 (the pulsing dot, the
- * rung word, the drift figure and the "Hard seek" pill).
+ * card at L918-L935 (82px art well, 21px title, provider chip, the 6px coral
+ * scrubber with its thumb over the two clocks) and the sync row at L952-L961
+ * (the pulsing dot, the rung word, the drift figure, a (?) affordance and the
+ * "Hard seek" pill).
  *
- * THE ACCENT SPLIT, DRAWN HERE, AND THIS FILE USED TO SHIP BOTH ANSWERS AT ONCE:
- *   CORAL is STATE — the scrubber's fill, the sync dot, the rung word and the
- *   drift figure, because playing and being in sync are true of the world right
- *   now;
- *   BLUE is every ACTION on this screen without exception — "Add a track" on
- *   the empty face, "Hard seek" in the sync row, "Retry" on the failure card,
- *   and the 66px play circle in 'transport-controls.tsx';
+ * ------------------------------------------------------- what moved, and why
+ *
+ * TWO THINGS LEFT THIS FILE IN THIS PASS, both because the user's own session
+ * screenshot puts them somewhere this component cannot reach.
+ *
+ * 1. THE VIDEO MODULE, and with it the `media` slot. This component used to
+ *    mount the YouTube player host as the first child of its own root, which
+ *    made `NowPlaying` un-unmountable: the Session had to keep the whole card
+ *    on screen at all times or the music stopped, and that is exactly why the
+ *    stage/switch order was upside down — the card ABOVE the toggle instead of
+ *    inside it. The host now has a permanent address on the Session screen
+ *    itself, one fixed position in that tree for the life of the route, and
+ *    this card is free to be ordinary tab content that mounts and unmounts.
+ *    `videoOnStage` is all that survives of the arrangement: when the video
+ *    module is up there, the 82px artwork tile is a second, smaller copy of the
+ *    same picture, so the card drops it.
+ *
+ * 2. THE SYNC ROW, now exported as `SessionSyncRow`. The artboard draws it as a
+ *    SIBLING of the card — L952 opens a new block after the card closes at
+ *    L950 — and the screenshot puts it below the transport and below the aux
+ *    hand-off, neither of which this component draws. Rendering it from inside
+ *    `NowPlaying` forced it to sit directly under the scrubber, which is the
+ *    one place it must not be. The screen composes the order now.
+ *
+ * THE CARD NO LONGER CARRIES ITS OWN GUTTER. It used to set
+ * `paddingHorizontal: Space.lg` while the Session screen wrapped it in a band
+ * that set the same 16 again — 32px of inset on a 16px screen, which showed as
+ * a card noticeably narrower than the transport row beneath it. The screen owns
+ * the gutter; this file owns the card.
+ *
+ * -------------------------------------------------------------- the accents
+ *
+ *   CORAL is STATE and LIVE-ENTRY — the scrubber's fill, the sync dot, the rung
+ *   word, the drift figure, and climbing back onto the live position.
+ *   BLUE is CREATE and TRANSPORT — "Add a track" on the empty face, "Retry" on
+ *   the failure card, and the play circle in 'transport-controls.tsx'.
  *   PINK-RED (`danger`) is FAILURE, which is the playback-error card and
  *   nothing else here.
- * The sync row used to draw a CORAL button while the error card forty lines
- * below it drew a BLUE one, so one component argued both sides. The rule is
- * that on a live object the BADGE is coral and the BUTTON is blue: the sync row
- * kept its coral readout and lost its coral button.
+ *
+ * `Hard seek` USED TO BE BLUE, AND A LONG COMMENT HERE DEFENDED THAT. It read:
+ * "re-anchoring is a thing you DO, not a thing that is true... on a live object
+ * the badge is coral and the button is blue". That ruling is reversed. Entering
+ * something that is live is the one action the state colour owns — the same
+ * correction that made JOIN and SOLO coral on the home feed — and hard-seeking
+ * is nothing but climbing back into the live position everyone else is already
+ * at. The artboard agrees and always did: L961 draws the pill `--aux-live-w`
+ * behind `--aux-live-m` with `--aux-live-t` on top, which is
+ * `variant="liveOutline"` exactly. `Add a track` and `Retry` stay blue, because
+ * neither is entering anything; one creates and one recovers.
+ *
  * The card's corner bleed is `glow="live"` for the same reason, and it is gated
  * on a track EXISTING rather than on `isPlaying`: `GlassCard` changes its own
  * tree shape when `glow` toggles, so a bleed that followed play/pause would
  * remount the artwork `Image` on every tap.
  *
- * Four things are load-bearing:
+ * --------------------------------------------------------- still load-bearing
  *
- *  - The `media` slot is rendered unconditionally, in a FIXED tree position, as
- *    the first child of the root in EVERY branch. It holds the YouTube player
- *    host, and unmounting that mid-song stops the audio for this listener. It
- *    lives OUTSIDE the card on purpose — the card is the one thing here whose
- *    structure changes between states, and the WebView must not be downstream
- *    of that. When YouTube is the active provider the slot becomes a 16:9 stage
- *    (the design's own video layout, L1010); otherwise it parks at 1x1 and
- *    keeps playing.
  *  - The playhead is driven by a local 250ms ticker over
  *    `expectedPositionMs(timeline)`, never by asking the adapter. On Spotify,
  *    `getPosition()` is a rate-limited HTTP call.
@@ -56,12 +87,12 @@
  * nothing on the deck fell through to the populated branch and drew a full
  * scrubber reading `0:00 / 0:00` plus a `LOCKED +0ms` sync readout — a hero
  * that looked like it was playing silence. `empty` is now its own face: no
- * scrubber, no clocks, no sync row, and a CTA where the transport readout was.
+ * scrubber, no clocks, and the screen withholds the sync row to match.
  */
 
 import { Image } from 'expo-image';
-import { Disc3, MoreHorizontal, Plus, RotateCw } from 'lucide-react-native';
-import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Disc3, HelpCircle, MoreHorizontal, Plus, RotateCw } from 'lucide-react-native';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
   Pressable,
   StyleSheet,
@@ -90,6 +121,7 @@ import {
   Radii,
   Rule,
   Space,
+  TOUCH_TARGET,
   Type,
   pressedSoft,
   tracking,
@@ -130,15 +162,16 @@ const BAR = 6;
 const SCRUB_SLOP = { top: 15, bottom: 15, left: 0, right: 0 } as const;
 
 export type NowPlayingProps = {
-  /** The YouTube player host. Always mounted, never conditionally rendered. */
-  media: ReactNode;
-  /** True when the active provider is YouTube and the stage should show video. */
-  showMedia: boolean;
+  /**
+   * The video module is on stage above this card, so the artwork tile would be
+   * a second copy of the same picture at a tenth the size. The player host
+   * itself is no longer this component's to mount — see the file header.
+   */
+  videoOnStage: boolean;
   track: ResolvedTrack | null;
   timeline: RoomTimeline | null;
   isLoading: boolean;
-  driftMs: number;
-  /** Re-measures the clock offset and seeks back onto the room's position. */
+  /** Recovers from a playback failure. The sync row has its own copy. */
   onResync: () => void;
   /** Opens the lobby controls. */
   onMore: () => void;
@@ -147,20 +180,17 @@ export type NowPlayingProps = {
   /**
    * Opens the add-track flow from the EMPTY face. Optional so the screen keeps
    * compiling untouched — without it the empty card still reads as empty, it
-   * just cannot offer the way out from here. Wire it and the separate
-   * `QueuePrompt` on the Session screen becomes redundant.
+   * just cannot offer the way out from here.
    */
   onAddTrack?: () => void;
   errorMessage?: string | null;
 };
 
 export function NowPlaying({
-  media,
-  showMedia,
+  videoOnStage,
   track,
   timeline,
   isLoading,
-  driftMs,
   onResync,
   onMore,
   onSeek,
@@ -201,9 +231,6 @@ export function NowPlaying({
   const positionMs = durationMs > 0 ? Math.min(rawPosition, durationMs) : rawPosition;
   const progress = durationMs > 0 ? Math.min(1, Math.max(0, positionMs / durationMs)) : 0;
 
-  const rung = driftRung(driftMs);
-  const rungTint = rungColor(rung, C);
-
   const handleLayout = useCallback((event: LayoutChangeEvent) => {
     trackWidth.current = event.nativeEvent.layout.width;
   }, []);
@@ -238,25 +265,17 @@ export function NowPlaying({
 
   const subtitle = track ? (track.album ? `${track.artist} · ${track.album}` : track.artist) : null;
 
+  /*
+    A FRAGMENT, NOT A WRAPPER VIEW. The card and the failure notice are two
+    siblings in the Session's scroller, and that scroller already spaces its
+    children with `gap` — a wrapper here would collapse them into one item and
+    the failure card would have to reinvent the spacing as a margin.
+  */
   return (
-    <View style={styles.root}>
-      {/*
-        ONE position in the tree, in every branch, and deliberately not inside
-        the card — see the file header. Parking it (1x1, transparent) rather
-        than unmounting keeps the WebView alive and the music playing.
-      */}
-      <View
-        style={[
-          showMedia ? styles.stage : styles.stageParked,
-          showMedia ? { borderColor: C.rule } : null,
-          showMedia ? PointerEvents.auto : PointerEvents.none,
-        ]}>
-        {media}
-      </View>
-
+    <>
       <GlassCard glow={track ? 'live' : undefined}>
         <View style={styles.meta}>
-          {showMedia ? null : (
+          {videoOnStage ? null : (
             <ArtSlot
               waiting={waiting}
               title={track?.title ?? null}
@@ -295,8 +314,8 @@ export function NowPlaying({
           {/*
             The lobby controls. The artboard hangs these off the Session header
             rather than the card, but that header is not this component's to
-            draw, and dropping the control would make the game, the mic and the
-            change-lobby sheet unreachable from the player.
+            draw, and the drawer holds the game table and change-lobby — a door
+            worth having twice.
           */}
           <CircleIconButton
             icon={MoreHorizontal}
@@ -373,22 +392,8 @@ export function NowPlaying({
         )}
       </GlassCard>
 
-      {/*
-        L952-L961. Hidden on the empty face: "LOCKED +0ms" against nothing is
-        the same lie the 0:00 scrubber was telling.
-      */}
-      {empty ? null : (
-        <SyncRow
-          waiting={waiting}
-          label={waiting ? 'Finding the beat' : `You are ${RUNG_LABEL[rung]}`}
-          drift={waiting ? null : formatDrift(driftMs)}
-          tint={waiting ? C.ink3 : rungTint}
-          onResync={onResync}
-        />
-      )}
-
       {errorMessage ? <PlaybackError message={errorMessage} onRetry={onResync} /> : null}
-    </View>
+    </>
   );
 }
 
@@ -420,11 +425,7 @@ const ArtSlot = memo(function ArtSlot({ waiting, title, artworkUrl }: ArtSlotPro
     <View
       accessible={title === null}
       accessibilityLabel={title === null ? 'Nothing playing' : undefined}
-      style={[
-        styles.art,
-        { backgroundColor: C.artwork, borderColor: C.rule },
-        pressedSoft(C),
-      ]}>
+      style={[styles.art, { backgroundColor: C.artwork, borderColor: C.rule }, pressedSoft(C)]}>
       {title === null ? (
         <Disc3 size={30} strokeWidth={1.6} color={C.ink3} />
       ) : artworkUrl ? (
@@ -447,40 +448,47 @@ const ArtSlot = memo(function ArtSlot({ waiting, title, artworkUrl }: ArtSlotPro
 
 // ----------------------------------------------------------------- sync row
 
-type SyncRowProps = {
+export type SessionSyncRowProps = {
+  /** Nothing measured yet: the dot slows down and the figure is withheld. */
   waiting: boolean;
-  label: string;
-  /** Null while there is nothing measured yet. */
-  drift: string | null;
-  tint: string;
+  driftMs: number;
+  /** Re-measures the clock offset and seeks back onto the room's position. */
   onResync: () => void;
+  /**
+   * L958: the (?) beside the reading. Opens the full sync diagnostics — the
+   * ladder that says what the app will DO at each distance. Optional, and the
+   * glyph is simply not drawn without it, because a help affordance that opens
+   * nothing is worse than none at all.
+   */
+  onExplain?: () => void;
 };
 
 /**
- * L952-L961: the pulsing dot, the rung word, the drift figure, and the one
- * control that fixes a drifting listener.
+ * L952-L961: the pulsing dot, the rung word, the drift figure, the (?), and the
+ * one control that fixes a drifting listener.
  *
- * CORAL READOUT, BLUE BUTTON, AND THE ROW USED TO ARGUE OTHERWISE.
+ * EXPORTED AND FREE-STANDING, WHICH IT WAS NOT. It used to be drawn from inside
+ * `NowPlaying`, welded directly under the scrubber. The artboard and the user's
+ * screenshot both put it at the BOTTOM of the now-playing tab — under the
+ * transport and under the aux hand-off — so the screen has to be the thing that
+ * places it. See the file header.
  *
- * The reading is coral: being in sync is a state of the world, and the dot and
- * the figure step DOWN the neutral ramp as drift grows (see `rungColor`) —
- * losing the coral is the whole signal.
- *
- * The button is not part of that reading. `Hard seek` used to be
- * `variant="liveOutline"`, defended here by a paragraph that read "ALL CORAL,
- * AND THAT IS THE POINT... this row takes the state accent even though it ends
- * in a button". That was the inversion the accent rule exists to prevent:
- * re-anchoring is a thing you DO, not a thing that is true, and the rule is
- * explicit that on a live object the badge is coral and the button is blue.
- * `PlaybackError` forty lines below already drew the correct answer, so the
- * file shipped both. It is `pri` now, matching that button and matching
- * `ResyncFooter` in 'app/room/[id].tsx', which offers the identical re-measure.
- *
- * `Hard seek` is `onResync`, which used to be a bare rotate glyph tucked beside
- * the track title where nothing said what it did.
+ * The reading is coral because being in sync is a state of the world, and the
+ * dot and the figure step DOWN the neutral ramp as drift grows (see
+ * `rungColor`) — losing the coral is the whole signal. `Hard seek` is coral
+ * too, and that reverses this file's previous ruling; the argument is in the
+ * file header.
  */
-const SyncRow = memo(function SyncRow({ waiting, label, drift, tint, onResync }: SyncRowProps) {
+export const SessionSyncRow = memo(function SessionSyncRow({
+  waiting,
+  driftMs,
+  onResync,
+  onExplain,
+}: SessionSyncRowProps) {
   const C = useColors();
+
+  const rung = driftRung(driftMs);
+  const tint = waiting ? C.ink3 : rungColor(rung, C);
 
   return (
     <View style={styles.sync}>
@@ -489,14 +497,32 @@ const SyncRow = memo(function SyncRow({ waiting, label, drift, tint, onResync }:
       <LivePulse size={8} color={tint} tempo={waiting ? 'session' : 'synced'} />
 
       <Text numberOfLines={1} style={[styles.syncLabel, { color: waiting ? C.ink3 : C.ink }]}>
-        {label}
+        {waiting ? 'Finding the beat' : `You are ${RUNG_LABEL[rung]}`}
       </Text>
 
-      {drift ? <Text style={[styles.syncDrift, { color: tint }]}>{drift}</Text> : null}
+      {waiting ? null : (
+        <Text style={[styles.syncDrift, { color: tint }]}>{formatDrift(driftMs)}</Text>
+      )}
+
+      {onExplain ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="What this sync reading means"
+          onPress={onExplain}
+          style={({ pressed }) => [styles.syncHelp, pressed ? styles.dim : null]}>
+          <HelpCircle size={16} strokeWidth={2} color={C.ink3} />
+        </Pressable>
+      ) : null}
 
       <View style={styles.syncSpacer} />
 
-      <AuxButton label="Hard seek" variant="pri" size="sm" icon={RotateCw} onPress={onResync} />
+      <AuxButton
+        label="Hard seek"
+        variant="liveOutline"
+        size="sm"
+        icon={RotateCw}
+        onPress={onResync}
+      />
     </View>
   );
 });
@@ -531,8 +557,10 @@ const SyncRow = memo(function SyncRow({ waiting, label, drift, tint, onResync }:
  * the refusal card in 'app/(tabs)/lounge/create.tsx' and the bad-code notice in
  * 'components/lounge/join-code-modal.tsx'.
  *
- * The button stays BLUE, which is the half the old comment had right: the card
- * reports what happened, the button is the thing you do about it.
+ * The button stays BLUE while `Hard seek` next door goes coral, and the two are
+ * not in conflict: hard-seeking is entering the live position, which is what
+ * coral now owns, whereas Retry is recovering from a stop. Nothing is live to
+ * enter at the moment this card is on screen.
  */
 const PlaybackError = memo(function PlaybackError({
   message,
@@ -601,41 +629,8 @@ export const ModularGrid = memo(function ModularGrid({ step = GRID }: { step?: n
 });
 
 const styles = StyleSheet.create({
-  root: {
-    paddingHorizontal: Space.lg,
-    paddingTop: Space.md,
-  },
-
-  // ------------------------------------------------------- the video stage
-  /**
-   * L1010: the design's video surface is 16:9 inside the card's own corner.
-   *
-   * The fill stays a literal black rather than a token — this is a letterbox
-   * behind a WebView, and a theme-aware "surface" behind video reads as a
-   * rendering fault the instant the frame is narrower than the box.
-   *
-   * NO SHADOW ON PURPOSE, matching the artboard, where the stage is a clipped
-   * child and the CARD does the lifting. Android drops a view's own boxShadow
-   * when that view also clips, so a `raised()` here would lift on iOS and web
-   * and silently do nothing on Android — a divergence for a decoration.
-   */
-  stage: {
-    width: '100%',
-    aspectRatio: 16 / 9,
-    borderRadius: 24,
-    borderWidth: Rule.hair,
-    backgroundColor: '#000000',
-    overflow: 'hidden',
-    marginBottom: Space.md,
-  },
-  /** Mounted and audible, out of the layout, effectively invisible. */
-  stageParked: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    width: 1,
-    height: 1,
-    opacity: 0,
+  dim: {
+    opacity: 0.6,
   },
 
   // -------------------------------------------------------------- the head
@@ -667,7 +662,7 @@ const styles = StyleSheet.create({
     marginTop: Space.sm,
   },
 
-  // ------------------------------------------------------------- the well
+  // -------------------------------------------------------------- the well
   art: {
     width: ART,
     height: ART,
@@ -683,7 +678,7 @@ const styles = StyleSheet.create({
     letterSpacing: tracking(34, -0.02),
   },
 
-  // --------------------------------------------------------- the scrubber
+  // ---------------------------------------------------------- the scrubber
   scrubWrap: {
     marginTop: Space.lg,
   },
@@ -706,7 +701,7 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
 
-  // ------------------------------------------------------- the empty face
+  // -------------------------------------------------------- the empty face
   emptyBody: {
     marginTop: Space.lg,
     gap: Space.md,
@@ -716,12 +711,18 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 
-  // ---------------------------------------------------------- the sync row
+  // ----------------------------------------------------------- the sync row
+  /**
+   * NO VERTICAL MARGIN ANY MORE. This row is a sibling in the Session's
+   * scroller and that scroller spaces its children with `gap`; the old
+   * `marginTop` would stack on top of it. L953's `padding:0 4px` survives — the
+   * row sits a hair inside the card edge above it, which is what lines the dot
+   * up with the card's own padding rather than with the screen gutter.
+   */
   sync: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Space.sm + 2,
-    marginTop: Space.md + 2,
     paddingHorizontal: Space.xs,
   },
   syncLabel: {
@@ -737,6 +738,19 @@ const styles = StyleSheet.create({
    * this sheet.
    */
   syncDrift: readout(13),
+  /**
+   * L958: a full 44px target around a 16px glyph, pulled back over the row's
+   * own gap so the (?) still reads as attached to the figure it explains
+   * instead of floating in the middle of the row.
+   */
+  syncHelp: {
+    width: TOUCH_TARGET,
+    height: TOUCH_TARGET,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: -(Space.sm + 2) - 2,
+  },
   syncSpacer: {
     flex: 1,
     minWidth: Space.sm,
@@ -748,10 +762,10 @@ const styles = StyleSheet.create({
    * longer a `GlassCard` — see `PlaybackError`. Radius 18 and `Space.md` of
    * padding are exactly what that variant applies, so the failure card still
    * sits in the same grammar as every other row-card on the screen; only the
-   * fill and the edge moved to the danger family.
+   * fill and the edge moved to the danger family. The old `marginTop` is gone
+   * for the same reason the sync row's is: the scroller's `gap` owns it.
    */
   errorCard: {
-    marginTop: Space.md,
     flexDirection: 'row',
     alignItems: 'center',
     gap: Space.md,
@@ -776,7 +790,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 
-  // --------------------------------------------------------- modular grid
+  // ---------------------------------------------------------- modular grid
   gridColumn: {
     position: 'absolute',
     top: 0,

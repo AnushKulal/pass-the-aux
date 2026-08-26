@@ -79,9 +79,27 @@ export const DarkPalette = {
    * live · playing · happening · in sync · on aux · unread · PREMIUM · joinable.
    * The rule that governs every screen in this direction:
    *   coral says "this is happening right now"
-   *   `pill` (blue) says "you do this"
-   * If something is both — a Join button on a live session — the BUTTON is blue
-   * and the BADGE beside it is coral. Never paint one element in both.
+   *   `pill` (blue) says "you make this happen"
+   * Never paint one element in both.
+   *
+   * JOIN AND SOLO ARE CORAL, AND THIS COMMENT USED TO SAY THE OPPOSITE.
+   *
+   * It taught "a Join button on a live session — the BUTTON is blue and the
+   * BADGE beside it is coral", and every screen that read this file inherited
+   * that, so Join shipped blue. The design's own artboards draw it coral, and
+   * when the built app reached a phone the first note back was that the feed's
+   * Join and Solo pills were the wrong colour.
+   *
+   * The distinction the old wording missed: blue is not "any action", it is the
+   * action that CREATES or CONTROLS — start a session, submit a form, play,
+   * skip. Entering something that is already live is not creating anything; it
+   * is joining a state that exists without you, and the state colour owns it.
+   * Coral on that button is what makes a row of live cards scan as one thing.
+   *
+   * So: JOIN, SOLO and any other "come into this live thing" control take the
+   * coral fill. CREATE, START, PLAY, NEXT and every primary form submit take
+   * blue. If you find a comment arguing otherwise, it predates this and is
+   * wrong — correct it rather than following it.
    */
   live: '#ff4a2e',
   /** Coral as small text. */
@@ -123,7 +141,11 @@ export const DarkPalette = {
   /* -------------------------------------------------- the primary action */
 
   /**
-   * BLUE - and it means ACTION. Every CTA, the FAB, the play button.
+   * BLUE - and it means CREATE or CONTROL, which is narrower than "action".
+   *
+   * Every primary CTA, the nav FAB, the play and skip controls, a selected
+   * segment, a link. NOT Join and NOT Solo: entering something that is already
+   * live belongs to the state accent — see the note on `live`.
    *
    * MEASURED 3.6:1 under white at 15px/600. That is below AA for text this
    * size, and it is the design's own value, kept on purpose: the blue gradient

@@ -14,21 +14,41 @@
  * unrecoverable without reinstalling. A gate has to lead somewhere.
  */
 
+import { BlurTargetView } from 'expo-blur';
+import { useRef } from 'react';
 import { Redirect } from 'expo-router';
-import { Tabs, type BottomTabBarProps } from 'expo-router/js-tabs';
-import { StyleSheet, View } from 'react-native';
+import { Tabs } from 'expo-router/js-tabs';
+// `Easing` here is React Native's Animated easing, which is what a bottom-tab
+// `transitionSpec` is fed. It is NOT `Easing` from @/lib/theme — that one is a
+// CSS cubic-bezier string for a different consumer entirely.
+import { Easing, StyleSheet, View } from 'react-native';
 
 import { AmbientGround } from '@/components/shell/ambient-ground';
 import { NavBar } from '@/components/shell/nav-bar';
 import { UpdateBanner } from '@/components/shell/update-banner';
 import { useAuth } from '@/lib/auth';
 import { useLocalProfile } from '@/lib/providers';
+import { Duration } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
-const renderTabBar = (props: BottomTabBarProps) => <NavBar {...props} />;
+
 
 export default function TabsLayout() {
   const C = useColors();
+  /**
+   * What Android blurs behind the navigation capsule.
+   *
+   * `expo-blur`'s Android path does not sample the window the way iOS does — it
+   * blurs a `BlurTargetView` handed to it by ref, and given none it silently
+   * renders a flat translucent slab over sharp content. That is not a subtle
+   * degradation: it is exactly the "the nav bar is clearly using glass ui, i
+   * want a little blurring effect" complaint, and the capsule was shipping it.
+   *
+   * The ref has to live HERE rather than in `nav-bar.tsx`, because the target
+   * must WRAP the content being blurred — the ambient ground and the navigator
+   * — and the capsule is a sibling of both, not their parent.
+   */
+  const blurTarget = useRef<View | null>(null);
   const { session, loading } = useAuth();
   const { profileDone, hydrating: gateHydrating } = useLocalProfile();
 
@@ -43,7 +63,7 @@ export default function TabsLayout() {
   if (!profileDone) return <Redirect href="/(auth)/profile-setup" />;
 
   return (
-    <View style={[styles.shell, { backgroundColor: C.bg }]}>
+    <BlurTargetView ref={blurTarget} style={[styles.shell, { backgroundColor: C.bg }]}>
       {/*
         Behind everything, drawn once for the whole shell rather than per
         screen, so the blobs stay put across navigation instead of restarting
@@ -54,7 +74,7 @@ export default function TabsLayout() {
           re-entering on each screen. */}
       <UpdateBanner />
       <Tabs
-        tabBar={renderTabBar}
+        tabBar={(props) => <NavBar {...props} blurTarget={blurTarget} />}
         screenOptions={{
           // Each screen renders its own header.
           headerShown: false,
@@ -74,15 +94,37 @@ export default function TabsLayout() {
             Without this the navigator's default is an instant swap, which is why
             a screen only ever appeared to animate the FIRST time: what was
             moving was the content's own entrance, firing on mount.
+
+            VERIFIED, not assumed: `BottomTabView` reads `animation` off the
+            merged descriptor options, so setting it here reaches every screen
+            in the group, and `fade` resolves to a real opacity cross-fade of
+            the two scenes. Because `sceneStyle` above is transparent, both
+            scenes dissolve through the ambient ground rather than through a
+            slab of `C.bg`.
           */
           animation: 'fade',
+          /*
+            The `fade` preset's own spec is 150ms of straight linear, which is
+            below the 200-320ms floor `Duration` is documented as holding and
+            fast enough to register as a jump-cut rather than a transition.
+            This is the same curve and very nearly the same length as the theme
+            dissolve in @/lib/theme-context, so changing tab and changing
+            appearance now move at one tempo.
+
+            Only the timing is overridden — `sceneStyleInterpolator` still comes
+            from the `fade` preset, so this stays a cross-fade.
+          */
+          transitionSpec: {
+            animation: 'timing',
+            config: { duration: Duration.scrim, easing: Easing.out(Easing.quad) },
+          },
         }}>
         <Tabs.Screen name="index" options={{ title: 'The Feed' }} />
         <Tabs.Screen name="explore" options={{ title: 'Explore' }} />
         <Tabs.Screen name="lounges" options={{ title: 'Lounges' }} />
         <Tabs.Screen name="profile" options={{ title: 'You' }} />
       </Tabs>
-    </View>
+    </BlurTargetView>
   );
 }
 

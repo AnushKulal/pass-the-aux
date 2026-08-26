@@ -55,14 +55,25 @@
       "eas": {
         "projectId": "3c252219-3619-434b-9ab4-f0931d09722a"
       },
-      "patch": 6,
+      "patch": 7,
       "releaseNotes": [
-        "A new look throughout: deeper background, glass navigation, and one colour reserved for what is live",
-        "Create a session from the button in the middle of the navigation bar",
-        "Mic, deafen and mute-one-person are on the session screen itself, not buried in a sheet",
-        "Direct messages have their own place in the navigation, with an unread count"
+        "The app icon is fixed - it was being cropped away by Android before it ever drew",
+        "The plus button in the navigation is a whole circle again, not a clipped one",
+        "Sign in and Create account are separate now, and signing in no longer asks you to build a profile you already have",
+        "Password fields have a show/hide button",
+        "The session's bottom bar swipes up for change lobby and games, and light/dark now fades instead of snapping"
       ],
       "changelog": [
+        {
+          "patch": 7,
+          "notes": [
+            "The app icon is fixed - it was being cropped away by Android before it ever drew",
+            "The plus button in the navigation is a whole circle again, not a clipped one",
+            "Sign in and Create account are separate now, and signing in no longer asks you to build a profile you already have",
+            "Password fields have a show/hide button",
+            "The session's bottom bar swipes up for change lobby and games, and light/dark now fades instead of snapping"
+          ]
+        },
         {
           "patch": 6,
           "notes": [

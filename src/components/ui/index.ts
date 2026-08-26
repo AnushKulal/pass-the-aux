@@ -37,6 +37,11 @@ export {
   type CircleIconButtonTone,
 } from '@/components/ui/circle-icon-button';
 export {
+  ConfirmDialog,
+  type ConfirmDialogProps,
+  type ConfirmDialogTone,
+} from '@/components/ui/confirm-dialog';
+export {
   EmptyState,
   type EmptyStateAction,
   type EmptyStateProps,

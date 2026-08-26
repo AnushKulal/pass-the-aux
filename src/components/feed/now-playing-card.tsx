@@ -1,39 +1,57 @@
 /**
  * One Feed row — who is listening, to what, and how far in.
  *
- * design/nocturne/aux-nocturne.dc.html, the `feed` loop at L281-298. Two skins
- * of one card:
+ * design/nocturne/aux-nocturne.dc.html, the `feed` loop at L281-298, and the
+ * user's own home-screen capture of that prototype. Two rows inside one card:
  *
- *   live — a `GlassCard`: artwork, track, artist, a blue Join, and underneath
- *          it the person, a coral bar and a timecode.
- *   idle — the identical geometry with the card taken away and every value
- *          stepped down one ink. Nothing to join, so nothing lifts off the page.
+ *   row 1 — the artwork tile, the track, "Artist · LOUNGE", and a CORAL entry
+ *           pill on the right: JOIN when there is a Session to walk into, SOLO
+ *           when this person is listening alone and there is nothing to join.
+ *   row 2 — the listener's face, their handle, a coral progress bar filling the
+ *           width, and the timecode.
  *
  * The bar and the timecode are the point of the screen. They advance against
  * the SERVER clock on a 250ms tick, interpolated from the last presence beat,
  * so several cards ticking at once is the moment the product explains itself.
  *
- * THE ACCENT RULE, IN ITS PUREST FORM — this card is where it is easiest to see
- * and easiest to get wrong. Two accents sit on one row:
- *   CORAL is STATE. The pulsing badge on the artwork and the progress fill both
- *   say "this is happening right now".
- *   BLUE is ACTION. The Join button says "you do this".
- * Never one element in both. A Join button tinted coral, or a live badge tinted
- * blue, breaks the only colour rule the app has.
+ * === THE ACCENT RULE, AND A CORRECTION THIS PASS MAKES ===
  *
- * THREE DEVIATIONS FROM THE ARTBOARD, ALL DELIBERATE:
+ * This file used to carry a long comment insisting the Join button be BLUE,
+ * on the reasoning that "coral is state, blue is action, and joining is an
+ * action". That comment has been deleted, because the ruling was wrong. The
+ * user supplied a screenshot of their own design and the JOIN pill on the home
+ * feed is unambiguously coral; the only blue on that screen is the create FAB
+ * and the "See all" link. The rule is therefore:
  *
- * 1. The artboard's top-right pill is a coral wash (`--aux-live-w`). It is the
- *    JOIN affordance, and an action is blue in this direction — so it became an
- *    `AuxButton variant="pri"` and the coral moved to the badge on the artwork,
- *    where it describes a state rather than inviting a tap.
- * 2. The artboard makes the person's row its own tap target (`f.onProfile`).
+ *   CORAL = state AND live-entry. Live dots, progress fill, listening counts,
+ *           and JOIN / SOLO — entering something that is live is the one action
+ *           the state colour owns, because the thing you are entering IS the
+ *           state.
+ *   BLUE  = create and transport. Start a Session, play/pause, form submit.
+ *
+ * So this card is now coral throughout and carries no blue at all.
+ *
+ * === THREE DEVIATIONS FROM THE ARTBOARD, ALL DELIBERATE ===
+ *
+ * 1. THE IDLE SKIN IS GONE, AND THAT REVERSES AN EARLIER DECISION HERE.
+ *    Rows for people listening alone used to be drawn flat — no fill, no edge,
+ *    no shadow — with the stated reason that "giving them a card with no Join
+ *    on it would promise something the row cannot deliver". The SOLO pill now
+ *    says it in words, so the promise is no longer implied and no longer has to
+ *    be withheld. Every row is a `GlassCard`, which is what the design shows and
+ *    what the user asked for: one column of glass with the ambient blobs reading
+ *    through it. Idle rows still step every value down one ink and drop the
+ *    coral badge, so the hierarchy survives without the missing card.
+ * 2. The entry pill is NOT a nested button. `Pressable` is `accessible` by
+ *    default, so the card is one element to a screen reader and a button inside
+ *    it would be announced as a second, identical action. The card already owns
+ *    the press — a tap on the pill falls through to it — so JOIN and SOLO are
+ *    both static labels describing the row, structurally identical, differing
+ *    only in the skin. See `EntryPill`.
+ * 3. The artboard makes the person's row its own tap target (`f.onProfile`).
  *    There is no route for somebody else's profile in this app — `(tabs)/
  *    profile` is your own — so it would be a target that does nothing. The
  *    person is drawn, not pressed, until that screen exists.
- * 3. The idle skin is not in the artboard, which draws one loop. It is kept
- *    because half the Feed is people listening alone: giving them a card with
- *    no Join on it would promise something the row cannot deliver.
  */
 
 import { Image } from 'expo-image';
@@ -50,18 +68,11 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { LiveDot } from '@/components/feed/live-dot';
-import {
-  Avatar,
-  AuxButton,
-  BLURHASH_SURFACE,
-  GlassCard,
-  ProgressBar,
-  useToast,
-} from '@/components/ui';
+import { Avatar, BLURHASH_SURFACE, GlassCard, ProgressBar, useToast } from '@/components/ui';
 import { livePositionMs } from '@/features/presence/presence-client';
 import type { FeedEntry } from '@/features/presence/use-lounge-presence';
 import { serverNow } from '@/lib/clock';
-import { Duration, Fonts, Rule, Space, Stagger, Type } from '@/lib/theme';
+import { Duration, Fonts, Radii, Rule, Space, Stagger, Type, bloom, tracking } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
 /** The artwork tile, the badge on its corner, and the person under it (L283/L292). */
@@ -76,6 +87,10 @@ const AVATAR = 22;
  * token layer grows the steps.
  */
 const ART_RADIUS = 16;
+
+/** L288: `min-height:44px;padding:0 15px` on the entry pill. */
+const PILL_HEIGHT = 44;
+const PILL_PAD = 15;
 
 /** Playback position advances on a 250ms tick. */
 const TICK_MS = 250;
@@ -119,7 +134,7 @@ function subscribeTick(listener: (nowMs: number) => void): () => void {
 }
 
 /**
- * The server clock, ticking. Exported so the Feed's hero card rides the same
+ * The server clock, ticking. Exported so the Feed's resume card rides the same
  * timer as the rows underneath it instead of starting a second one.
  */
 export function useFeedClock(): number {
@@ -149,6 +164,53 @@ function present(value: string | null): string | null {
   return trimmed ? trimmed : null;
 }
 
+// -------------------------------------------------------------- the entry pill
+
+/**
+ * The pill on the right of row 1 — the artboard's L288 geometry exactly: 44
+ * tall, 15 across, an 11px extrabold uppercase word on a fully rounded cell.
+ *
+ * BOTH SKINS ARE CORAL, because both describe the same live state; they differ
+ * in whether you can act on it.
+ *
+ *   join — the solid `live` fill under `onLive` (a warm near-black; white on
+ *          coral fails), with a coral bloom under it. This is the pill in the
+ *          user's screenshot and the one thing on the row asking to be tapped.
+ *   solo — the `liveWash` fill behind a `liveMid` edge. Same hue, a quarter of
+ *          the volume: this person is listening alone and there is no Session
+ *          to walk into, so the pill reports rather than invites.
+ *
+ * The artboard draws both as the wash and varies only the text colour. That is
+ * the one thing not copied: a wash pill you CAN enter and a wash pill you
+ * cannot are indistinguishable at 11px, and the difference between them is the
+ * whole question this row answers. Give the actionable one the fill back and
+ * the two read apart instantly. Revert by dropping the `join` branch below.
+ *
+ * Hidden from assistive tech: the card's own label already says "live now" or
+ * "listening alone", and a nested element inside an `accessible` Pressable is
+ * either unreachable or announced as a second, identical control.
+ */
+function EntryPill({ kind }: { kind: 'join' | 'solo' }) {
+  const C = useColors();
+  const join = kind === 'join';
+
+  return (
+    <View
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={[
+        styles.pill,
+        join
+          ? { backgroundColor: C.live, borderColor: C.live, ...bloom(C.glowSoft, 'sm') }
+          : { backgroundColor: C.liveWash, borderColor: C.liveMid },
+      ]}>
+      <Text style={[styles.pillLabel, { color: join ? C.onLive : C.liveText }]}>
+        {join ? 'Join' : 'Solo'}
+      </Text>
+    </View>
+  );
+}
+
 // -------------------------------------------------------------------- the card
 
 export type NowPlayingCardProps = {
@@ -169,9 +231,8 @@ function NowPlayingCardBase({ entry, index = 0 }: NowPlayingCardProps) {
 
   /*
     `isLive` is not "this person has a track loaded", it is "there is a Session
-    here you can walk into" — and it is the only thing on the card allowed to
-    reach for the card skin, the coral badge or the Join button. Somebody
-    listening alone gets the identical layout flattened onto the ground.
+    here you can walk into" — and it is what picks JOIN over SOLO, lights the
+    coral badge on the artwork, and holds the row at full ink.
   */
   const isLive = entry.roomId !== null;
   const positionMs = livePositionMs(entry, nowMs);
@@ -195,9 +256,14 @@ function NowPlayingCardBase({ entry, index = 0 }: NowPlayingCardProps) {
   const playing = track !== null && entry.isPlaying;
 
   const title = track ?? entry.loungeName;
+  /*
+    "Artist · LOUNGE", with the lounge set in caps — the user's screenshot sets
+    the second half of this line as a label rather than as prose, which is what
+    keeps a room name from reading like part of the band's name.
+  */
   const subtitle =
     track !== null
-      ? [artist, entry.loungeName].filter(Boolean).join(' · ')
+      ? [artist, entry.loungeName.toUpperCase()].filter(Boolean).join('  ·  ')
       : isLive
         ? 'Session open — nothing playing yet'
         : 'Not playing anything';
@@ -241,119 +307,13 @@ function NowPlayingCardBase({ entry, index = 0 }: NowPlayingCardProps) {
 
   const open = useCallback(() => {
     if (entry.roomId === null) {
-      toast.show(`@${entry.username} is not in a Session`, 'info');
+      toast.show(`@${entry.username} is listening alone`, 'info');
       return;
     }
     // Object form rather than a template literal: it stays valid under typed
     // routes regardless of whether the route types have been generated yet.
     router.push({ pathname: '/room/[id]', params: { id: entry.roomId } });
   }, [entry.roomId, entry.username, router, toast]);
-
-  const body = (
-    <>
-      <View style={styles.head}>
-        <View style={styles.artWrap}>
-          <View style={[styles.art, { backgroundColor: C.artwork, borderColor: C.rule }]}>
-            {/*
-              Under the cover, so it doubles as the decode placeholder and the
-              error fallback. `artInk` is faint on purpose: artwork is a WELL
-              with a monogram in it now, not a bright plate — anything written
-              against the old bright tile (dark ink, a light edge) is wrong here.
-            */}
-            <Text style={[styles.artGlyph, { color: C.artInk }]}>{glyphFor(title)}</Text>
-
-            {entry.artworkUrl ? (
-              <Image
-                source={{ uri: entry.artworkUrl }}
-                style={StyleSheet.absoluteFill}
-                contentFit="cover"
-                cachePolicy="memory-disk"
-                // FlatList recycles cards; without this the previous listener's
-                // cover stays on screen until the new one has decoded.
-                recyclingKey={`art:${entry.userId}`}
-                placeholder={{ blurhash: BLURHASH_SURFACE }}
-                transition={Duration.press}
-                accessible={false}
-              />
-            ) : null}
-          </View>
-
-          {/*
-            A SIBLING of the tile, not a child: the tile clips its cover, and the
-            badge has to overhang that clip on both edges. `badgeRing` is the
-            token for a badge punched into glass — the ring is the surface
-            behind it, never a new colour, and it must not be `surface`, which
-            is 5.5% white and would go see-through over the artwork.
-          */}
-          {isLive ? (
-            <View style={styles.artBadge}>
-              <LiveDot size={BADGE} ringColor={C.badgeRing} ringWidth={3} tempo="session" />
-            </View>
-          ) : null}
-        </View>
-
-        <View style={styles.info}>
-          <Text numberOfLines={1} style={[styles.title, { color: isLive ? C.ink : C.ink2 }]}>
-            {title}
-          </Text>
-          <Text numberOfLines={1} style={[styles.subtitle, { color: isLive ? C.ink2 : C.ink3 }]}>
-            {subtitle}
-          </Text>
-        </View>
-
-        {/*
-          BLUE, beside a coral badge, on one card. The whole card already opens
-          the Session; this is what makes the affordance visible instead of
-          secret, which is the one thing the old row never said out loud.
-
-          Hidden from assistive tech deliberately. `Pressable` is `accessible`
-          by default, so the card is a single element to a screen reader and a
-          nested button inside it would either be unreachable or announced as a
-          second, identical action. The card's own hint already says it joins.
-        */}
-        {isLive ? (
-          <View
-            accessibilityElementsHidden
-            importantForAccessibility="no-hide-descendants"
-            style={styles.join}>
-            <AuxButton label="Join" onPress={open} variant="pri" size="sm" />
-          </View>
-        ) : null}
-      </View>
-
-      <View style={styles.foot}>
-        {/*
-          Keyed by user so a recycled card mounts a fresh `Avatar` rather than
-          showing the previous listener's face until the new one decodes — the
-          same problem `recyclingKey` solves on the cover above, which the kit's
-          `Avatar` gives no way to solve from out here.
-        */}
-        <Avatar key={entry.userId} uri={entry.avatarUrl} name={entry.displayName} size={AVATAR} />
-        <Text numberOfLines={1} style={[styles.handle, { color: isLive ? C.ink2 : C.ink3 }]}>
-          @{entry.username}
-        </Text>
-
-        {showBar ? (
-          <>
-            {/*
-              CORAL, and the gradient is `ProgressBar`'s default because a bar is
-              always measuring something that is playing. The flat `ink3` is the
-              paused case — see `playing` above.
-            */}
-            <ProgressBar
-              progress={positionMs / entry.durationMs}
-              height={4}
-              color={playing ? undefined : C.ink3}
-              style={styles.bar}
-            />
-            <Text style={[styles.elapsed, { color: isLive ? C.ink2 : C.ink3 }]}>
-              {timecode(positionMs)}
-            </Text>
-          </>
-        ) : null}
-      </View>
-    </>
-  );
 
   return (
     <Animated.View style={entering}>
@@ -363,13 +323,108 @@ function NowPlayingCardBase({ entry, index = 0 }: NowPlayingCardProps) {
         accessibilityHint={isLive ? 'Joins this Session' : undefined}
         onPress={open}
         style={({ pressed }) => [
-          isLive ? styles.card : styles.flat,
+          styles.row,
           // The artboard's own press (`transform:scale(.985)`), not a fade: a
           // card that dims reads as disabled, and dropping the opacity of a
           // raised surface takes its shadow down with it.
           pressed && styles.pressed,
         ]}>
-        {isLive ? <GlassCard>{body}</GlassCard> : <View style={styles.flatBody}>{body}</View>}
+        <GlassCard>
+          <View style={styles.head}>
+            <View style={styles.artWrap}>
+              <View style={[styles.art, { backgroundColor: C.artwork, borderColor: C.rule }]}>
+                {/*
+                  Under the cover, so it doubles as the decode placeholder and
+                  the error fallback. `artInk` is faint on purpose: artwork is a
+                  WELL with a monogram in it, not a bright plate — anything
+                  written against the old bright tile (dark ink, a light edge) is
+                  wrong here.
+                */}
+                <Text style={[styles.artGlyph, { color: C.artInk }]}>{glyphFor(title)}</Text>
+
+                {entry.artworkUrl ? (
+                  <Image
+                    source={{ uri: entry.artworkUrl }}
+                    style={StyleSheet.absoluteFill}
+                    contentFit="cover"
+                    cachePolicy="memory-disk"
+                    // FlatList recycles cards; without this the previous
+                    // listener's cover stays on screen until the new one has
+                    // decoded.
+                    recyclingKey={`art:${entry.userId}`}
+                    placeholder={{ blurhash: BLURHASH_SURFACE }}
+                    transition={Duration.press}
+                    accessible={false}
+                  />
+                ) : null}
+              </View>
+
+              {/*
+                A SIBLING of the tile, not a child: the tile clips its cover, and
+                the badge has to overhang that clip on both edges. `badgeRing` is
+                the token for a badge punched into glass — the ring is the
+                surface behind it, never a new colour, and it must not be
+                `surface`, which is 5.5% white and would go see-through over the
+                artwork.
+              */}
+              {isLive ? (
+                <View style={styles.artBadge}>
+                  <LiveDot size={BADGE} ringColor={C.badgeRing} ringWidth={3} tempo="session" />
+                </View>
+              ) : null}
+            </View>
+
+            <View style={styles.info}>
+              <Text numberOfLines={1} style={[styles.title, { color: isLive ? C.ink : C.ink2 }]}>
+                {title}
+              </Text>
+              <Text
+                numberOfLines={1}
+                style={[styles.subtitle, { color: isLive ? C.ink2 : C.ink3 }]}>
+                {subtitle}
+              </Text>
+            </View>
+
+            <EntryPill kind={isLive ? 'join' : 'solo'} />
+          </View>
+
+          <View style={styles.foot}>
+            {/*
+              Keyed by user so a recycled card mounts a fresh `Avatar` rather
+              than showing the previous listener's face until the new one
+              decodes — the same problem `recyclingKey` solves on the cover
+              above, which the kit's `Avatar` gives no way to solve from out here.
+            */}
+            <Avatar
+              key={entry.userId}
+              uri={entry.avatarUrl}
+              name={entry.displayName}
+              size={AVATAR}
+            />
+            <Text numberOfLines={1} style={[styles.handle, { color: isLive ? C.ink2 : C.ink3 }]}>
+              @{entry.username}
+            </Text>
+
+            {showBar ? (
+              <>
+                {/*
+                  CORAL, and the gradient is `ProgressBar`'s default because a
+                  bar is always measuring something that is playing. The flat
+                  `ink3` is the paused case — see `playing` above.
+                */}
+                <ProgressBar
+                  progress={positionMs / entry.durationMs}
+                  height={4}
+                  color={playing ? undefined : C.ink3}
+                  style={styles.bar}
+                />
+                <Text style={[styles.elapsed, { color: isLive ? C.ink2 : C.ink3 }]}>
+                  {timecode(positionMs)}
+                </Text>
+              </>
+            ) : null}
+          </View>
+        </GlassCard>
       </Pressable>
     </Animated.View>
   );
@@ -382,28 +437,9 @@ function NowPlayingCardBase({ entry, index = 0 }: NowPlayingCardProps) {
 export const NowPlayingCard = memo(NowPlayingCardBase);
 
 const styles = StyleSheet.create({
-  /** The artboard's gap between feed cards (L280). */
-  card: {
+  /** The artboard's gap between feed cards (L280): a flat 12 for every row. */
+  row: {
     marginBottom: Space.md,
-  },
-  /*
-    The design draws 2px between rows. Every card is a tap target, and two
-    targets 2px apart mis-fire — 4 plus the row's own padding is the floor at
-    which a near-miss still lands on the card the finger was aimed at.
-  */
-  flat: {
-    marginBottom: Space.xs,
-  },
-  /*
-    An idle card has no fill, no edge and no shadow — the ABSENCE of a card
-    rather than a quieter one, which is why `GlassCard` has nothing to offer
-    here. It keeps the card's 16px padding anyway: that is what holds every
-    artwork tile on one vertical line down a Feed of mixed live and idle rows,
-    and the column reading as a list is most of the point of the screen.
-  */
-  flatBody: {
-    paddingHorizontal: Space.lg,
-    paddingVertical: Space.md,
   },
   pressed: {
     transform: [{ scale: 0.985 }],
@@ -456,9 +492,23 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     marginTop: 2,
   },
-  /** Stops the gradient pill from stretching to the artwork's height. */
-  join: {
+
+  /* ------------------------------------------------------------ entry pill */
+
+  /** Never shrinks: the pill is the row's answer, so the title gives up its characters first. */
+  pill: {
     flexShrink: 0,
+    minHeight: PILL_HEIGHT,
+    paddingHorizontal: PILL_PAD,
+    borderRadius: Radii.pill,
+    borderWidth: Rule.hair,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pillLabel: {
+    ...Type.heading(11),
+    letterSpacing: tracking(11, 0.04),
+    textTransform: 'uppercase',
   },
 
   foot: {
