@@ -35,6 +35,15 @@
  * Grouping is the caller's decision (`showHeader` / `showStamp`), because
  * whether a message starts or ends a run depends on its NEIGHBOURS in an
  * inverted list and this component only ever sees itself.
+ *
+ * THE ENTRANCE IS THE SHARED ONE, DELIBERATELY UNCONFIGURED. A DM thread and a
+ * lounge log are the same object drawn twice — the same `bubble-kit`, the same
+ * run grouping, the same day breaks — so a reader who can tell them apart by
+ * how their messages arrive has found a seam that should not exist.
+ * `useEntrance({ index })` at its defaults is what a chat row gets everywhere:
+ * `auxRow`, an 8px lift over 240ms, 55ms per step. `Stagger.messages` is NOT
+ * borrowed here; that token is the INBOX row's step (see `conversation-row`),
+ * and this is a log, not the inbox.
  */
 
 import { Image } from 'expo-image';
@@ -50,6 +59,7 @@ import {
 } from 'lucide-react-native';
 import { memo, useCallback, useMemo, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import Animated from 'react-native-reanimated';
 
 import {
   Bubble,
@@ -65,6 +75,7 @@ import { TrackCard } from '@/components/dm/track-card';
 import { VoiceNote } from '@/components/dm/voice-note';
 import { BLURHASH_SURFACE } from '@/components/ui';
 import { useSignedUrl, type DmAttachment, type DmMessage } from '@/features/dm';
+import { useEntrance } from '@/lib/entrance';
 import {
   DarkPalette,
   Duration,
@@ -258,6 +269,13 @@ export type MessageBubbleProps = {
   /** Day label to print above this bubble, or null. */
   daySeparator: string | null;
   /**
+   * Position in the log. Drives the entrance stagger, and the list is
+   * `inverted` — so index 0 is the NEWEST message, sitting at the bottom, and
+   * the thread assembles upward from the message you are reading. Straight from
+   * `renderItem`, which already hands it over; nothing derives it.
+   */
+  index?: number;
+  /**
    * The seam for a message-actions sheet (delete lives behind
    * `useDeleteMessage`). Absent here, the bubble simply has no long press.
    */
@@ -271,10 +289,19 @@ function MessageBubbleBase({
   showHeader,
   showStamp = true,
   daySeparator,
+  index = 0,
   onLongPress,
   onOpenProfile,
 }: MessageBubbleProps) {
   const { mine, kind, body } = message;
+
+  /*
+    The whole row arrives as one thing — day break, identity line and bubble
+    together. Animating the bubble alone would leave "Yesterday" and the
+    sender's name already sitting there waiting for their own message.
+  */
+  const entering = useEntrance({ index });
+
   const name = message.author?.display_name?.trim() || message.author?.username || 'Someone';
 
   /*
@@ -332,7 +359,7 @@ function MessageBubbleBase({
   }
 
   return (
-    <View>
+    <Animated.View style={entering}>
       {daySeparator ? <DaySeparator label={daySeparator} /> : null}
 
       {/* The identity line, on the first of the other person's runs only. */}
@@ -370,7 +397,7 @@ function MessageBubbleBase({
           ) : null}
         </View>
       </Pressable>
-    </View>
+    </Animated.View>
   );
 }
 

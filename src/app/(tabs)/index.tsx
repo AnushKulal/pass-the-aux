@@ -73,7 +73,7 @@ import {
   WifiOff,
   X,
 } from 'lucide-react-native';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   FlatList,
   Pressable,
@@ -88,13 +88,7 @@ import {
   type TextStyle,
   type ViewStyle,
 } from 'react-native';
-import Animated, {
-  Easing,
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 
 import {
   NowPlayingCard,
@@ -129,6 +123,7 @@ import {
 import { useAuth } from '@/lib/auth';
 import { syncClock } from '@/lib/clock';
 import { useDockReserve } from '@/lib/dock';
+import { useEntrance } from '@/lib/entrance';
 import { supabase } from '@/lib/supabase';
 import {
   Duration,
@@ -896,35 +891,44 @@ function matchesQuery(entry: FeedEntry, q: string): boolean {
   );
 }
 
-/**
- * Every module enters the same way: translateY(8) → 0 over 280ms on the
- * design's curve, and nothing at all when the OS asks for reduced motion.
- *
- * A shared value driven from an effect, NOT a Reanimated layout animation:
- * `entering=` marks the view `visibility: hidden` until the animation runs, and
- * on react-native-web it never runs — leaving the whole Feed permanently
- * invisible while reporting perfectly correct colour, size and layout.
- */
-function useModuleEnter() {
-  const reduced = useReducedMotion();
-  const t = useSharedValue(reduced ? 1 : 0);
+/*
+  ===================== HOW THIS SCREEN ARRIVES =====================
 
-  useEffect(() => {
-    if (reduced) {
-      t.value = 1;
-      return;
-    }
-    t.value = withTiming(1, {
-      duration: Duration.enter,
-      easing: Easing.bezier(0.2, 0.8, 0.2, 1),
-    });
-  }, [reduced, t]);
+  There used to be a local `useModuleEnter` here — a shared value, an effect, a
+  hardcoded 8px lift and a curve one control point off the design's — and two
+  more copies of it in `explore.tsx` and `lounges.tsx`. It is `useEntrance` now.
+  Two things that copy got wrong, neither fixable from inside this file:
 
-  return useAnimatedStyle(() => ({
-    opacity: t.value,
-    transform: [{ translateY: (1 - t.value) * 8 }],
-  }));
-}
+    - it ran on MOUNT, and a tab navigator never unmounts its screens. So the
+      Feed animated in exactly once per app launch and was dead silent on every
+      return to the tab afterwards, which is precisely when the user was looking
+      for it. `useEntrance` keys off focus and so replays.
+    - it fell back to the navigator's cross-fade for everything else, so the
+      whole screen dissolved in as one block.
+
+  WHAT ANIMATES, AND WHAT DELIBERATELY DOES NOT.
+
+  The design's grammar is one module arriving whole (`auxIn`), and then the rows
+  INSIDE it arriving one after another (`auxRow`). This screen has four bands —
+  the masthead, the search pill, the lounge rail, the live list — and animating
+  four bands independently is how a screen ends up looking like it is assembling
+  itself rather than arriving. So there is exactly one module and exactly one
+  list:
+
+    MODULE  the whole column: masthead, search field, list and all. One 10px
+            lift, once, on entering the tab.
+    ROWS    `NowPlayingCard`, staggered by its `index` at 55ms a step. This is
+            the only genuine list on the screen and the thing the Feed is for —
+            several cards landing in sequence with their timecodes already
+            ticking is the screen explaining itself.
+
+  Everything else rides the module. The rail is a second list, but it is
+  horizontal and half of it is off the frame, so a cascade running sideways
+  underneath the one running down would be two competing sequences; it arrives
+  as one strip. The resume card is a single card and the one thing a user in a
+  Session is actively waiting on — it gets no delay of its own. The skeletons
+  never stagger for the same reason: nobody should wait longer for a placeholder.
+*/
 
 /*
   THERE IS NO SKELETON FOR THE RESUME CARD ANY MORE, AND THAT IS DELIBERATE.
@@ -973,7 +977,8 @@ export default function FeedScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { profile } = useAuth();
-  const moduleStyle = useModuleEnter();
+  /* One arrival for the whole column — see the note above the skeletons. */
+  const moduleStyle = useEntrance({ kind: 'module' });
   const dockReserve = useDockReserve();
 
   const [refreshing, setRefreshing] = useState(false);
@@ -1184,6 +1189,14 @@ export default function FeedScreen() {
     ];
   }, [entries, q]);
 
+  /*
+    `index` is what makes the rows arrive one after another rather than all at
+    once, and it comes from `renderItem` because that is the one place that
+    already knows it. Deriving it any other way — an `indexOf` in the card, a
+    map built alongside `rows` — would put a value that changes on every
+    presence beat into the card's props and break the memo that keeps one person
+    changing song from re-rendering the whole Feed.
+  */
   const renderItem = useCallback(
     ({ item, index }: ListRenderItemInfo<FeedEntry>) => (
       <NowPlayingCard entry={item} index={index} />

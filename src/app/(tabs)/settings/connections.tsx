@@ -55,16 +55,8 @@ import { AuxButton, GlassCard, Skeleton, StatusPill } from '@/components/ui';
 import { useSpotifyLink } from '@/features/spotify/use-spotify-link';
 import { useAuth } from '@/lib/auth';
 import { useDockReserve } from '@/lib/dock';
-import {
-  Duration,
-  Fonts,
-  Radii,
-  Rule,
-  Space,
-  TOUCH_TARGET,
-  Type,
-  tracking,
-} from '@/lib/theme';
+import { useEntrance } from '@/lib/entrance';
+import { Fonts, Radii, Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 import { usePlayback, type SourcePreference } from '@/playback/store';
 
@@ -160,11 +152,32 @@ export default function ConnectionsScreen() {
   // wired to nothing.
   const source = usePlayback((state) => state.sourcePreference);
 
-  const enter = useSharedValue(0);
-  useEffect(() => {
-    enter.value = reduced ? 1 : withTiming(1, { duration: Duration.enter });
-  }, [reduced, enter]);
-  const enterStyle = useAnimatedStyle(() => ({ opacity: enter.value }));
+  /*
+    ===================== HOW THIS SCREEN ARRIVES =====================
+
+    The local shared-value entrance this held — opacity only, fired on mount —
+    is `useEntrance` now, as in Settings, About and You. It faded without
+    LIFTING, which is the dissolve being complained about, and it fired on
+    mount, so inside a group that keeps its screens alive it played once per app
+    launch and was silent on every return.
+
+    WHAT ANIMATES. Two cards, so two steps:
+
+      MODULE  the whole column — the back link and the title ride it.
+      BANDS   the Spotify card, then the playback source, one step apart.
+
+    THE HANDSHAKE ROW IS INSIDE THE FIRST BAND RATHER THAN A THIRD ONE, and that
+    is what keeps it from animating. It appears while an OAuth round trip is in
+    flight, which is long after this screen settled, so as a child of a wrapper
+    that has already arrived it simply exists. Given a step of its own it would
+    have faded in on a delay — and a progress report the user is actively
+    waiting on is the one thing that must never be staggered. The card's
+    skeleton is in the same band for the same reason, at index 0, which carries
+    no delay at all.
+  */
+  const moduleStyle = useEntrance({ kind: 'module' });
+  const spotifyIn = useEntrance({ index: 0 });
+  const sourceIn = useEntrance({ index: 1 });
 
   const state: LinkState = !profile?.spotify_linked
     ? 'unlinked'
@@ -191,7 +204,7 @@ export default function ConnectionsScreen() {
 
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={[styles.root, { backgroundColor: C.bg }]}>
-      <Animated.View style={[styles.flex, enterStyle]}>
+      <Animated.View style={[styles.flex, moduleStyle]}>
         <ScrollView
           contentContainerStyle={[
             styles.content,
@@ -223,101 +236,100 @@ export default function ConnectionsScreen() {
           </Text>
 
           {/* ---------------------------------------------------- spotify card */}
-          {loading ? (
-            <View accessibilityRole="progressbar" accessibilityLabel="Loading your Spotify link">
-              <Skeleton width="100%" height={CARD_HEIGHT} radius={CARD_RADIUS} />
-            </View>
-          ) : (
-            <GlassCard>
-              <View style={styles.cardHead}>
-                <Text style={[styles.cardTitle, { color: C.ink }]}>Spotify</Text>
-                {/*
-                  CORAL ON PREMIUM AND NOWHERE ELSE. The accent rule names
-                  PREMIUM explicitly as a state of the world, and this badge is
-                  the only element on the screen entitled to it — everything
-                  else here is either an action (blue) or a fact in the neutral
-                  register (`outline`, a `surface2` fill behind a hairline).
-                */}
-                <StatusPill
-                  label={BADGE[state]}
-                  tone={state === 'premium' ? 'accent' : 'outline'}
-                />
+          <Animated.View style={spotifyIn}>
+            {loading ? (
+              <View accessibilityRole="progressbar" accessibilityLabel="Loading your Spotify link">
+                <Skeleton width="100%" height={CARD_HEIGHT} radius={CARD_RADIUS} />
               </View>
+            ) : (
+              <GlassCard>
+                <View style={styles.cardHead}>
+                  <Text style={[styles.cardTitle, { color: C.ink }]}>Spotify</Text>
+                  {/*
+                    CORAL ON PREMIUM AND NOWHERE ELSE. The accent rule names
+                    PREMIUM explicitly as a state of the world, and this badge is
+                    the only element on the screen entitled to it — everything
+                    else here is either an action (blue) or a fact in the neutral
+                    register (`outline`, a `surface2` fill behind a hairline).
+                  */}
+                  <StatusPill label={BADGE[state]} tone={state === 'premium' ? 'accent' : 'outline'} />
+                </View>
 
-              {/*
-                One paragraph, and on a failure it is the reason instead.
+                {/*
+                  One paragraph, and on a failure it is the reason instead.
 
-                THE ERROR TAKES `danger`, NOT `liveText`. This block used to
-                carry a comment asserting the opposite — that `liveText` was
-                "the house colour for a thing that went wrong" and that `danger`
-                was reserved for controls that destroy something. That was
-                invented here and it is backwards. Coral is the LIVE accent:
-                playing, in sync, on aux, unread, Premium — things that are TRUE
-                RIGHT NOW about the world. Pink-red is destruction AND FAILURE,
-                which is why a failed link reads in the same hue as the Unlink
-                button below it rather than in the same hue as the PREMIUM badge
-                above it. `ui/text-field.tsx` and `ui/toast.tsx` have always done
-                it this way.
-              */}
-              {failed ? (
-                <Text accessibilityLiveRegion="polite" style={[styles.body, { color: C.danger }]}>
-                  {error}
-                </Text>
-              ) : overridden ? (
-                <Text style={[styles.body, { color: C.ink2 }]}>
-                  Premium is linked, but the playback source below is set to YouTube, so
-                  <Text style={{ color: C.ink }}> that is what this device uses.</Text>
-                </Text>
-              ) : (
-                <Text style={[styles.body, { color: C.ink2 }]}>
-                  {body.lead}
-                  <Text style={{ color: C.ink }}>{body.emphasis}</Text>
-                </Text>
-              )}
-
-              <View style={styles.actions}>
-                {state === 'unlinked' ? (
-                  <AuxButton
-                    label={failed ? 'Try again' : 'Connect Spotify'}
-                    variant="pri"
-                    size="sm"
-                    disabled={linking}
-                    onPress={() => {
-                      void link();
-                    }}
-                  />
+                  THE ERROR TAKES `danger`, NOT `liveText`. This block used to
+                  carry a comment asserting the opposite — that `liveText` was
+                  "the house colour for a thing that went wrong" and that
+                  `danger` was reserved for controls that destroy something. That
+                  was invented here and it is backwards. Coral is the LIVE
+                  accent: playing, in sync, on aux, unread, Premium — things that
+                  are TRUE RIGHT NOW about the world. Pink-red is destruction AND
+                  FAILURE, which is why a failed link reads in the same hue as
+                  the Unlink button below it rather than in the same hue as the
+                  PREMIUM badge above it. `ui/text-field.tsx` and `ui/toast.tsx`
+                  have always done it this way.
+                */}
+                {failed ? (
+                  <Text accessibilityLiveRegion="polite" style={[styles.body, { color: C.danger }]}>
+                    {error}
+                  </Text>
+                ) : overridden ? (
+                  <Text style={[styles.body, { color: C.ink2 }]}>
+                    Premium is linked, but the playback source below is set to YouTube, so
+                    <Text style={{ color: C.ink }}> that is what this device uses.</Text>
+                  </Text>
                 ) : (
-                  <>
-                    {state === 'free' || failed ? (
-                      <AuxButton
-                        label={failed ? 'Try again' : 'Recheck Premium'}
-                        variant="pri"
-                        size="sm"
-                        disabled={linking}
-                        onPress={() => {
-                          void link();
-                        }}
-                      />
-                    ) : null}
+                  <Text style={[styles.body, { color: C.ink2 }]}>
+                    {body.lead}
+                    <Text style={{ color: C.ink }}>{body.emphasis}</Text>
+                  </Text>
+                )}
+
+                <View style={styles.actions}>
+                  {state === 'unlinked' ? (
                     <AuxButton
-                      label="Unlink"
-                      variant="danger"
+                      label={failed ? 'Try again' : 'Connect Spotify'}
+                      variant="pri"
                       size="sm"
                       disabled={linking}
                       onPress={() => {
-                        void unlink();
+                        void link();
                       }}
                     />
-                  </>
-                )}
-              </View>
-            </GlassCard>
-          )}
+                  ) : (
+                    <>
+                      {state === 'free' || failed ? (
+                        <AuxButton
+                          label={failed ? 'Try again' : 'Recheck Premium'}
+                          variant="pri"
+                          size="sm"
+                          disabled={linking}
+                          onPress={() => {
+                            void link();
+                          }}
+                        />
+                      ) : null}
+                      <AuxButton
+                        label="Unlink"
+                        variant="danger"
+                        size="sm"
+                        disabled={linking}
+                        onPress={() => {
+                          void unlink();
+                        }}
+                      />
+                    </>
+                  )}
+                </View>
+              </GlassCard>
+            )}
 
-          {linking ? <Handshake reduced={reduced} /> : null}
+            {linking ? <Handshake reduced={reduced} /> : null}
+          </Animated.View>
 
           {/* ------------------------------------------------- playback source */}
-          <View style={styles.sourceCard}>
+          <Animated.View style={[styles.sourceCard, sourceIn]}>
             <GlassCard>
               <Text style={[styles.kicker, { color: C.ink3 }]}>Playback source</Text>
 
@@ -342,7 +354,7 @@ export default function ConnectionsScreen() {
 
               <Text style={[styles.helper, { color: C.ink3 }]}>{caption}</Text>
             </GlassCard>
-          </View>
+          </Animated.View>
         </ScrollView>
       </Animated.View>
     </SafeAreaView>

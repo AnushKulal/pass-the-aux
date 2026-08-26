@@ -183,13 +183,42 @@ const PROVIDERS: readonly MusicProvider[] = ['spotify', 'youtube'];
  * Normalises whatever the function sent into the shape the list renders. A row
  * missing an id, a title, or a duration is dropped rather than rendered as a
  * broken card — it could never be queued anyway.
+ *
+ * AN UNRECOGNISABLE PAYLOAD THROWS, AND THAT REVERSES WHAT THIS DID.
+ *
+ * The envelope used to fall through to `[]`, which the sheet renders as
+ * "Nothing matched · Try the artist name, or fewer words." That is a lie about
+ * the user's query, and it is the exact shape of the bug report this pass
+ * exists to kill: a search that failed and a search that found nothing looked
+ * identical, so the only thing anyone could report was "add track doesn't
+ * work".
+ *
+ * It matters because a 200 is not proof of success here. `search-tracks` needs
+ * SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET and YOUTUBE_API_KEY set on whichever
+ * Supabase project it is deployed to, and a function that answers `{ error }`
+ * — or a gateway that answers an HTML error page with a 200 — never reaches
+ * `edgeFunctionError` at all, because `invoke` only reports non-2xx there.
+ *
+ * `{ results: [] }` is still an honest empty answer and still returns `[]`.
+ * Only a body with no results array in it is treated as a failure.
  */
 function parseResults(data: unknown): TrackSearchResult[] {
-  const rows: unknown[] = Array.isArray(data)
+  const rows: unknown[] | null = Array.isArray(data)
     ? data
     : isRecord(data) && Array.isArray(data.results)
       ? data.results
-      : [];
+      : null;
+
+  if (rows === null) {
+    // The function's own words if it sent any, so the screen can print them.
+    const reported = isRecord(data) ? (isRecord(data.error) ? data.error.message : data.error) : null;
+
+    throw new Error(
+      typeof reported === 'string' && reported.length > 0
+        ? reported
+        : 'Search answered with something this app could not read.'
+    );
+  }
 
   const out: TrackSearchResult[] = [];
   for (const row of rows) {

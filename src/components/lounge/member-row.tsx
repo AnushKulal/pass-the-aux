@@ -51,13 +51,22 @@
  * `danger` — the pink-red that is now distinct from both accents — and never
  * `live`, which would say the removal is something happening rather than
  * something you are about to do.
+ *
+ * THE ROSTER CASCADES IN, ONE ROW AT A TIME. This is the design's `auxRow` and
+ * it is the reason the roster reads as a list of PEOPLE rather than as a block
+ * of text: the whole segment used to cross-fade in as one, so fifty rows landed
+ * at the same instant with the same treatment. `index` drives `useEntrance`,
+ * which caps the stagger at eight steps — a roster of two hundred finishes
+ * arriving instead of trickling, and row 40 is off-screen anyway.
  */
 
 import { memo, useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 
 import { Avatar } from '@/components/ui';
 import type { MemberRole } from '@/lib/database.types';
+import { useEntrance } from '@/lib/entrance';
 import { Fonts, Radii, Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
@@ -77,6 +86,12 @@ export type MemberRowProps = {
    * callers pass this only where the answer is actually known.
    */
   isOnline?: boolean;
+  /**
+   * Position in the roster. Drives the 55ms-per-row entrance stagger, and it is
+   * the `index` `renderItem` already hands over — threading it costs the row
+   * nothing, because a number is as cheap to compare as the props beside it.
+   */
+  index?: number;
   /** Opens this person's profile. Without it the row is inert, not fake-tappable. */
   onPress?: () => void;
 };
@@ -108,9 +123,12 @@ function MemberRowBase({
   joinedAt,
   isPremium = false,
   isOnline = false,
+  index = 0,
   onPress,
 }: MemberRowProps) {
   const C = useColors();
+  /* `auxRow` — 8px up, fading, 55ms behind the row above. See the header. */
+  const entering = useEntrance({ index, kind: 'row' });
   const roleLabel = ROLE_LABEL[role];
   const name = displayName.trim() || username;
   const since = useMemo(() => sinceLabel(joinedAt), [joinedAt]);
@@ -127,90 +145,98 @@ function MemberRowBase({
     .join(', ');
 
   return (
-    <Pressable
-      accessible
-      accessibilityRole={onPress ? 'button' : 'text'}
-      accessibilityLabel={label}
-      disabled={!onPress}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.row,
-        // `ruleSoft`, not `rule`: these separate rows WITHIN one card and the
-        // card already owns the heavier edge. L502 draws `--aux-rule-s`.
-        { borderBottomColor: C.ruleSoft },
-        pressed && onPress ? { backgroundColor: C.surface2 } : null,
-      ]}>
-      {/*
-        The presence dot is the kit's now, not a hand-rolled square pinned to a
-        wrapper. `Avatar presence` draws it as a HOLE — a coral disc ringed in
-        the screen colour, so it reads as punched through the face — and that
-        ring has to follow the theme; the pinned value the old row used leaves a
-        dark notch on a light ground. The absolutely-positioned wrapper went
-        with it, which is why there is no `avatarWell` here any more.
+    /*
+      `Animated.View` around the row rather than an animated `Pressable`: the
+      press already writes `backgroundColor` through this element's own style
+      callback, and the hairline that separates rows belongs on the pressable
+      surface so the highlight lands inside it.
+    */
+    <Animated.View style={entering}>
+      <Pressable
+        accessible
+        accessibilityRole={onPress ? 'button' : 'text'}
+        accessibilityLabel={label}
+        disabled={!onPress}
+        onPress={onPress}
+        style={({ pressed }) => [
+          styles.row,
+          // `ruleSoft`, not `rule`: these separate rows WITHIN one card and the
+          // card already owns the heavier edge. L502 draws `--aux-rule-s`.
+          { borderBottomColor: C.ruleSoft },
+          pressed && onPress ? { backgroundColor: C.surface2 } : null,
+        ]}>
+        {/*
+          The presence dot is the kit's now, not a hand-rolled square pinned to a
+          wrapper. `Avatar presence` draws it as a HOLE — a coral disc ringed in
+          the screen colour, so it reads as punched through the face — and that
+          ring has to follow the theme; the pinned value the old row used leaves a
+          dark notch on a light ground. The absolutely-positioned wrapper went
+          with it, which is why there is no `avatarWell` here any more.
 
-        `identity` is the coral-to-magenta gradient, and it is reserved for the
-        signed-in user: the point of a gradient only you carry is that you can
-        find yourself in a roster of two hundred.
-      */}
-      <Avatar
-        name={name}
-        uri={avatarUrl}
-        size={AVATAR_SIZE}
-        presence={isOnline}
-        identity={isYou}
-      />
+          `identity` is the coral-to-magenta gradient, and it is reserved for the
+          signed-in user: the point of a gradient only you carry is that you can
+          find yourself in a roster of two hundred.
+        */}
+        <Avatar
+          name={name}
+          uri={avatarUrl}
+          size={AVATAR_SIZE}
+          presence={isOnline}
+          identity={isYou}
+        />
 
-      <View style={styles.identity}>
-        <View style={styles.nameLine}>
-          <Text numberOfLines={1} style={[styles.name, { color: C.ink }]}>
-            {name}
+        <View style={styles.identity}>
+          <View style={styles.nameLine}>
+            <Text numberOfLines={1} style={[styles.name, { color: C.ink }]}>
+              {name}
+            </Text>
+
+            {/*
+              L508. Premium is a STATE — this person's plays route through Spotify
+              right now — so it is coral, in the outline register the design gives
+              it here. The profile header at L372 shouts the same word in the solid
+              fill; a roster of fifty would be unreadable at that volume, which is
+              why the artboard itself splits the two.
+            */}
+            {isPremium ? (
+              <View style={[styles.badgeOutline, { borderColor: C.liveMid }]}>
+                <Text style={[styles.badgeLabel, { color: C.liveText }]}>PREMIUM</Text>
+              </View>
+            ) : null}
+          </View>
+
+          <Text numberOfLines={1} style={[styles.handle, { color: C.ink3 }]}>
+            @{username}
+            {since ? ` · since ${since}` : ''}
           </Text>
+        </View>
 
-          {/*
-            L508. Premium is a STATE — this person's plays route through Spotify
-            right now — so it is coral, in the outline register the design gives
-            it here. The profile header at L372 shouts the same word in the solid
-            fill; a roster of fifty would be unreadable at that volume, which is
-            why the artboard itself splits the two.
-          */}
-          {isPremium ? (
-            <View style={[styles.badgeOutline, { borderColor: C.liveMid }]}>
-              <Text style={[styles.badgeLabel, { color: C.liveText }]}>PREMIUM</Text>
+        {isYou ? (
+          <View style={[styles.badgeOutline, { borderColor: C.rule2 }]}>
+            <Text style={[styles.badgeLabel, { color: C.ink2 }]}>YOU</Text>
+          </View>
+        ) : null}
+
+        {/*
+          NOT `StatusPill`, and this is the one place in the file where the kit is
+          deliberately passed over. `StatusPill` is `accessible` with
+          `accessibilityRole="text"`, so up to three of them inside a row that is
+          itself one accessible unit would split a single announcement into four.
+          The row's own label above already spells out the rank in words.
+        */}
+        {roleLabel ? (
+          role === 'owner' ? (
+            <View style={[styles.badgeFill, { backgroundColor: C.live }]}>
+              <Text style={[styles.badgeLabel, { color: C.onLive }]}>{roleLabel}</Text>
             </View>
-          ) : null}
-        </View>
-
-        <Text numberOfLines={1} style={[styles.handle, { color: C.ink3 }]}>
-          @{username}
-          {since ? ` · since ${since}` : ''}
-        </Text>
-      </View>
-
-      {isYou ? (
-        <View style={[styles.badgeOutline, { borderColor: C.rule2 }]}>
-          <Text style={[styles.badgeLabel, { color: C.ink2 }]}>YOU</Text>
-        </View>
-      ) : null}
-
-      {/*
-        NOT `StatusPill`, and this is the one place in the file where the kit is
-        deliberately passed over. `StatusPill` is `accessible` with
-        `accessibilityRole="text"`, so up to three of them inside a row that is
-        itself one accessible unit would split a single announcement into four.
-        The row's own label above already spells out the rank in words.
-      */}
-      {roleLabel ? (
-        role === 'owner' ? (
-          <View style={[styles.badgeFill, { backgroundColor: C.live }]}>
-            <Text style={[styles.badgeLabel, { color: C.onLive }]}>{roleLabel}</Text>
-          </View>
-        ) : (
-          <View style={[styles.badgeOutline, { borderColor: C.liveMid }]}>
-            <Text style={[styles.badgeLabel, { color: C.liveText }]}>{roleLabel}</Text>
-          </View>
-        )
-      ) : null}
-    </Pressable>
+          ) : (
+            <View style={[styles.badgeOutline, { borderColor: C.liveMid }]}>
+              <Text style={[styles.badgeLabel, { color: C.liveText }]}>{roleLabel}</Text>
+            </View>
+          )
+        ) : null}
+      </Pressable>
+    </Animated.View>
   );
 }
 

@@ -29,21 +29,50 @@
  * row above — a description that stopped being true the moment that row was
  * replaced, but stayed in the comment. Two cards shipped, one was ever drawn.
  * The duplicate is deleted and the lounge screen imports this.
+ *
+ * IT ARRIVES NOW, WHERE BEFORE IT SIMPLY EXISTED. The Sessions segment used to
+ * cross-fade in as one block, so every card in it appeared at the same instant
+ * with the same treatment — the "easy fade" the design never asked for. The
+ * design animates CONTENT in (`auxRow`: 8px up, fading, one after the next), so
+ * this card takes an `index` and hands it to `useEntrance`. Nothing is
+ * hand-rolled here: the hook owns the curve, the cap on the stagger and the
+ * reduced-motion branch, and it keys off focus so the cascade replays on every
+ * entry rather than once per app launch.
+ *
+ * THE CORAL IS NOW CONDITIONAL, AND THAT IS A CORRECTION. This card used to
+ * name every Session in `liveText` unconditionally, under a comment reading
+ * "the NAME stays coral, because a paused Session is still a live room you can
+ * walk into". That was true of a PAUSED room and false of the room this card
+ * actually kept painting: press "Start a Session", back out, and the row sits
+ * there with no track and nobody in it, wearing the state accent and the word
+ * "0 listening". Coral is still the STATE accent — the fix is about WHEN it
+ * shows, not what colour it is. `isSessionLive` in `@/features/lounges/live`
+ * decides, and this card calls it on its OWN props rather than taking an
+ * `isLive` prop, so no caller can hand it a different answer than the lounge
+ * header above it computed.
  */
 
 import { LinearGradient } from 'expo-linear-gradient';
 import { Play } from 'lucide-react-native';
 import { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 
 import { GlassCard, LivePulse } from '@/components/ui';
+import { isSessionLive } from '@/features/lounges/live';
+import { useEntrance } from '@/lib/entrance';
 import { Fonts, PointerEvents, Radii, Rule, Space, Type, tracking } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
 export type SessionCardProps = {
   name: string;
   hostName: string;
+  /**
+   * People in the room this second — `room_participants`, not a running total.
+   * Half of the liveness predicate; see the header.
+   */
   listeners: number;
+  /** `rooms.is_playing`. The other half. */
   isPlaying: boolean;
   /**
    * `artworkUrl` is optional so the shape `useLoungeSessions` already returns
@@ -62,6 +91,8 @@ export type SessionCardProps = {
    * cards stacked composite to ~11% and the inner one stops being an object.
    */
   solid?: boolean;
+  /** Position in the Sessions column. Drives the 55ms-per-row entrance stagger. */
+  index?: number;
   onPress: () => void;
 };
 
@@ -91,13 +122,30 @@ function SessionCardBase({
   nowPlaying,
   syncLabel,
   solid = false,
+  index = 0,
   onPress,
 }: SessionCardProps) {
   const C = useColors();
+  /* `auxRow`. The lift and the delay belong to the hook — see the header. */
+  const entering = useEntrance({ index, kind: 'row' });
 
-  const meta = [`${hostName} on aux`, `${listeners} listening`, syncLabel]
-    .filter(Boolean)
-    .join(' · ');
+  /*
+    THE ONE PREDICATE, called on this card's own props. Playing, or somebody in
+    the room. Everything coral below hangs off this single boolean, so the dot
+    and the name can never disagree with each other or with the "· N live" count
+    in the header — that count runs the same function over the same rows.
+  */
+  const live = isSessionLive({ isPlaying, listeners });
+
+  /*
+    "0 listening" was printing on empty rooms, which is the badge's lie in a
+    quieter typeface — a count of nobody, dressed as a readout. At zero there is
+    no number worth reporting, so the line says the state in words instead. It
+    is still `ink3` either way: the card announces live ONCE, in coral, at the
+    top, and this line is metadata whichever way it reads.
+  */
+  const occupancy = listeners > 0 ? `${listeners} listening` : 'nobody listening yet';
+  const meta = [`${hostName} on aux`, occupancy, syncLabel].filter(Boolean).join(' · ');
 
   /*
     The empty case says NOTHING PLAYING YET, and it is the third thing this line
@@ -111,84 +159,109 @@ function SessionCardBase({
   const track = nowPlaying ? `${nowPlaying.title} — ${nowPlaying.artist}` : 'Nothing playing yet';
 
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`${name}. ${track}. ${meta}.`}
-      accessibilityHint="Opens this Session"
-      onPress={onPress}
-      // L438: `style-active="transform:scale(.985)"`. The fill belongs to
-      // `GlassCard` and is deliberately not overridable from out here.
-      style={({ pressed }) => [pressed && styles.held]}>
-      {/* `padded={false}`: the artboard's Session card runs 15px, one step off
-          the kit's 16, and overriding a prop-driven padding from `style` is a
-          coin toss about array order. */}
-      <GlassCard solid={solid} padded={false} style={styles.card}>
-        <View style={styles.head}>
-          {/*
-            `session` is the 1.8s beat the artboard runs on this dot (L445) —
-            ambient, "there is a room here", not the 1s urgency of a recording
-            light. The dot goes when playback pauses; the NAME stays coral,
-            because a paused Session is still a live room you can walk into.
-          */}
-          {isPlaying ? <LivePulse size={7} tempo="session" /> : null}
-          <Text numberOfLines={1} style={[styles.name, { color: C.liveText }]}>
-            {name}
-          </Text>
-        </View>
+    /*
+      `Animated.View`, not `View`, and the entrance sits OUTSIDE the Pressable:
+      the press already owns `transform: scale(.985)` on the same element, and
+      two transforms fighting over one style would make a card pressed mid-
+      entrance snap to its resting position.
+    */
+    <Animated.View style={entering}>
+      <Pressable
+        accessibilityRole="button"
+        // The state the colour carries has to be spoken, not implied: a screen
+        // reader gets no coral. "Live" / "Empty" is the whole of what the dot
+        // and the name's hue say to everybody else.
+        accessibilityLabel={`${name}. ${live ? 'Live' : 'Empty'}. ${track}. ${meta}.`}
+        accessibilityHint="Opens this Session"
+        onPress={onPress}
+        // L438: `style-active="transform:scale(.985)"`. The fill belongs to
+        // `GlassCard` and is deliberately not overridable from out here.
+        style={({ pressed }) => [pressed && styles.held]}>
+        {/* `padded={false}`: the artboard's Session card runs 15px, one step off
+            the kit's 16, and overriding a prop-driven padding from `style` is a
+            coin toss about array order. */}
+        <GlassCard solid={solid} padded={false} style={styles.card}>
+          <View style={styles.head}>
+            {/*
+              `session` is the 1.8s beat the artboard runs on this dot (L445) —
+              ambient, "there is a room here", not the 1s urgency of a recording
+              light.
 
-        <View style={styles.body}>
-          {/*
-            A dark WELL with a faint monogram — `artwork` inverted in this
-            direction and `artInk` is a 22% white. Code written against the old
-            bright plate puts dark ink on dark here and loses the letter.
-          */}
-          <View style={[styles.well, { backgroundColor: C.artwork, borderColor: C.rule }]}>
-            <Text style={[styles.wellGlyph, { color: C.artInk }]}>
-              {glyphFor(nowPlaying?.title ?? name)}
+              BOTH MARKS NOW READ `live`, WHERE THE DOT READ `isPlaying` AND THE
+              NAME READ NOTHING AT ALL. The old split meant a room with four
+              people sitting between tracks lost its dot while a room with
+              nobody in it kept its coral name — the two halves of one state
+              disagreeing on one card. A paused Session with people in it is
+              still live and keeps both; an empty idle room is not, and the name
+              drops to `ink2`.
+
+              `ink2` AND NOT `ink`: this line is 12px extrabold on open tracking
+              — a kicker — sitting directly above a 15px semibold track title in
+              `ink`. Handing the kicker the same near-white would put the loudest
+              ink in the card on the room's label rather than on what is playing
+              in it. Coral could carry that weight because it was saying
+              something; grey at full strength is only shouting.
+            */}
+            {live ? <LivePulse size={7} tempo="session" /> : null}
+            <Text numberOfLines={1} style={[styles.name, { color: live ? C.liveText : C.ink2 }]}>
+              {name}
             </Text>
           </View>
 
-          <View style={styles.text}>
-            <Text numberOfLines={1} style={[styles.track, { color: C.ink }]}>
-              {track}
-            </Text>
-            {/* All of it in `ink3`. The card has already said "live" once, in
-                coral, at the top; a second accent down here would make the
-                colour mean "session metadata" instead of "happening now". */}
-            <Text numberOfLines={1} style={[styles.meta, { color: C.ink3 }]}>
-              {meta}
-            </Text>
-          </View>
+          <View style={styles.body}>
+            {/*
+              A dark WELL with a faint monogram — `artwork` inverted in this
+              direction and `artInk` is a 22% white. Code written against the old
+              bright plate puts dark ink on dark here and loses the letter.
+            */}
+            <View style={[styles.well, { backgroundColor: C.artwork, borderColor: C.rule }]}>
+              <Text style={[styles.wellGlyph, { color: C.artInk }]}>
+                {glyphFor(nowPlaying?.title ?? name)}
+              </Text>
+            </View>
 
-          {/*
-            DECORATIVE AND UNTOUCHABLE, deliberately not a `CircleIconButton`.
-            The design gives the tap to the whole card; a real button nested
-            inside it would trade taps along its edge and read out to a screen
-            reader as a second control that does the same thing.
-          */}
-          <View
-            accessibilityElementsHidden
-            importantForAccessibility="no-hide-descendants"
-            style={[
-              styles.puck,
-              PointerEvents.none,
-              // L451: `0 8px 18px var(--aux-glow)`. A COLOURED bloom — light
-              // coming off the puck — never a grey drop shadow, and never the
-              // coral `glowSoft`, which would put the state colour under the
-              // one element on this card that is an action.
-              { boxShadow: [{ offsetX: 0, offsetY: 8, blurRadius: 18, color: C.glow }] },
-            ]}>
-            <LinearGradient
-              colors={[C.priTint, C.pill]}
-              start={GRADIENT_TOP}
-              end={GRADIENT_BOTTOM}
-              style={[StyleSheet.absoluteFill, styles.puckFill]}
-            />
-            <Play size={PUCK_GLYPH} strokeWidth={2} color={C.pillInk} fill={C.pillInk} />
+            <View style={styles.text}>
+              <Text numberOfLines={1} style={[styles.track, { color: C.ink }]}>
+                {track}
+              </Text>
+              {/* All of it in `ink3`. The card has already said "live" once, in
+                  coral, at the top; a second accent down here would make the
+                  colour mean "session metadata" instead of "happening now". */}
+              <Text numberOfLines={1} style={[styles.meta, { color: C.ink3 }]}>
+                {meta}
+              </Text>
+            </View>
+
+            {/*
+              DECORATIVE AND UNTOUCHABLE, deliberately not a `CircleIconButton`.
+              The design gives the tap to the whole card; a real button nested
+              inside it would trade taps along its edge and read out to a screen
+              reader as a second control that does the same thing.
+            */}
+            <View
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+              style={[
+                styles.puck,
+                PointerEvents.none,
+                // L451: `0 8px 18px var(--aux-glow)`. A COLOURED bloom — light
+                // coming off the puck — never a grey drop shadow, and never the
+                // coral `glowSoft`, which would put the state colour under the
+                // one element on this card that is an action.
+                { boxShadow: [{ offsetX: 0, offsetY: 8, blurRadius: 18, color: C.glow }] },
+              ]}>
+              <LinearGradient
+                colors={[C.priTint, C.pill]}
+                start={GRADIENT_TOP}
+                end={GRADIENT_BOTTOM}
+                style={[StyleSheet.absoluteFill, styles.puckFill]}
+              />
+              <Play size={PUCK_GLYPH} strokeWidth={2} color={C.pillInk} fill={C.pillInk} />
+            </View>
           </View>
-        </View>
-      </GlassCard>
-    </Pressable>
+        </GlassCard>
+      </Pressable>
+    </Animated.View>
   );
 }
 

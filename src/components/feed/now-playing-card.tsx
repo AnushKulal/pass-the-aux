@@ -56,23 +56,17 @@
 
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View, type TextStyle } from 'react-native';
-import Animated, {
-  Easing,
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withDelay,
-  withTiming,
-} from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 
 import { LiveDot } from '@/components/feed/live-dot';
 import { Avatar, BLURHASH_SURFACE, GlassCard, ProgressBar, useToast } from '@/components/ui';
 import { livePositionMs } from '@/features/presence/presence-client';
 import type { FeedEntry } from '@/features/presence/use-lounge-presence';
 import { serverNow } from '@/lib/clock';
-import { Duration, Fonts, Radii, Rule, Space, Stagger, Type, bloom, tracking } from '@/lib/theme';
+import { useEntrance } from '@/lib/entrance';
+import { Duration, Fonts, Radii, Rule, Space, Type, bloom, tracking } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
 /** The artwork tile, the badge on its corner, and the person under it (L283/L292). */
@@ -216,8 +210,10 @@ function EntryPill({ kind }: { kind: 'join' | 'solo' }) {
 export type NowPlayingCardProps = {
   entry: FeedEntry;
   /**
-   * Position in the list. Cards stagger in at 55ms steps, which needs to know
-   * where in the run this one sits.
+   * Position in the list. Cards arrive one after another at 55ms steps, which
+   * needs to know where in the run this one sits. Handed straight down from
+   * `renderItem`, which already has it — nothing here re-derives it, so the
+   * card stays memoised.
    */
   index?: number;
 };
@@ -227,7 +223,6 @@ function NowPlayingCardBase({ entry, index = 0 }: NowPlayingCardProps) {
   const router = useRouter();
   const toast = useToast();
   const nowMs = useFeedClock();
-  const reduced = useReducedMotion();
 
   /*
     `isLive` is not "this person has a track loaded", it is "there is a Session
@@ -280,30 +275,25 @@ function NowPlayingCardBase({ entry, index = 0 }: NowPlayingCardProps) {
     .filter(Boolean)
     .join(', ');
 
-  // ---- entrance: translateY(8) → 0 + fade, 55ms per card, off under reduce-motion
-  const enter = useSharedValue(reduced ? 1 : 0);
   /*
-    The stagger is read once, at mount. Presence reorders the Feed the moment
-    somebody starts playing, and reading `index` live would re-run the entrance
-    on cards that never left the screen.
+    THE ROW'S ARRIVAL — `auxRow`, and it is no longer built here.
+
+    This file used to hand-roll it: its own shared value, its own reduced-motion
+    branch, its own `useRef(index * Stagger.feed)` and a 280ms `Duration.enter`
+    on a curve that was one control point off the design's. `useEntrance` is
+    that same animation, minus two bugs this copy could not fix from in here.
+
+    It keeps the reasoning this copy was right about — the delay is read ONCE
+    and held, because presence reorders the Feed the instant somebody starts
+    playing and a live `index` would restart the entrance of a card already
+    sitting still on screen. What it adds is that it keys off FOCUS rather than
+    mount, so the cascade replays every time the Feed is entered instead of once
+    per app launch; a tab navigator never unmounts this screen, so the mount
+    version was silent from the second tab switch onward — which is exactly when
+    it was being asked for. It is also `Duration.row` (240ms) and the 8px lift
+    the design actually specifies for a row, where this copy borrowed a module's.
   */
-  const delay = useRef(index * Stagger.feed);
-
-  useEffect(() => {
-    if (reduced) {
-      enter.value = 1;
-      return;
-    }
-    enter.value = withDelay(
-      delay.current,
-      withTiming(1, { duration: Duration.enter, easing: Easing.bezier(0.2, 0.8, 0.2, 1) })
-    );
-  }, [enter, reduced]);
-
-  const entering = useAnimatedStyle(() => ({
-    opacity: enter.value,
-    transform: [{ translateY: (1 - enter.value) * 8 }],
-  }));
+  const entering = useEntrance({ index, kind: 'row' });
 
   const open = useCallback(() => {
     if (entry.roomId === null) {

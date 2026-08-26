@@ -19,19 +19,12 @@
  */
 
 import { LinearGradient } from 'expo-linear-gradient';
-import { useEffect } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { X } from 'lucide-react-native';
 
 import {
-  Duration,
   PointerEvents,
   Radii,
   Rule,
@@ -42,6 +35,7 @@ import {
   dropped,
 } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
+import { useSheetSlide } from '@/lib/entrance';
 import { useUpdates } from '@/lib/updates';
 
 /**
@@ -57,12 +51,24 @@ const SHEET_TRAVEL = 480;
 export function UpdatePrompt() {
   const C = useColors();
   const insets = useSafeAreaInsets();
-  const reduced = useReducedMotion();
 
   const { promptVisible, pending, status, apply, dismissPrompt } = useUpdates();
 
-  const y = useSharedValue(SHEET_TRAVEL);
-  const opacity = useSharedValue(0);
+  /**
+   * TRANSLATE ONLY, and the opacity that used to ride alongside it is gone.
+   *
+   * The design's `auxSheetIn` (aux-nocturne.dc.html L25) is
+   * `translateY(100%) -> none` and nothing else. This animated `opacity` at the
+   * same time, so the card was see-through for the whole of its travel — and a
+   * surface with no edge gives the eye nothing to follow, so what registered was
+   * the brightness changing rather than the sheet moving. It read as a fade that
+   * happened to drift upward, which is exactly what was reported.
+   *
+   * The easing matters as much as dropping the fade: `withTiming`'s default is
+   * ease-in-out, which starts slowly and reads as hesitant. The design's curve
+   * is a decelerate — off the mark fast, settling slow — and that asymmetry is
+   * most of what makes it feel like a sheet being thrown up rather than eased.
+   */
 
   /**
    * The card stays in the tree and is moved off the bottom edge instead of
@@ -75,20 +81,7 @@ export function UpdatePrompt() {
    * artificially if nothing ever dies. It starts at `SHEET_TRAVEL` with zero
    * opacity, so the first paint is already off-screen.
    */
-  useEffect(() => {
-    // Sheet duration on the way up — this travels a full card height rather
-    // than nudging a module into place. Back down faster, so dismissing feels
-    // like a dismissal and not a second presentation.
-    const ms = reduced ? 0 : promptVisible ? Duration.sheet : Duration.press;
-
-    y.value = withTiming(promptVisible ? 0 : SHEET_TRAVEL, { duration: ms });
-    opacity.value = withTiming(promptVisible ? 1 : 0, { duration: ms });
-  }, [promptVisible, reduced, y, opacity]);
-
-  const animated = useAnimatedStyle(() => ({
-    opacity: opacity.value,
-    transform: [{ translateY: y.value }],
-  }));
+  const animated = useSheetSlide(promptVisible, SHEET_TRAVEL);
 
   const applying = status === 'applying';
 

@@ -34,7 +34,8 @@
  * still bubble past it.
  *
  * Rows stagger in at 50ms steps (`Stagger.messages`). The Feed's 55ms is a
- * different screen with a taller row; do not borrow it.
+ * different screen with a taller row; do not borrow it. The stagger itself is
+ * `useEntrance` now — see the note above the call.
  *
  * NOTE FOR WHOEVER TOUCHES THE INBOX SCREEN NEXT: `messages/index.tsx` inlines
  * its own `ThreadRow` and imports only the three pure helpers below. The metrics
@@ -43,7 +44,7 @@
  * currently has no way to offer.
  */
 
-import { memo, useCallback, useEffect, useRef } from 'react';
+import { memo, useCallback } from 'react';
 import {
   Pressable,
   StyleSheet,
@@ -52,20 +53,13 @@ import {
   type GestureResponderEvent,
   type TextStyle,
 } from 'react-native';
-import Animated, {
-  Easing,
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withDelay,
-  withTiming,
-} from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 
 import { Avatar, StatusPill } from '@/components/ui';
 import type { DmAuthor, InboxRow } from '@/features/dm';
 import { serverNow } from '@/lib/clock';
+import { useEntrance } from '@/lib/entrance';
 import {
-  Duration,
   Fonts,
   Radii,
   Rule,
@@ -93,14 +87,6 @@ const AVATAR_SLOP = { top: 2, bottom: 2, left: 2, right: 2 };
  * the 12px row gap has to keep ≥8px of clear air between the two.
  */
 const NAME_SLOP = { top: 14, bottom: 14, left: 0, right: Space.sm };
-
-/**
- * The stagger is capped rather than run to the end of the list. A row mounted
- * on scroll would otherwise sit invisible for `index × 50ms` before fading in —
- * at row 20 that is a full second of blank band. Eight steps covers the first
- * screenful, which is the only place the stagger is ever perceived.
- */
-const MAX_STAGGER_STEPS = 8;
 
 /**
  * `Type.readout()` freezes `fontVariant` as a readonly tuple, which RN's
@@ -221,7 +207,25 @@ function ConversationRowBase({
   onOpenProfile,
 }: ConversationRowProps) {
   const C = useColors();
-  const reduced = useReducedMotion();
+
+  /*
+    WAS a hand-rolled shared value + `withDelay(withTiming())` right here, with
+    its own `MAX_STAGGER_STEPS = 8` and its own curve. It has moved to
+    `useEntrance`, which carries the identical cap and the design's own
+    `auxRow` recipe, for two reasons beyond not keeping three copies of one
+    behaviour:
+
+      - the local copy fired on MOUNT. A FlatList row does not unmount when you
+        leave the inbox and come back, so the entrance played once per app
+        launch and was missing from every return to Messages after the first —
+        exactly the module switch it exists for. `useEntrance` keys off focus.
+      - it ran at `Duration.enter` (280ms) on `Easing.standard`. The design
+        gives a ROW `auxRow` at 240ms on cubic-bezier(.2,.85,.2,1); the
+        primitive's `kind: 'row'` is that, and the 8px lift is unchanged.
+
+    `Stagger.messages` stays: the step is this screen's, not the primitive's.
+  */
+  const entering = useEntrance({ index, kind: 'row', step: Stagger.messages });
 
   const person = row.other;
   const name = person ? person.display_name.trim() || person.username : 'Someone';
@@ -239,31 +243,6 @@ function ConversationRowBase({
       ? `You: ${row.preview}`
       : row.preview
     : 'No messages yet';
-
-  // ---- entrance: fade + translateY(8) → 0, 50ms per row, off under reduce-motion
-  const enter = useSharedValue(reduced ? 1 : 0);
-  /*
-    Read once, at mount. The inbox reorders itself the moment a message lands
-    (`last_message_at` is the sort key), and reading `index` live would re-run
-    the entrance on rows that never left the screen.
-  */
-  const delay = useRef(Math.min(index, MAX_STAGGER_STEPS) * Stagger.messages);
-
-  useEffect(() => {
-    if (reduced) {
-      enter.value = 1;
-      return;
-    }
-    enter.value = withDelay(
-      delay.current,
-      withTiming(1, { duration: Duration.enter, easing: Easing.bezier(0.2, 0.8, 0.2, 1) }),
-    );
-  }, [enter, reduced]);
-
-  const entering = useAnimatedStyle(() => ({
-    opacity: enter.value,
-    transform: [{ translateY: (1 - enter.value) * 8 }],
-  }));
 
   const openThread = useCallback(() => {
     onOpenThread(row.conversationId);

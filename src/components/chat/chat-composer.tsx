@@ -20,6 +20,7 @@
  * so the send on this bar and the send on the DM bar cannot drift apart again.
  */
 
+import { useQueryClient } from '@tanstack/react-query';
 import { Send } from 'lucide-react-native';
 import { useCallback, useMemo, useState } from 'react';
 import {
@@ -36,8 +37,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ChatGround } from '@/components/chat/bubble-kit';
-import { CircleIconButton } from '@/components/ui';
-import { useSendMessage, type ChatScope } from '@/features/chat/queries';
+import { CircleIconButton, useToast } from '@/components/ui';
+import { chatKeys, useSendMessage, type ChatScope } from '@/features/chat/queries';
 import { Rule, Space, TOUCH_TARGET, Type, raised } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
@@ -111,6 +112,8 @@ export function ChatComposer({
   const insets = useSafeAreaInsets();
   const scope = useMemo<ChatScope>(() => ({ loungeId, roomId: roomId ?? null }), [loungeId, roomId]);
   const send = useSendMessage(scope);
+  const client = useQueryClient();
+  const toast = useToast();
 
   const [value, setValue] = useState('');
   const [height, setHeight] = useState(MIN_INPUT_HEIGHT);
@@ -139,8 +142,31 @@ export function ChatComposer({
     */
     setValue('');
     setHeight(MIN_INPUT_HEIGHT);
-    send.mutate(trimmed);
-  }, [canSend, send, trimmed]);
+
+    send.mutate(trimmed, {
+      /*
+        A SEND INTO A LOG THAT NEVER LOADED GOES THROUGH AND SHOWS NOTHING, AND
+        THAT IS WORTH SAYING OUT LOUD.
+
+        Every cache write in `useSendMessage` is guarded `data ? … : data` —
+        correctly, because there is no page array to splice into when the list
+        query failed or has not resolved. The consequence is that the optimistic
+        entry is dropped, the confirmed row is dropped, and the row IS in the
+        database: the field clears, nothing appears, and no error is raised
+        because nothing went wrong. Indistinguishable from a message that was
+        eaten, and unreportable.
+
+        Failures already toast from the mutation itself. This covers the other
+        case — it worked, and you still cannot see it — and it is checked at
+        callback time rather than during render so the bar does not have to
+        subscribe to the log's cache entry to draw itself.
+      */
+      onSuccess: () => {
+        if (client.getQueryData(chatKeys.messages(loungeId, roomId ?? null))) return;
+        toast.show('Sent. The log has not loaded, so it is not on screen.', 'info');
+      },
+    });
+  }, [canSend, client, loungeId, roomId, send, toast, trimmed]);
 
   const frame = FRAME[ground];
   const inSheet = ground === 'sheet';

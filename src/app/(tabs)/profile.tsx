@@ -42,14 +42,9 @@ import {
   WifiOff,
   type LucideIcon,
 } from 'lucide-react-native';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View, type TextStyle } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
@@ -67,16 +62,8 @@ import { useMyLounges, useProfile, type MyLounge } from '@/features/profile/quer
 import { useAuth } from '@/lib/auth';
 import type { ProfileRow } from '@/lib/database.types';
 import { useDockReserve } from '@/lib/dock';
-import {
-  Duration,
-  Fonts,
-  Radii,
-  Rule,
-  Space,
-  TOUCH_TARGET,
-  Type,
-  tracking,
-} from '@/lib/theme';
+import { useEntrance } from '@/lib/entrance';
+import { Fonts, Radii, Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 import { usePlayback, type SourcePreference } from '@/playback/store';
 
@@ -126,7 +113,6 @@ const readout = (size: number): TextStyle => ({
 
 export default function ProfileScreen() {
   const C = useColors();
-  const reduced = useReducedMotion();
   const dockReserve = useDockReserve();
   const toast = useToast();
   const { user, profile, loading, signOut, refreshProfile } = useAuth();
@@ -150,15 +136,39 @@ export default function ProfileScreen() {
   const sourcePreference = usePlayback((s) => s.sourcePreference);
 
   /*
-    Driven from a shared value in an effect, never `entering={FadeIn…}`: a
-    Reanimated layout animation marks the view hidden until it runs, and on
-    react-native-web it never runs.
+    ===================== HOW THIS SCREEN ARRIVES =====================
+
+    There was a local entrance here — a shared value, an effect and a plain
+    `withTiming` on OPACITY ONLY — and identical copies in all three settings
+    screens. It is `useEntrance` now, for two reasons neither copy could fix
+    from inside its own file:
+
+      - it faded and did not LIFT, so the screen dissolved rather than arrived.
+        A dissolve is the thing the user objected to by name; the design's
+        `auxIn` is 10px of travel on a decelerate curve, and the travel is most
+        of what makes it read as arrival.
+      - it ran on MOUNT, and this tab never unmounts. So You animated in exactly
+        once per app launch and was silent on every return to the tab
+        afterwards, which is precisely when it was being looked for.
+        `useEntrance` keys off focus and replays.
+
+    WHAT ANIMATES, AND WHAT DELIBERATELY DOES NOT.
+
+    One module and one list, the same grammar the Feed settled on:
+
+      MODULE  the whole column — identity card, menu card, section head and
+              Sign out. A 10px lift, once, on entering the tab.
+      ROWS    the lounges, staggered by their own `index` inside `LoungeCard`.
+              This is the only genuine list on the screen.
+
+    The identity card does NOT get a step of its own, and that is the deliberate
+    part. It is the subject of the screen rather than an item in a queue, and it
+    is also the slot that holds the skeleton — nobody should wait longer for a
+    placeholder than for the thing it stands in for. The menu card is one object
+    with a hairline through it; stepping its two rows apart would tear that
+    hairline in half and make one card look like two.
   */
-  const enter = useSharedValue(0);
-  useEffect(() => {
-    enter.value = reduced ? 1 : withTiming(1, { duration: Duration.enter });
-  }, [reduced, enter]);
-  const enterStyle = useAnimatedStyle(() => ({ opacity: enter.value }));
+  const moduleStyle = useEntrance({ kind: 'module' });
 
   /*
     SIGNING OUT IS A TWO-STEP NOW, AND THE FIRST STEP IS THE APP'S OWN DIALOG.
@@ -244,7 +254,7 @@ export default function ProfileScreen() {
 
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={[styles.root, { backgroundColor: C.bg }]}>
-      <Animated.View style={[styles.flex, enterStyle]}>
+      <Animated.View style={[styles.flex, moduleStyle]}>
         <ScrollView
           contentContainerStyle={[
             styles.content,
@@ -379,9 +389,9 @@ export default function ProfileScreen() {
       {/*
         A SIBLING of the animated wrapper, not a child. On native a Modal is its
         own window and an ancestor's opacity cannot reach it, but on
-        react-native-web it renders inline in the DOM — parented under the enter
-        fade, the dialog would inherit whatever opacity that wrapper happened to
-        be holding.
+        react-native-web it renders inline in the DOM — parented under the module
+        entrance, the dialog would inherit whatever opacity that wrapper happened
+        to be holding, and now its 10px offset as well.
       */}
       <ConfirmDialog
         visible={signOutOpen}

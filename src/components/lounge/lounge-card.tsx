@@ -20,9 +20,17 @@
  * "nested".
  *
  * THE ACCENT. A live lounge is a STATE, so it is coral, in three registers: a
- * wash pill when there is a NUMBER to report, a bare dot when a Session is up
- * but empty, and the `badge` word beside the name for a membership you already
- * hold. All of them mean "this is true of the world right now".
+ * wash pill when there is a NUMBER to report, a bare dot when a Session is
+ * PLAYING to an empty room, and the `badge` word beside the name for a
+ * membership you already hold. All of them mean "this is true of the world
+ * right now".
+ *
+ * WHICH IS ONLY WORTH SAYING IF `isLive` IS TRUE OF THE WORLD, AND IT WAS NOT.
+ * Callers used to pass `activeSessions > 0` — a room ROW EXISTING — so a lounge
+ * where somebody had pressed "Start a Session" and immediately backed out wore
+ * the live dot forever. `isLive` is a verdict now, not a row count, and
+ * `isLoungeLive` in `@/features/lounges/live` is the only thing allowed to
+ * reach it. See the note on the prop.
  *
  * The one blue thing is `cta`, and it is blue because it is the only thing on
  * the row that names an ACTION — "Join". It is drawn as an affordance INSIDE
@@ -39,23 +47,33 @@
  * app shipped three lounge rows with three different tile radii. `badge` and
  * `cta` are the two props those forks actually needed; both screens now render
  * this.
+ *
+ * THE ARRIVAL IS `useEntrance` AND IS NO LONGER BUILT HERE. This file used to
+ * hand-roll `auxRow`: its own shared value, its own reduced-motion branch, its
+ * own `useRef(index * Stagger.feed)` and a 280ms `Duration.enter` on a curve one
+ * control point off the design's. Three files had grown their own copy of that
+ * animation. The shared hook keeps the one thing this copy was right about — the
+ * delay is read ONCE and held, so a realtime refetch reordering the list cannot
+ * restart the entrance of a row already sitting still — and fixes two things it
+ * could not fix from in here: it keys off FOCUS rather than mount, so the
+ * cascade replays every time a screen is entered instead of once per app launch
+ * (a tab navigator never unmounts its screens), and it runs at `Duration.row`
+ * (240ms) with the 8px lift the design actually specifies for a row, where this
+ * copy had borrowed a module's 280ms.
+ *
+ * This row is rendered by three screens, so it is also the single place where
+ * fixing that reaches the most of the app.
  */
 
 import { Image } from 'expo-image';
-import { memo, useEffect, useRef } from 'react';
+import { memo } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import Animated, {
-  Easing,
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withDelay,
-  withTiming,
-} from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 
 import { LiveDot } from '@/components/feed/live-dot';
 import { GlassCard, Skeleton, StatusPill } from '@/components/ui';
-import { Duration, Fonts, Radii, Rule, Space, Stagger, Type, tracking } from '@/lib/theme';
+import { useEntrance } from '@/lib/entrance';
+import { Duration, Fonts, Radii, Rule, Space, Type, tracking } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
 /** `card` is Explore's row (L268); `row` is the profile's (L399). */
@@ -112,7 +130,14 @@ export type LoungeCardProps = {
   iconUrl?: string | null;
   /** Stand-in in the tile. Derived from the name when absent. */
   tag?: string;
-  /** A Session is running in this lounge. */
+  /**
+   * A LIVE Session is running in this lounge — playing, or with somebody in it.
+   *
+   * NOT "a room row exists", which is what every caller used to pass and what
+   * lit this dot on empty lounges. `isLoungeLive(summary)` from
+   * `@/features/lounges/live` is the one correct source; anything else is a
+   * screen inventing its own definition of the word, which is the bug.
+   */
   isLive?: boolean;
   /** People inside those Sessions. Above zero, the pill reports the number. */
   listeners?: number;
@@ -129,7 +154,7 @@ export type LoungeCardProps = {
   cta?: string;
   /** A join is in flight: the row stops taking taps and steps back. */
   busy?: boolean;
-  /** Position in the list, for the 55ms entrance stagger. */
+  /** Position in the list. Drives `useEntrance`'s 55ms-per-row stagger. */
   index?: number;
   /**
    * `card` (the default) stands on the page: radius 24, a shadow, and the
@@ -179,14 +204,21 @@ function LoungeCardBase({
   accessibilityHint,
 }: LoungeCardProps) {
   const C = useColors();
-  const reduced = useReducedMotion();
   const s = SIZES[variant];
 
   const count = Math.max(0, listeners);
   /*
-    The pill carries a number; the dot carries none. An active Session with
-    nobody in it yet is still worth surfacing — it is an invitation — but a pill
-    reading "0" would look like a bug rather than an opening.
+    The pill carries a number; the dot carries none. A pill reading "0" would
+    look like a bug rather than an opening, so the numberless case gets the dot.
+
+    WHAT THE DOT MEANS CHANGED WITH `isLive`. It used to read "an active Session
+    with nobody in it yet is still worth surfacing — it is an invitation", and
+    on the old predicate that fired for any room row that had ever been created:
+    the invitation was to an empty room with no track in it. Now `isLive` is
+    already a verdict, so `isLive && count === 0` is the narrow real case it was
+    always meant to be — a Session still PLAYING after the last person walked
+    out. The timeline is running; whoever opens it lands mid-track. That is
+    worth a dot and has no number to put in a pill.
   */
   const showPill = isLive && count > 0;
   const showDot = isLive && count === 0;
@@ -200,26 +232,8 @@ function LoungeCardBase({
     .filter(Boolean)
     .join(', ');
 
-  // ---- entrance: translateY(8) → 0 + fade, 55ms per row, off under reduce-motion
-  const enter = useSharedValue(reduced ? 1 : 0);
-  /** Read once at mount, so a refetch reordering the list does not replay it. */
-  const delay = useRef(index * Stagger.feed);
-
-  useEffect(() => {
-    if (reduced) {
-      enter.value = 1;
-      return;
-    }
-    enter.value = withDelay(
-      delay.current,
-      withTiming(1, { duration: Duration.enter, easing: Easing.bezier(0.2, 0.8, 0.2, 1) })
-    );
-  }, [enter, reduced]);
-
-  const entering = useAnimatedStyle(() => ({
-    opacity: enter.value,
-    transform: [{ translateY: (1 - enter.value) * 8 }],
-  }));
+  /* `auxRow` — an 8px lift on a 55ms step. See the header for what this replaced. */
+  const entering = useEntrance({ index, kind: 'row' });
 
   return (
     <Animated.View style={entering}>

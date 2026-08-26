@@ -21,14 +21,23 @@
  * from the Feed's lounge tile (L269-272). `LoungeCard` states the same two
  * facts in its own grammar: the count is the `meta` line under the name in
  * `ink3`, and the live state is the coral pill in the trailing slot (a number
- * when there is one to report, a bare dot when a Session is up but empty). No
- * information was dropped — only a second layout for it.
+ * when there is one to report, a bare dot when a Session is playing to an empty
+ * room). No information was dropped — only a second layout for it.
  *
  * WHY THE LIVE STATE IS THE ONLY ACCENT. These are lounges you are already in,
  * so there is no action to offer per row — the card IS the action. That leaves
  * coral free to do the one job it has here: say which lounges have something
  * happening in them right now. No blue appears in the list at all, which is
  * correct; the only blue on the screen is the empty state's CTA.
+ *
+ * AND THAT JOB WAS BEING DONE WRONG, IN TWO PLACES ON THIS SCREEN. Both the
+ * row's `isLive` and the masthead's "· N live" read `activeSessions > 0`, which
+ * counts rooms that EXIST rather than rooms that are happening. `rooms.is_active`
+ * goes true when a Session row is inserted and stays true until somebody ends
+ * it, so backing straight out of a Session you just started left this screen
+ * claiming a live lounge indefinitely. Both now call `isLoungeLive` from
+ * `@/features/lounges/live`, which is also what the lounge header and the
+ * Session card read — one definition of the word, not three.
  *
  * Redeeming a code lives on Explore, where the design puts it. It stays
  * reachable from the empty state, which is the one moment you have no lounges
@@ -37,7 +46,7 @@
 
 import { router } from 'expo-router';
 import { Plus, Users, WifiOff, type LucideIcon } from 'lucide-react-native';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   FlatList,
   Pressable,
@@ -47,48 +56,43 @@ import {
   View,
   type ListRenderItemInfo,
 } from 'react-native';
-import Animated, {
-  Easing,
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 
 import { JoinCodeModal } from '@/components/lounge/join-code-modal';
 import { LoungeCard, LoungeListSkeleton } from '@/components/lounge/lounge-card';
 import { EmptyState, Screen, Skeleton, useToast } from '@/components/ui';
+import { isLoungeLive } from '@/features/lounges/live';
 import { loungeErrorMessage, useMyLounges, type LoungeSummary } from '@/features/lounges/queries';
 import { useDockReserve } from '@/lib/dock';
-import { Duration, Radii, Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
+import { useEntrance } from '@/lib/entrance';
+import { Radii, Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
 /** 18 in every nocturne artboard. See the note on the same constant in `explore.tsx`. */
 const GUTTER = 18;
 
-function useModuleEnter() {
-  const reduced = useReducedMotion();
-  const t = useSharedValue(reduced ? 1 : 0);
+/*
+  ===================== HOW THIS SCREEN ARRIVES =====================
 
-  /*
-    An effect, never `entering={FadeIn}`. Reanimated marks an entering view
-    `visibility: hidden` until its animation runs, and on react-native-web that
-    animation never fires — leaving a screen that reports the correct colour,
-    size and layout while being completely invisible.
-  */
-  useEffect(() => {
-    if (reduced) {
-      t.value = 1;
-      return;
-    }
-    t.value = withTiming(1, { duration: Duration.enter, easing: Easing.bezier(0.2, 0.8, 0.2, 1) });
-  }, [reduced, t]);
+  The third copy of `useModuleEnter` lived here — the Feed and Explore carried
+  the other two — and all three are `useEntrance` now. The copy ran on MOUNT,
+  which in a tab navigator means once per app launch and never again: the
+  screens are kept mounted, so returning to this tab replayed nothing. That is
+  exactly the switch the user was watching. `useEntrance` keys off focus.
 
-  return useAnimatedStyle(() => ({
-    opacity: t.value,
-    transform: [{ translateY: (1 - t.value) * 8 }],
-  }));
-}
+  One module, one list, the design's own grammar:
+
+    MODULE  the whole column — masthead, the create button, the list frame. A
+            10px `auxIn` lift on entering the tab.
+    ROWS    `LoungeCard`, staggered by `index` at 55ms a step, so the lounges
+            land one after another rather than all at once.
+
+  The masthead rides the module rather than arriving separately: a title and a
+  count sliding in ahead of the list they describe reads as two events where
+  there is only one. The skeletons and the error card get no entrance at all —
+  a placeholder is something the user is waiting on, and delaying it is the one
+  thing motion must never do.
+*/
 
 /**
  * The screen with no list on it. This is where the two-action case earns its
@@ -124,7 +128,8 @@ function QuietCard({
 export default function LoungesScreen() {
   const C = useColors();
   const toast = useToast();
-  const moduleStyle = useModuleEnter();
+  /* One arrival for the whole column — see the note above `QuietCard`. */
+  const moduleStyle = useEntrance({ kind: 'module' });
   const dockReserve = useDockReserve();
 
   const [joinOpen, setJoinOpen] = useState(false);
@@ -144,7 +149,12 @@ export default function LoungesScreen() {
   );
 
   const renderItem = useCallback(({ item, index }: ListRenderItemInfo<LoungeSummary>) => {
-    const { lounge, memberCount, activeSessions, listeners } = item;
+    /*
+      `activeSessions` is deliberately NOT destructured any more. It is the
+      field this row used to light its coral from, and it answers a different
+      question than the one being asked — see the header.
+    */
+    const { lounge, memberCount, listeners } = item;
 
     return (
       <LoungeCard
@@ -158,7 +168,7 @@ export default function LoungesScreen() {
         */
         meta={`${memberCount} ${memberCount === 1 ? 'member' : 'members'}`}
         iconUrl={lounge.icon_url}
-        isLive={activeSessions > 0}
+        isLive={isLoungeLive(item)}
         listeners={listeners}
         index={index}
         onPress={() => router.push({ pathname: '/lounge/[id]', params: { id: lounge.id } })}
@@ -167,12 +177,17 @@ export default function LoungesScreen() {
     );
   }, []);
 
-  /** The masthead's second line is a readout, not a sentence. */
+  /**
+   * The masthead's second line is a readout, not a sentence — so the number in
+   * it has to be one. `isLoungeLive`, the same predicate the rows use: a
+   * masthead saying "2 live" over a list showing no coral was the readout
+   * disagreeing with the thing it was reading out.
+   */
   const summary = useMemo(() => {
     if (isError) return 'Could not reach your lounges';
     const lounges = data ?? [];
     if (lounges.length === 0) return 'No lounges yet';
-    const live = lounges.filter((item) => item.activeSessions > 0).length;
+    const live = lounges.filter(isLoungeLive).length;
     return live > 0 ? `${lounges.length} joined · ${live} live` : `${lounges.length} joined`;
   }, [data, isError]);
 

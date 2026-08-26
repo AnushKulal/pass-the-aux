@@ -18,17 +18,13 @@ import { BlurTargetView } from 'expo-blur';
 import { useRef } from 'react';
 import { Redirect } from 'expo-router';
 import { Tabs } from 'expo-router/js-tabs';
-// `Easing` here is React Native's Animated easing, which is what a bottom-tab
-// `transitionSpec` is fed. It is NOT `Easing` from @/lib/theme — that one is a
-// CSS cubic-bezier string for a different consumer entirely.
-import { Easing, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { AmbientGround } from '@/components/shell/ambient-ground';
 import { NavBar } from '@/components/shell/nav-bar';
 import { UpdateBanner } from '@/components/shell/update-banner';
 import { useAuth } from '@/lib/auth';
 import { useLocalProfile } from '@/lib/providers';
-import { Duration } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
 
@@ -86,37 +82,68 @@ export default function TabsLayout() {
           */
           sceneStyle: { backgroundColor: 'transparent' },
           /*
-            Every screen in this group animates the same way, and that includes
-            the ones with no cell in the bar — lounge/[id], settings/*, messages/*
-            and room/create are all siblings of the four destinations here,
-            because none of them declares a nested layout.
+            THE NAVIGATOR NO LONGER ANIMATES. THE CONTENT DOES.
 
-            Without this the navigator's default is an instant swap, which is why
-            a screen only ever appeared to animate the FIRST time: what was
-            moving was the content's own entrance, firing on mount.
+            The spec below used to run 200ms, and what it ran was a cross-fade:
+            the "some easy fade" the user asked to be rid of. A cross-fade
+            dissolves the whole outgoing screen into the whole incoming one, so
+            every card on the new module arrives at the same instant with the
+            same treatment — the exact opposite of the design, where a module
+            lifts in and the rows inside it follow one after another
+            (`auxIn`/`auxRow`, aux-nocturne.dc.html L17-18).
 
-            VERIFIED, not assumed: `BottomTabView` reads `animation` off the
-            merged descriptor options, so setting it here reaches every screen
-            in the group, and `fade` resolves to a real opacity cross-fade of
-            the two scenes. Because `sceneStyle` above is transparent, both
-            scenes dissolve through the ambient ground rather than through a
-            slab of `C.bg`.
+            It is worse than merely redundant now. Every screen in this group
+            carries its own `useEntrance` (@/lib/entrance), which fades AND
+            lifts. Run a scene cross-fade underneath that and the two opacity
+            ramps multiply — the stagger survives, but it reads through a
+            dissolve, which is precisely the mush being complained about. One
+            animation per arrival, and it is the one that carries meaning.
+
+            SO WHY IS `animation` STILL 'fade' RATHER THAN 'none'? Because
+            `none` does not mean "swap instantly", it means "apply no scene
+            style at all", and the two are only the same thing on native.
+            VERIFIED against the installed BottomTabView rather than assumed:
+
+              - `animation` is read off the merged descriptor options
+                (BottomTabView.js L175), so whatever is set here reaches every
+                screen in the group — including the ones with no cell in the
+                bar. lounge/[id], settings/*, messages/* and room/create are
+                all siblings of the four destinations below, because none of
+                them declares a nested layout.
+              - `hasAnimation()` short-circuits on `animation !== 'none'`
+                (L67), so under `none` the interpolated `sceneStyle` is never
+                applied to ANY scene. On native that is harmless — the blurred
+                screen's `activityState` drops to STATE_INACTIVE and
+                react-native-screens detaches it. But `screensEnabled()` is
+                false on web, where `MaybeScreen` degrades to a plain absolutely
+                positioned View at `zIndex: -1`. Under `none` that View keeps
+                full opacity, and since `sceneStyle` above is transparent, every
+                screen you have visited would sit stacked behind the one you are
+                looking at, relying on CSS stacking-context rules to stay
+                hidden. Every screen in this group paints an opaque `C.bg` at
+                its own root, so the failure mode is not subtle: the Feed's
+                ambient ground would disappear behind whichever tab you came
+                from.
+              - `fade`'s interpolator (`forFade`) maps progress -1/0/1 to
+                opacity 0/1/0. Keeping it means the blurred scene is explicitly
+                zeroed on every platform, with no appeal to how a browser
+                resolves a negative z-index.
+
+            So the preset stays for its interpolator and the DURATION goes to
+            zero, which is the honest length of a transition that no longer
+            exists. The value snaps rather than ramps, and the content entrance
+            is left as the only thing moving.
+
+            `transitionSpec` could not simply be deleted: BottomTabView reads it
+            from options INDEPENDENTLY of `animation` (L112) and falls back to
+            the preset's own 150ms, so removing it would have restored a shorter
+            cross-fade rather than removing one. `easing` is gone with the
+            duration — there is no curve to shape across no time.
           */
           animation: 'fade',
-          /*
-            The `fade` preset's own spec is 150ms of straight linear, which is
-            below the 200-320ms floor `Duration` is documented as holding and
-            fast enough to register as a jump-cut rather than a transition.
-            This is the same curve and very nearly the same length as the theme
-            dissolve in @/lib/theme-context, so changing tab and changing
-            appearance now move at one tempo.
-
-            Only the timing is overridden — `sceneStyleInterpolator` still comes
-            from the `fade` preset, so this stays a cross-fade.
-          */
           transitionSpec: {
             animation: 'timing',
-            config: { duration: Duration.scrim, easing: Easing.out(Easing.quad) },
+            config: { duration: 0 },
           },
         }}>
         <Tabs.Screen name="index" options={{ title: 'The Feed' }} />

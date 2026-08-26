@@ -69,7 +69,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { BottomTabBarProps } from 'expo-router/js-tabs';
 
 import { useTotalUnread } from '@/features/dm';
-import { Dock, Fonts, Rule, ZIndex, floating } from '@/lib/theme';
+import { Dock, Fonts, Rule, ZIndex, bloom, floating } from '@/lib/theme';
 import { useColors, useTheme } from '@/lib/theme-context';
 
 /** The two declared tabs that sit left of the centre action. */
@@ -246,9 +246,14 @@ export function NavBar({ state, navigation, blurTarget }: NavBarProps) {
         OUTSIDE the BlurView, and that is the whole point.
 
         The capsule must carry `overflow: 'hidden'` or the blur paints square
-        corners behind its rounded border. The FAB is lifted 20px proud of the
-        capsule's top edge, so as a CHILD it had its top 20px sliced clean off —
-        a circle with a flat lid, which is exactly how it shipped.
+        corners behind its rounded border. The FAB stands proud of the capsule's
+        top edge, so as a CHILD its protruding cap was sliced clean off — a
+        circle with a flat lid, which is exactly how it shipped.
+
+        SHRINKING THE BUTTON DOES NOT RETIRE THIS. The cap is 8px now where it
+        was 16, which makes the clipping less obvious and no less real; at any
+        positive lift some of the circle is outside the box that clips. Do not
+        read the smaller number as permission to move it back inside.
 
         As a sibling it is clipped by nothing, and being later in the tree it
         paints above the glass without needing a z-index.
@@ -259,6 +264,17 @@ export function NavBar({ state, navigation, blurTarget }: NavBarProps) {
 }
 
 /* ------------------------------------------------------------------- cells */
+
+/**
+ * The marker behind the selected cell's glyph.
+ *
+ * WIDER THAN IT IS TALL, and that is the load-bearing part of the shape: it has
+ * to be impossible to mistake for the round button in the middle of the same
+ * row. 44x32 inside a 48px cell leaves 2px of air each side and 8px above and
+ * below, so it reads as a pill sitting under one icon rather than as a tile the
+ * cell has been filled with. See `NavCell` for why it exists at all.
+ */
+const ACTIVE = { width: 44, height: 32, radius: 16 } as const;
 
 type CellProps = {
   icon: LucideIcon;
@@ -278,20 +294,85 @@ const NavCell = memo(function NavCell({
   const C = useColors();
 
   /*
-    Selection is carried by ink weight alone — no tile, no pill, no underline.
-    On glass that is enough, and it is the one place this design is quieter than
-    the bar it replaces: a filled selection chip inside a translucent capsule
-    reads as a second piece of chrome floating inside the first.
+    SELECTION IS A PILL BEHIND THE GLYPH, AND THIS FILE USED TO ARGUE AGAINST
+    ONE. The comment that stood here read:
+
+      "Selection is carried by ink weight alone — no tile, no pill, no
+       underline. On glass that is enough, and it is the one place this design
+       is quieter than the bar it replaces: a filled selection chip inside a
+       translucent capsule reads as a second piece of chrome floating inside the
+       first."
+
+    It was faithful to the design — the nav at aux-nocturne.dc.html L878-889 is
+    icons-only and marks the current tab with `navFeedFg` and nothing else — and
+    on a phone it does not work. The note back was that you cannot tell which
+    module you are on. `ink` against `ink3` is two greys a step apart, and the
+    loudest thing in this row by a wide margin is a saturated gradient circle
+    standing proud of the middle of it. Beside that, a grey icon turning a
+    lighter grey does not read as a selection; it reads as a rendering
+    difference. The artboard measures that contrast with no FAB drawn over it.
+    Ours has one, so ours needs more than the artboard does.
+
+    Going past the design here is therefore deliberate, and the constraints on
+    the extra thing are tight:
+      - NOT blue, or anything on the primary ramp. Blue is CREATE and CONTROL,
+        and this control neither creates nor controls — it reports where you
+        already are. A blue marker two cells from the create button would also
+        turn one blue circle into two or three, which is the exact confusion
+        being complained about.
+      - NOT coral. Coral is state-of-the-world: live, playing, unread. Your own
+        location in your own app is not an event happening to you, and the
+        unread badge one cell over has to stay the only warm thing in the bar.
+      - NOT a disc. A filled circle under a glyph is the FAB's own silhouette.
+
+    Which leaves a NEUTRAL pill, wider than tall — no accent to compete with,
+    and a shape that cannot be confused with the round button beside it.
+
+    `surface3` is the fill because it is the only token that moves the right way
+    in BOTH themes: white at 13% in dark, ink at 9% in light, so it lightens
+    dark glass and darkens light glass instead of picking one and inverting in
+    the other. That is the deliberate exception to the usual rule that a fill
+    inside a BlurView must be `surfaceSolid` — an opaque patch would have to
+    guess what the glass composited to and would be wrong on one theme or the
+    other, and the guess is unnecessary here because this never sits on raw
+    blur: the `tint` layer is always painted underneath it. `rule2` closes the
+    edge so the pill survives a bright pill scrolling under the capsule.
+
+    The two other candidates: a dot beneath the glyph is ~4px of signal against
+    a 52px circle and loses the same argument the ink weight just lost; a label
+    that appears only when selected puts 9px text on moving glass inside a 48px
+    cell. Both were weaker for the same reason.
+
+    Selection SNAPS, matching `Chip` — an SVG stroke colour cannot be driven
+    from the UI thread, so a crossfade would ease the pill while the glyph
+    jumped. The ink and stroke-weight change stays: it is now the second cue
+    rather than the only one, and it is what the pill's own contrast rests on.
   */
   const ink = focused ? C.ink : C.ink3;
 
   return (
     <Pressable
       accessibilityRole="tab"
+      // Unchanged, and load-bearing: a screen reader has always announced this
+      // correctly. Everything above is about making the eye agree with it.
       accessibilityState={{ selected: focused }}
       accessibilityLabel={badge > 0 ? label + ', ' + badge + ' unread' : label}
       onPress={onPress}
       style={({ pressed }) => [styles.cell, pressed ? styles.held : null]}>
+      {/*
+        First in the tree, so the glyph and the badge both paint on top of it.
+        The badge keeps its exact `right: 5 / top: 6` corner and simply lands on
+        the pill instead of on bare glass — its 2px `badgeRing` was already
+        there to separate it from whatever is behind, and a neutral fill under a
+        coral dot is not two accents, it is one accent on a surface.
+      */}
+      {focused ? (
+        <View
+          pointerEvents="none"
+          style={[styles.active, { backgroundColor: C.surface3, borderColor: C.rule2 }]}
+        />
+      ) : null}
+
       <Icon size={Dock.icon} strokeWidth={focused ? 2.4 : 2} color={ink} />
 
       {badge > 0 ? (
@@ -308,9 +389,45 @@ const NavCell = memo(function NavCell({
 /* --------------------------------------------------------------------- FAB */
 
 /**
+ * THE CENTRE ACTION'S METRICS, OVERRIDDEN LOCALLY — 60/20/26 was too big.
+ *
+ * `Dock.fab`/`Dock.fabLift`/`Dock.fabIcon` carry the design's own numbers
+ * (aux-nocturne.dc.html L881: `60px`, `margin-top:-20px`, a 26px glyph). At
+ * those values the circle is 88% of the capsule's height, stands 16px proud of
+ * it, and is 25% wider than the 48px cells either side. The bar stopped reading
+ * as five destinations with one emphasised and started reading as one button
+ * with four attendants — which is also why the selected tab was invisible next
+ * to it; see `NavCell`.
+ *
+ * 52/16/22 is the correction, and each number does one job:
+ *
+ *   size 52  only 4px larger than a `Dock.cell`. The emphasis now comes from
+ *            the gradient, the lift and the glow — three things none of the
+ *            other cells have — rather than from bulk.
+ *   lift 16  `fabLift` IS the offset of the circle's centre above the row (see
+ *            `fabWrap`), so this leaves 8px of cap above the capsule:
+ *            unmistakably lifted, half the previous overhang. That overhang is
+ *            also dead to touch on Android, where a child drawn outside its
+ *            parent's bounds still paints but stops receiving touches — so the
+ *            two numbers together leave exactly 52 - 8 = 44 of live target,
+ *            which is `TOUCH_TARGET` on the nose. At 60/20 it was 44 as well,
+ *            so the shrink costs nothing at the finger; go smaller or lift
+ *            higher and it starts to.
+ *   icon 22  equal to `Dock.icon`, the nav glyphs. 22/52 is .42 against the
+ *            design's 26/60 = .43, so the plus keeps its proportion inside the
+ *            circle while stopping being the largest glyph in the bar — the
+ *            first half of the complaint was about the plus, not just the disc.
+ *
+ * The tokens stay in `theme.ts` untouched because that file is not this job's
+ * to edit. If they are ever re-tuned there, these are the values that were
+ * wrong and this is why.
+ */
+const FAB = { size: 52, lift: 16, icon: Dock.icon } as const;
+
+/**
  * Create a session.
  *
- * Lifted 20px out of the capsule and gradient-filled, which makes it the only
+ * Lifted out of the capsule and gradient-filled, which makes it the only
  * element in the shell that is unambiguously an ACTION rather than a place.
  * That is the accent rule doing its job: blue for the thing you do, and the
  * coral badge two cells over for the thing that is happening.
@@ -330,11 +447,21 @@ const CreateButton = memo(function CreateButton() {
         end={{ x: 0, y: 1 }}
         style={[
           styles.fab,
-          // The design's own recipe rather than `bloom()`, whose sizes are all
-          // wider than this — a 60px button under a 42px blur reads as a smudge.
-          { boxShadow: [{ offsetX: 0, offsetY: 12, blurRadius: 30, color: C.glow }] },
+          /*
+            `bloom.sm` (0/8/24), where this used to hand-roll 0/12/30 with the
+            note "the design's own recipe rather than `bloom()`, whose sizes are
+            all wider than this — a 60px button under a 42px blur reads as a
+            smudge". That was true of `bloom.md` at 60px and it is no longer the
+            situation: the button came down to 52 and met the ladder's small
+            step, which `Chip` already uses for a 44px pill. Scaling the literal
+            would have landed on 0/10/26 — near enough that keeping every glow
+            in the app on one ladder is worth the two pixels. The tighter glow
+            is also part of the fix: half of "it dominates the bar" was the
+            50%-alpha blue haze bleeding across the cells either side.
+          */
+          bloom(C.glow, 'sm'),
         ]}>
-        <Plus size={Dock.fabIcon} strokeWidth={2.4} color={C.pillInk} />
+        <Plus size={FAB.icon} strokeWidth={2.4} color={C.pillInk} />
       </LinearGradient>
     </Pressable>
   );
@@ -378,6 +505,23 @@ const styles = StyleSheet.create({
   held: {
     opacity: 0.6,
   },
+  /**
+   * Explicit insets rather than leaning on the cell's `alignItems`/
+   * `justifyContent`. Yoga does apply a parent's alignment to an absolute child
+   * that declares no insets, but react-native-web has not always agreed, and a
+   * selection marker that centres on two platforms and corners on the third is
+   * the kind of bug nobody notices until it ships. The arithmetic is the
+   * centring, written down.
+   */
+  active: {
+    position: 'absolute',
+    top: (Dock.cell - ACTIVE.height) / 2,
+    left: (Dock.cell - ACTIVE.width) / 2,
+    width: ACTIVE.width,
+    height: ACTIVE.height,
+    borderRadius: ACTIVE.radius,
+    borderWidth: Rule.hair,
+  },
 
   badge: {
     position: 'absolute',
@@ -403,27 +547,37 @@ const styles = StyleSheet.create({
    * offset, so the circle stays on the capsule's centre line at every screen
    * width without arithmetic that can drift.
    *
-   * Vertically: `(height - fab) / 2` would centre it in the bar; adding
-   * `fabLift` raises it from there, so 16px of the circle sits above the
-   * capsule's top edge and the rest is inside it. Every one of those pixels is
-   * now drawn, where the clipped version simply lost them.
+   * Vertically: `(height - size) / 2` would centre it in the bar; adding
+   * `lift` raises it from there. Which means `lift` is not the overhang — it is
+   * the offset of the circle's CENTRE above the row's centre line, and the
+   * overhang falls out of it as `size / 2 + lift - height / 2`: 8px at 52/16,
+   * where it was 16px at the design's 60/20. Every one of those pixels is drawn,
+   * where the clipped version simply lost them.
    */
   fabWrap: {
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: (Dock.height - Dock.fab) / 2 + Dock.fabLift,
+    bottom: (Dock.height - FAB.size) / 2 + FAB.lift,
     alignItems: 'center',
   },
-  /** The gap the FAB used to occupy in the row it no longer belongs to. */
+  /**
+   * The gap the FAB used to occupy in the row it no longer belongs to.
+   *
+   * Narrowing it with the button is not cosmetic: the four cells are spaced by
+   * `space-between` against whatever is left over, so the 8px this gives back
+   * becomes 2px of extra air in each of the four gaps. On a 320pt screen those
+   * gaps were down to ~4px, which is where the row started to look crowded and
+   * where two 44px-wide selection pills would have nearly touched.
+   */
   fabSlot: {
-    width: Dock.fab,
+    width: FAB.size,
     height: Dock.height,
   },
   fab: {
-    width: Dock.fab,
-    height: Dock.fab,
-    borderRadius: Dock.fab / 2,
+    width: FAB.size,
+    height: FAB.size,
+    borderRadius: FAB.size / 2,
     alignItems: 'center',
     justifyContent: 'center',
   },

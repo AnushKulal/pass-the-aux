@@ -46,13 +46,32 @@
  * (live, on aux, PREMIUM, OWNER, joinable), blue is ACTION (start, play, send,
  * copy, the selected segment). A live Session card names itself in coral and
  * carries a blue play puck; neither element is ever painted in both.
+ *
+ * "· 1 LIVE" WAS PRINTING OVER "NOTHING PLAYING YET", and that is what the most
+ * recent pass on this file fixed. The header's count was `liveSessions.length`
+ * — the number of rooms `fetchLoungeSessions` returned — and that query filters
+ * on `rooms.is_active`, which is a tombstone flag rather than a liveness one:
+ * true from the moment `useStartSession` inserts the row, true forever after
+ * unless the Session is ended. Start a Session, back out, and the header claims
+ * a live room with no track and nobody in it for the rest of the lounge's life.
+ *
+ * The list is now named `sessions`, because that is what it is, and the count
+ * beside the name runs `countLiveSessions` over it — the shared predicate in
+ * `@/features/lounges/live`, which `SessionCard` and the Lounges tab also read.
+ * The rooms that are not live still render; they simply render as what they
+ * are, which is empty.
+ *
+ * THE SEGMENTS NOW ARRIVE RATHER THAN CROSS-FADE — see the note above
+ * `ChromeBand` for the mechanism, which is the one genuinely awkward thing on
+ * this screen: switching Sessions to Members is a module change to the user and
+ * not a navigation to the router, so focus alone cannot drive it.
  */
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { BlurView } from 'expo-blur';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ArrowLeft, Copy, MoreHorizontal, Share2, UserRoundPlus, X } from 'lucide-react-native';
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   FlatList,
   Keyboard,
@@ -73,7 +92,6 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useEnterStyle } from '@/components/auth/onboarding';
 import { ChatNotice } from '@/components/chat/bubble-kit';
 import { ChatComposer } from '@/components/chat/chat-composer';
 import { ChatList } from '@/components/chat/chat-list';
@@ -91,6 +109,7 @@ import {
   useToast,
 } from '@/components/ui';
 import { shareInviteCode } from '@/features/lounges/invite';
+import { countLiveSessions } from '@/features/lounges/live';
 import {
   loungeErrorMessage,
   loungeKeys,
@@ -105,6 +124,7 @@ import {
   type LoungeSessionSummary,
 } from '@/features/lounges/queries';
 import { useDockReserve, useDockReserveLess } from '@/lib/dock';
+import { useEntrance } from '@/lib/entrance';
 import { supabase } from '@/lib/supabase';
 import {
   Duration,
@@ -157,6 +177,57 @@ const TABS = [
   { key: 'chat', label: 'Chat' },
   { key: 'members', label: 'Members' },
 ];
+
+/*
+  ===================== HOW THIS SCREEN ARRIVES =====================
+
+  Two bands, because two things arrive on genuinely different schedules:
+
+    CHROME  the header row and the segment track. One `auxIn` module lift when
+            the lounge resolves, and then it stays put — a control track that
+            re-animated every time you pressed it would be the control fighting
+            the press.
+    BODY    the selected segment. Its own module lift, and the rows inside it
+            (`SessionCard`, `MemberRow`) cascade at 55ms a step.
+
+  THE SEGMENT SWITCH IS THE HARD PART, and it is worth spelling out because the
+  obvious solution does not work here. `useEntrance` replays off ROUTE FOCUS,
+  which is what makes it right for a tab navigator that keeps its screens
+  mounted. But Sessions -> Members is not a navigation: the route never changes,
+  `useIsFocused` never flips, and a hook waiting on focus would sit still
+  through the one transition on this screen the user actually asked to see
+  animated. To the user that switch IS a module change; it just is not one to
+  the router.
+
+  So the body is REMOUNTED instead, and `key={tab}` is what says so. A fresh
+  mount inside an already-focused route runs `useEntrance`'s effect from zero,
+  so the new segment lifts in exactly the way entering the screen does. The
+  three branches below are already three different component types, which React
+  would remount anyway — the key is there so that stays true if anyone ever
+  folds them into one component, and so the mechanism is stated rather than
+  inherited by accident.
+
+  WHAT DOES NOT ANIMATE: `DetailSkeleton` and `Marker`. One is a placeholder and
+  the other is a failure with a way out of it — delaying either by 280ms to make
+  it prettier is the one thing motion is not allowed to do.
+*/
+
+/**
+ * The band above the segment body — the header and the tab track, arriving as
+ * one object.
+ *
+ * A component rather than an `Animated.View` inline in the screen, and that is
+ * about WHEN the entrance runs, not about tidiness. Called from the screen root,
+ * `useEntrance` would start the moment the route mounts — while `DetailSkeleton`
+ * is still on screen — and be finished before the header had rendered at all.
+ * Mounted here it starts when the lounge resolves, which is when there is
+ * something to watch arrive.
+ */
+function ChromeBand({ children }: { children: ReactNode }) {
+  const enter = useEntrance({ kind: 'module' });
+
+  return <Animated.View style={enter}>{children}</Animated.View>;
+}
 
 /**
  * Deleting a lounge lives here rather than in `@/features/lounges/queries`
@@ -247,7 +318,13 @@ export default function LoungeDetailScreen() {
   // Membership gates every nested read: RLS returns zero rows to a non-member,
   // which would otherwise render as a permanently empty roster.
   const members = useLoungeMembers(isMember ? loungeId : '');
-  const sessions = useLoungeSessions(isMember ? loungeId : '');
+  /*
+    `sessionsQuery`, not `sessions`, because the array it carries is NOT the
+    live ones — it is every `is_active` room in the lounge, live or empty. The
+    old naming (`sessions` for the query, `liveSessions` for its data) is how
+    `liveSessions.length` came to look like a live count in the header.
+  */
+  const sessionsQuery = useLoungeSessions(isMember ? loungeId : '');
 
   const join = useJoinLounge();
   const leave = useLeaveLounge();
@@ -346,12 +423,21 @@ export default function LoungeDetailScreen() {
   }, []);
 
   const memberCount = members.data?.length ?? null;
-  const liveSessions = useMemo(() => sessions.data ?? [], [sessions.data]);
+  const sessions = useMemo(() => sessionsQuery.data ?? [], [sessionsQuery.data]);
+
+  /*
+    THE NUMBER IN THE HEADER. `countLiveSessions`, not `sessions.length` — the
+    predicate lives in `@/features/lounges/live` so this screen, the Session
+    cards below it and the Lounges tab cannot each answer "is it live" a
+    different way. Memoised against the same array the cards render, so the
+    header and the list are always reporting one snapshot.
+  */
+  const liveCount = useMemo(() => countLiveSessions(sessions), [sessions]);
 
   const openSession = useCallback((roomId: string) => router.push(`/room/${roomId}`), []);
 
   const renderMember = useCallback<ListRenderItem<LoungeMemberEntry>>(
-    ({ item }) => (
+    ({ item, index }) => (
       <MemberRow
         displayName={item.profile?.display_name ?? 'Unknown'}
         username={item.profile?.username ?? 'unknown'}
@@ -363,6 +449,12 @@ export default function LoungeDetailScreen() {
         // No presence table yet, so the only presence this screen can honestly
         // assert is your own.
         isOnline={item.userId === userId}
+        /*
+          The roster cascades rather than landing whole. `renderItem` already
+          hands the position over, so this costs the row's `memo` nothing — a
+          number compares as cheaply as the strings beside it.
+        */
+        index={index}
         onPress={() => openProfile(item.userId)}
       />
     ),
@@ -415,35 +507,50 @@ export default function LoungeDetailScreen() {
         />
       ) : (
         <>
-          <LoungeHeader
-            name={lounge.name}
-            memberCount={memberCount}
-            isPublic={lounge.is_public}
-            liveCount={liveSessions.length}
-            onBack={handleBack}
-            onInvite={openInvite}
-            onMenu={openMenu}
-          />
+          <ChromeBand>
+            <LoungeHeader
+              name={lounge.name}
+              memberCount={memberCount}
+              isPublic={lounge.is_public}
+              liveCount={liveCount}
+              onBack={handleBack}
+              onInvite={openInvite}
+              onMenu={openMenu}
+            />
 
-          <View style={styles.tabsSlot}>
-            <SheetTabs tabs={TABS} active={tab} onChange={onTab} variant="segmented" />
-          </View>
+            <View style={styles.tabsSlot}>
+              <SheetTabs tabs={TABS} active={tab} onChange={onTab} variant="segmented" />
+            </View>
+          </ChromeBand>
 
+          {/*
+            `key={tab}` is the segment entrance — see the note above
+            `ChromeBand`. Selecting a segment is a module change to the user and
+            not a navigation to the router, so the body is remounted to give
+            `useEntrance` the fresh mount that focus never provides.
+          */}
           {tab === 'sessions' ? (
             <SessionsTab
+              key={tab}
               description={lounge.description}
-              sessions={liveSessions}
-              isPending={sessions.isPending}
-              isError={sessions.isError}
-              onRetry={() => void sessions.refetch()}
+              sessions={sessions}
+              isPending={sessionsQuery.isPending}
+              isError={sessionsQuery.isError}
+              onRetry={() => void sessionsQuery.refetch()}
               onOpen={openSession}
               onStart={handleStartSession}
               starting={startSession.isPending}
             />
           ) : tab === 'chat' ? (
-            <ChatTab loungeId={loungeId} loungeName={lounge.name} onOpenProfile={openProfile} />
+            <ChatTab
+              key={tab}
+              loungeId={loungeId}
+              loungeName={lounge.name}
+              onOpenProfile={openProfile}
+            />
           ) : (
             <MembersTab
+              key={tab}
               data={members.data ?? []}
               renderItem={renderMember}
               isPending={members.isPending}
@@ -515,6 +622,11 @@ const LoungeHeader = memo(function LoungeHeader({
   name: string;
   memberCount: number | null;
   isPublic: boolean;
+  /**
+   * Sessions in this lounge that are actually live — `countLiveSessions`, from
+   * `@/features/lounges/live`. NOT how many rooms exist, which is what this
+   * used to be handed and why the badge was on over an idle empty room.
+   */
   liveCount: number;
   onBack: () => void;
   onInvite: () => void;
@@ -542,6 +654,12 @@ const LoungeHeader = memo(function LoungeHeader({
           running Session is state — the same claim the pulsing dot on the card
           below makes, and the reason the count is not simply appended to the
           grey string.
+
+          The gate was never the bug: `liveCount > 0` was always here. What was
+          wrong was the number, which counted rooms rather than live ones, so
+          the gate could not be false while any room existed at all. Now the
+          coral span and the coral dots below it are driven by one predicate,
+          and this line disappears on a lounge where nothing is happening.
         */}
         <Text numberOfLines={1} style={[styles.headerMeta, { color: C.ink3 }]}>
           {head}
@@ -564,12 +682,20 @@ const LoungeHeader = memo(function LoungeHeader({
 /* --------------------------------------------------------------- sessions */
 
 /**
- * L440-462. Live Sessions, then the card that starts one.
+ * L440-462. The lounge's open Sessions, then the card that starts one.
  *
- * A ScrollView rather than a FlatList: `fetchLoungeSessions` returns only the
- * rooms with `is_active`, which is a handful even in a busy lounge, and the
- * "Start a Session" card has to sit after the last one rather than float as a
- * footer.
+ * "OPEN", NOT "LIVE", AND THE DISTINCTION IS THE POINT. `fetchLoungeSessions`
+ * returns every room with `is_active` — which includes rooms nobody is in with
+ * nothing on the decks. They belong on this list: a room somebody opened is
+ * still somewhere you can walk into and put a track on, and hiding it would
+ * leave the lounge looking emptier than it is. What they do not get is the
+ * state accent. `SessionCard` runs `isSessionLive` on its own props and paints
+ * itself accordingly, so this segment shows live rooms in coral and empty rooms
+ * in grey, and the header's count agrees with both.
+ *
+ * A ScrollView rather than a FlatList: that list is a handful even in a busy
+ * lounge, and the "Start a Session" card has to sit after the last one rather
+ * than float as a footer.
  */
 function SessionsTab({
   description,
@@ -592,7 +718,13 @@ function SessionsTab({
 }) {
   const C = useColors();
   const dockReserve = useDockReserve();
-  const enter = useEnterStyle();
+  /*
+    `auxIn` on the segment itself; the cards inside carry `auxRow`. This was
+    `useEnterStyle`, the onboarding screens' arrival — a 10px lift with no
+    stagger, no easing curve and no focus awareness, which was fine for a form
+    and wrong for a list.
+  */
+  const enter = useEntrance({ kind: 'module' });
 
   return (
     <Animated.View style={[styles.fill, enter]}>
@@ -634,7 +766,7 @@ function SessionsTab({
             Nobody is on aux. Start one below.
           </Text>
         ) : (
-          sessions.map((entry) => (
+          sessions.map((entry, position) => (
             <SessionCard
               key={sessionKey(entry)}
               name={entry.room.name}
@@ -642,6 +774,12 @@ function SessionsTab({
               listeners={entry.listeners}
               isPlaying={entry.room.is_playing}
               nowPlaying={entry.nowPlaying}
+              /*
+                The rooms arrive one after another rather than as a block. A
+                lounge holds a handful of them, so the position is the whole
+                stagger — `useEntrance` caps it at eight steps in any case.
+              */
+              index={position}
               /*
                 No `solid`: these cards sit on the screen ground, which is the
                 ambient blobs rather than another surface, so 5.5% white has
@@ -699,7 +837,13 @@ function ChatTab({
   loungeName: string;
   onOpenProfile: (userId: string) => void;
 }) {
-  const enter = useEnterStyle();
+  /*
+    ONE MODULE AND NO STAGGER, deliberately. The log's own rows are already a
+    conversation the user reads bottom-up, and a chat that dealt itself out row
+    by row on every visit would make yesterday's messages look like they were
+    arriving now. The segment lifts in; what is inside it is simply there.
+  */
+  const enter = useEntrance({ kind: 'module' });
   const keyboardUp = useKeyboardUp();
 
   /*
@@ -767,7 +911,12 @@ function MembersTab({
 }) {
   const C = useColors();
   const dockReserve = useDockReserve();
-  const enter = useEnterStyle();
+  /*
+    The panel arrives as a module and the rows cascade inside it — the design's
+    own nesting (`auxIn` on the card at L500, `auxRow` on each row at L502), and
+    the reason a roster reads as people rather than as a wall of names.
+  */
+  const enter = useEntrance({ kind: 'module' });
 
   return (
     <Animated.View

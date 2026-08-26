@@ -61,6 +61,37 @@
  *   SessionSyncRow    the coral dot, "You are LOCKED +26ms", the (?), Hard seek
  *   add a track       the way into the search sheet from the player itself
  *
+ * ------------------------------------------------------- how a stage ARRIVES
+ *
+ * The two stages swap WITHOUT a route change, so there is nothing in the
+ * navigator that could animate them — and the navigator's own screen-level
+ * cross-fade is the "some easy fade" this pass exists to remove. Each stage is
+ * instead an `auxIn` MODULE that arrives when it is switched to: one
+ * `useEntrance({ kind: 'module' })` from 'src/lib/entrance.ts', spread onto an
+ * `Animated.View`. See `StageModule` below for why it is a component and not a
+ * hook call up here.
+ *
+ * ONE MODULE PER STAGE, NOT ONE PER BAND. The now tab has four bands — the
+ * track card, the transport, the aux hand-off, the add row — and animating four
+ * bands independently is how a screen ends up looking like it is ASSEMBLING
+ * itself rather than arriving. The Feed's header makes the same ruling for the
+ * same reason. The row stagger is spent where there are actual rows: the queue
+ * sheet and the roster, both of which run it off their own `index`.
+ *
+ * THE INSTRUMENTS ARE GIVEN NO ENTRANCE OF THEIR OWN, and that is the whole of
+ * the rule for them. The LOCKED pill, the drift readout and the scrubber report
+ * live state, and a readout that fades up on a delay of its own is
+ * indistinguishable from a number still being computed — so none of them is
+ * ever handed an index, a step or a style. They ride the module they sit inside,
+ * already at their final value on its first frame. The pill does not even do
+ * that: it lives in the header, above the switch, which never remounts and
+ * never moves.
+ *
+ * THE VIDEO HOST IS OUTSIDE ALL OF IT, necessarily. `VideoStage` is a sibling
+ * of the stage module rather than a child, because its tree position is what
+ * keeps the WebView from remounting — and a live video surface fading in and
+ * out on every tab tap would read as the player reloading.
+ *
  * ------------------------------------------- where the buried features went
  *
  *   MIC          a permanent cell in the lobby bar, plus the drawer. THE VOICE
@@ -137,6 +168,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AddTrackSheet } from '@/components/room/add-track-sheet';
@@ -176,6 +208,7 @@ import {
   useTransport,
 } from '@/features/rooms/queries';
 import { useRoomSync } from '@/features/rooms/use-room-sync';
+import { useEntrance } from '@/lib/entrance';
 import {
   Fonts,
   PointerEvents,
@@ -390,12 +423,25 @@ export default function RoomScreen() {
     handlers did not move with it — the lobby bar and the drawer have always
     driven the same state, and they are now the only two places that do.
   */
+  /*
+    NO TOAST ON EITHER OF THESE, and that is a deliberate removal.
+
+    Both used to announce "Voice is not live yet" on every toggle. The intent
+    was honesty — the transport does not exist, so the button changes a light
+    and nothing else — but the effect was a message on every single tap of a
+    control people expect to flick without ceremony. The state is already
+    legible: the icon changes, and that is the whole feedback a mute button in
+    any other app gives you.
+
+    The honesty has to be paid for somewhere else, though, and this is where it
+    is recorded: until the LiveKit transport lands (see
+    supabase/functions/livekit/index.ts) these two toggle local state ONLY. No
+    audio is captured and nobody hears anything. The controls are real, the
+    plumbing behind them is not yet.
+  */
   const handleMic = useCallback(() => {
-    setMicOn((on) => {
-      if (!on) toast.show('Voice is not live yet', 'info');
-      return !on;
-    });
-  }, [toast]);
+    setMicOn((on) => !on);
+  }, []);
 
   /**
    * Deafen: stop hearing the room, and stop the room hearing you.
@@ -408,10 +454,9 @@ export default function RoomScreen() {
     setDeafened((on) => {
       const next = !on;
       if (next) setMicOn(false);
-      else toast.show('Voice is not live yet', 'info');
       return next;
     });
-  }, [toast]);
+  }, []);
 
   /**
    * Mute one person, for you only.
@@ -548,117 +593,137 @@ export default function RoomScreen() {
         */}
         <VideoStage visible={videoOnStage}>{media}</VideoStage>
 
-        {stage === 'now' ? (
-          <ScrollView
-            style={styles.fill}
-            contentContainerStyle={[styles.nowContent, { paddingBottom: barReserve }]}
-            showsVerticalScrollIndicator={false}>
-            <NowPlaying
-              videoOnStage={videoOnStage}
+        {/*
+          THE STAGE ARRIVES AS ONE MODULE, AND `key` IS WHAT MAKES IT REPLAY.
+
+          Without the key React sees the same component type at the same
+          position on both sides of the switch and reconciles rather than
+          remounts — the module would animate once, when the route is entered,
+          and then sit dead through every tab tap afterwards, which is exactly
+          the moment the arrival is being asked for. Keying on `stage` makes the
+          remount explicit rather than an accident of the two branches happening
+          to render different element types today.
+        */}
+        <StageModule key={stage}>
+          {stage === 'now' ? (
+            <ScrollView
+              style={styles.fill}
+              contentContainerStyle={[styles.nowContent, { paddingBottom: barReserve }]}
+              showsVerticalScrollIndicator={false}>
+              <NowPlaying
+                videoOnStage={videoOnStage}
+                track={track}
+                timeline={timeline}
+                isLoading={isLoading}
+                onResync={resync}
+                onMore={openLobby}
+                onSeek={isHost ? handleSeek : undefined}
+                onAddTrack={openAdd}
+                errorMessage={playbackError?.message ?? null}
+              />
+  
+              {/*
+                Nothing on the deck and nothing behind it: no transport at all.
+                Five disabled circles under an empty card tell the same "something
+                is playing" lie the card itself used to tell. See deviation 1.
+              */}
+              {nothingQueued ? null : (
+                <TransportControls
+                  isHost={isHost}
+                  isPlaying={room?.is_playing === true}
+                  canPlay={Boolean(room?.track_id) || queueLength > 0}
+                  canSkip={Boolean(room?.track_id) || queueLength > 0}
+                  isBusy={transport.isBusy}
+                  auxName={onAux?.displayName ?? null}
+                  onPlayPause={handlePlayPause}
+                  onSkip={handleSkip}
+                  onSeekBack={isHost ? handleSeekBack : undefined}
+                  onShuffle={handleShuffle}
+                  onRepeat={handleRepeat}
+                />
+              )}
+  
+              {/*
+                ALWAYS DRAWN, INCLUDING ON THE EMPTY FACE, and that is deliberate
+                — it is the one row here that is not a claim about a track. Who
+                holds the aux is true of the Session whether or not anything is
+                playing, and an empty Session is exactly when a passenger wants to
+                take it. Gating this on a track would have hidden the app's
+                namesake control at the only moment it is obviously useful.
+              */}
+              <PassTheAux
+                isHost={isHost}
+                isLoading={isLoading && !room}
+                requestSent={requestSent}
+                onRequest={handleRequestAux}
+              />
+  
+              {/*
+                L952-L961. Below the hand-off, not welded under the scrubber: the
+                reading is the last word on this tab, not an annotation on the
+                bar. `onExplain` is the (?) and it opens the real ladder.
+  
+                Withheld on the empty face: "You are LOCKED +0ms" measured against
+                nothing is the same lie the 0:00 scrubber used to tell.
+
+                AND IT IS NEVER GIVEN AN ENTRANCE OF ITS OWN. It rides the stage
+                module with every other band, at its final value on the first
+                frame; what it must never be handed is an `index` or a `step`,
+                because a live readout that fades up after its neighbours reads
+                as a number still being worked out rather than as a row
+                arriving.
+              */}
+              {deckEmpty ? null : (
+                <SessionSyncRow
+                  waiting={isLoading && !track}
+                  driftMs={driftMs}
+                  onResync={resync}
+                  onExplain={openSync}
+                />
+              )}
+  
+              {/*
+                The user asked for add-a-track to be reachable from the now
+                playing tab. `bordered`, not `pri`: the blue on this tab belongs
+                to the play circle, and a second filled blue control below it
+                would argue about which one is the point of the screen. Withheld
+                on the empty face, where `NowPlaying`'s own CTA is already the
+                loudest thing on the screen and a second one would just be it
+                again, quieter.
+              */}
+              {deckEmpty ? null : (
+                <AuxButton
+                  label={queueLength > 0 ? `Add a track · ${queueLength} queued` : 'Add a track'}
+                  variant="bordered"
+                  size="md"
+                  icon={Plus}
+                  align="center"
+                  onPress={openAdd}
+                  fullWidth
+                />
+              )}
+            </ScrollView>
+          ) : (
+            /*
+              PEOPLE ONLY, and that is the whole point of this branch. The orbit
+              and the roster under it, which is exactly what the artboard's
+              members tab is (L965-L1005) — no track card, no "nothing on the
+              deck", and no voice card: `voice` is deliberately not passed, so
+              `SyncOrbit` draws its header without one. Tapping any row mutes
+              that person for this listener only.
+            */
+            <SyncOrbit
+              roomId={roomId}
+              hostId={room?.host_id ?? null}
+              currentUserId={userId}
               track={track}
               timeline={timeline}
-              isLoading={isLoading}
-              onResync={resync}
-              onMore={openLobby}
-              onSeek={isHost ? handleSeek : undefined}
-              onAddTrack={openAdd}
-              errorMessage={playbackError?.message ?? null}
+              mutedIds={mutedIds}
+              onSelectPerson={toggleMemberMute}
+              contentBottomInset={barReserve}
             />
-
-            {/*
-              Nothing on the deck and nothing behind it: no transport at all.
-              Five disabled circles under an empty card tell the same "something
-              is playing" lie the card itself used to tell. See deviation 1.
-            */}
-            {nothingQueued ? null : (
-              <TransportControls
-                isHost={isHost}
-                isPlaying={room?.is_playing === true}
-                canPlay={Boolean(room?.track_id) || queueLength > 0}
-                canSkip={Boolean(room?.track_id) || queueLength > 0}
-                isBusy={transport.isBusy}
-                auxName={onAux?.displayName ?? null}
-                onPlayPause={handlePlayPause}
-                onSkip={handleSkip}
-                onSeekBack={isHost ? handleSeekBack : undefined}
-                onShuffle={handleShuffle}
-                onRepeat={handleRepeat}
-              />
-            )}
-
-            {/*
-              ALWAYS DRAWN, INCLUDING ON THE EMPTY FACE, and that is deliberate
-              — it is the one row here that is not a claim about a track. Who
-              holds the aux is true of the Session whether or not anything is
-              playing, and an empty Session is exactly when a passenger wants to
-              take it. Gating this on a track would have hidden the app's
-              namesake control at the only moment it is obviously useful.
-            */}
-            <PassTheAux
-              isHost={isHost}
-              isLoading={isLoading && !room}
-              requestSent={requestSent}
-              onRequest={handleRequestAux}
-            />
-
-            {/*
-              L952-L961. Below the hand-off, not welded under the scrubber: the
-              reading is the last word on this tab, not an annotation on the
-              bar. `onExplain` is the (?) and it opens the real ladder.
-
-              Withheld on the empty face: "You are LOCKED +0ms" measured against
-              nothing is the same lie the 0:00 scrubber used to tell.
-            */}
-            {deckEmpty ? null : (
-              <SessionSyncRow
-                waiting={isLoading && !track}
-                driftMs={driftMs}
-                onResync={resync}
-                onExplain={openSync}
-              />
-            )}
-
-            {/*
-              The user asked for add-a-track to be reachable from the now
-              playing tab. `bordered`, not `pri`: the blue on this tab belongs
-              to the play circle, and a second filled blue control below it
-              would argue about which one is the point of the screen. Withheld
-              on the empty face, where `NowPlaying`'s own CTA is already the
-              loudest thing on the screen and a second one would just be it
-              again, quieter.
-            */}
-            {deckEmpty ? null : (
-              <AuxButton
-                label={queueLength > 0 ? `Add a track · ${queueLength} queued` : 'Add a track'}
-                variant="bordered"
-                size="md"
-                icon={Plus}
-                align="center"
-                onPress={openAdd}
-                fullWidth
-              />
-            )}
-          </ScrollView>
-        ) : (
-          /*
-            PEOPLE ONLY, and that is the whole point of this branch. The orbit
-            and the roster under it, which is exactly what the artboard's
-            members tab is (L965-L1005) — no track card, no "nothing on the
-            deck", and no voice card: `voice` is deliberately not passed, so
-            `SyncOrbit` draws its header without one. Tapping any row mutes
-            that person for this listener only.
-          */
-          <SyncOrbit
-            roomId={roomId}
-            hostId={room?.host_id ?? null}
-            currentUserId={userId}
-            track={track}
-            timeline={timeline}
-            mutedIds={mutedIds}
-            onSelectPerson={toggleMemberMute}
-            contentBottomInset={barReserve}
-          />
-        )}
+          )}
+        </StageModule>
       </View>
 
       {/*
@@ -825,6 +890,31 @@ function Shell({ children }: { children: ReactNode }) {
       </SafeAreaView>
     </View>
   );
+}
+
+// ------------------------------------------------------------ stage arrival
+
+/**
+ * One arrival for a whole stage — the design's `auxIn`: a 10px lift over 280ms
+ * on the decelerate curve, from `useEntrance` in 'src/lib/entrance.ts'.
+ *
+ * A COMPONENT RATHER THAN A HOOK CALL IN `RoomScreen`, AND THAT IS LOAD-BEARING.
+ * `useEntrance` replays on FOCUS, which is what makes it work across a tab
+ * navigator — but the Session's two stages are not routes and switching between
+ * them does not change focus at all. `RoomScreen` itself never remounts while
+ * the stage toggles, so a style held up there would run once when the route was
+ * entered and stay put through every tap of the switch afterwards. Mounted
+ * inside the branch it animates, and keyed on `stage` at the call site, it
+ * arrives on every switch, which is precisely when the user asked to see it.
+ *
+ * It takes `body`'s own box rather than a new one, because every stage is a
+ * scroller: a wrapper sized to its own content would leave the scroller nothing
+ * to scroll inside.
+ */
+function StageModule({ children }: { children: ReactNode }) {
+  const entrance = useEntrance({ kind: 'module' });
+
+  return <Animated.View style={[styles.stage, entrance]}>{children}</Animated.View>;
 }
 
 // -------------------------------------------------------------- video stage
@@ -1136,10 +1226,18 @@ function Sheet({ visible, title, kicker, onClose, children }: SheetProps) {
           style={StyleSheet.absoluteFill}
         />
 
-        {/* The chat sheet has a composer in it; the other three are unaffected. */}
+        {/*
+          The chat sheet has a composer in it; the other three are unaffected.
+
+          `boxNone` because this slot now claims 82% of the window (see
+          `sheetSlot`). It is a spacer, not a surface: without it the 10px
+          gutters either side of the sheet and the band under it would swallow
+          the taps that the scrim `Pressable` behind is there to catch, and
+          tap-outside-to-dismiss would stop working over most of the screen.
+        */}
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.sheetSlot}>
+          style={[styles.sheetSlot, PointerEvents.boxNone]}>
           {/* The shadow has to live outside the clip — see `LobbyBar`. */}
           <View style={[styles.sheetShell, { marginBottom: lift }, sheetShadow(C)]}>
             <BlurView
@@ -1416,6 +1514,20 @@ const styles = StyleSheet.create({
     minHeight: 0,
   },
   /**
+   * The stage module's box, and it is `body`'s exactly.
+   *
+   * `StageModule` is a wrapper the layout never asked for — it exists so the
+   * arrival has something to animate — so it has to be invisible to the layout:
+   * it claims the rest of the column under the video, and `minHeight: 0` lets
+   * it shrink under a scroller full of content the way `body` already does. Any
+   * other geometry here would move the whole stage a few pixels off its own
+   * gutter, which is a real change dressed up as an animation.
+   */
+  stage: {
+    flex: 1,
+    minHeight: 0,
+  },
+  /**
    * L1010: 16:9 on the card's own corner, inside the body gutter.
    *
    * No `width`: the body is a flex column, so this stretches to the column
@@ -1533,12 +1645,44 @@ const styles = StyleSheet.create({
   },
   sheetSlot: {
     /*
-      82% rather than full height: the strip of scrim above it is the
-      affordance that says "this is a sheet you can dismiss". L1166's
-      `margin:0 10px` lives on this PARENT rather than on the sheet, because
-      the sheet is `width:'100%'` and a margin would put it 20px wider than the
-      screen.
+      `flex: 1` IS THE WHOLE REASON THESE SHEETS DREW NOTHING, AND IT IS NOT A
+      DECORATION.
+
+      This slot used to carry `maxHeight` and padding and nothing else, which
+      leaves its height AUTO — and every layer inside it (`sheetShell`,
+      `sheetGlass`, `sheetBody`) is `flex: 1`. Yoga resolves React Native's
+      `flex: 1` to `flexBasis: 0pt`, so a flex child inside an auto-height
+      parent contributes ZERO to that parent's content height; the parent then
+      measures itself at 0 and hands the child 0 back. A `maxHeight` caps a
+      height, it never supplies one. The sheet was 0px tall on device: the
+      Modal opened, the scrim painted, and the queue, the chat, the lobby
+      drawer and the sync panel all rendered inside a box with no height. That
+      is the "opens and the entire screen is empty" report, and it is the same
+      fault in 'add-track-sheet.tsx'.
+
+      IT LOOKS FINE ON WEB, which is how it shipped, and that was MEASURED
+      rather than assumed: the same three-box structure built in the dev
+      server's own page reports the slot and the shell at their content height,
+      with a flex basis of `0px` and of `0%` alike. CSS sizes an auto-height
+      flex column by its content and then lets the growing child fill that;
+      Yoga, handed an at-most main axis and a zero basis, measures the column at
+      zero and hands the child zero back. So the browser can never show this
+      fault and the device can never hide it.
+
+      `flex: 1` gives the slot the scrim's full height; `maxHeight` then trims
+      it to 82%, which is the ORIGINAL intent below and still holds: the strip
+      of scrim above it is the affordance that says "this is a sheet you can
+      dismiss". Every other sheet in this app avoids the trap the other way
+      round — 'attach-sheet.tsx', 'join-code-modal.tsx' and the lounge invite
+      sheet all leave the shell content-sized with no `flex` on it. That is not
+      an option here: three of these four sheets hold a FlatList, and a list
+      needs a parent with a real height or it has nothing to scroll inside.
+
+      L1166's `margin:0 10px` lives on this PARENT rather than on the sheet,
+      because the sheet is `width:'100%'` and a margin would put it 20px wider
+      than the screen.
     */
+    flex: 1,
     maxHeight: '82%',
     paddingHorizontal: Space.sm + 2,
   },

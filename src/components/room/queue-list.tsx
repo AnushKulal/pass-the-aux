@@ -41,12 +41,18 @@
  *
  * Four states: skeleton rows, an empty state that names the one next move, an
  * error with a retry, and the list itself.
+ *
+ * THE ROWS ARRIVE ONE AFTER ANOTHER (`useEntrance` in 'src/lib/entrance.ts'),
+ * and only the rows do — see the note inside `QueueRow`. The sheet this list is
+ * handed to does its own travel; what happens in here is the design's `auxRow`
+ * cascade landing inside it, which is exactly the pairing the artboard draws.
  */
 
 import { Image } from 'expo-image';
 import { ListMusic, Plus, WifiOff, X } from 'lucide-react-native';
 import { memo, useCallback, type ReactNode } from 'react';
 import { FlatList, StyleSheet, Text, View, type ListRenderItemInfo } from 'react-native';
+import Animated from 'react-native-reanimated';
 
 import {
   BLURHASH_SURFACE,
@@ -57,6 +63,7 @@ import {
   Skeleton,
 } from '@/components/ui';
 import { useQueue, useRemoveQueueItem, type QueueEntry } from '@/features/rooms/queries';
+import { useEntrance } from '@/lib/entrance';
 import { Fonts, Radii, Rule, Space, Type, tracking } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
@@ -179,6 +186,23 @@ const QueueRow = memo(function QueueRow({ entry, index, canRemove, onRemove }: Q
   const { track } = entry;
 
   /*
+    The design's `auxRow`: an 8px lift, one row after another, 55ms a step.
+
+    This is the list the row stagger exists for — a queue is a sequence, and
+    reading it top to bottom as it lands is the same information the numerals
+    down the left edge carry, said in motion. `index` is the one `renderItem`
+    already hands us, so nothing is threaded through and the row stays
+    memoised; `useEntrance` caps the delay at 8 steps, so a long queue finishes
+    arriving instead of trickling.
+
+    The SKELETON rows, the empty state and the error notice deliberately get
+    none of this: nobody should wait an extra beat for a placeholder, and
+    staggering the notice that says a thing failed is making someone wait to be
+    told bad news.
+  */
+  const entrance = useEntrance({ index });
+
+  /*
     The one piece of state a queue row can carry. See deviation 2 in the header:
     the playing track lives in the strip above this list, so the accent inside
     the list belongs to whatever plays next.
@@ -188,7 +212,7 @@ const QueueRow = memo(function QueueRow({ entry, index, canRemove, onRemove }: Q
   const handleRemove = useCallback(() => onRemove(entry.id), [onRemove, entry.id]);
 
   return (
-    <View style={styles.row}>
+    <Animated.View style={[styles.row, entrance]}>
       {/*
         A position is a measurement, so it is tabular like every other number.
         The coral is the only thing marking row one, and colour alone is not a
@@ -262,7 +286,7 @@ const QueueRow = memo(function QueueRow({ entry, index, canRemove, onRemove }: Q
       ) : (
         <View style={styles.removeSpacer} />
       )}
-    </View>
+    </Animated.View>
   );
 });
 

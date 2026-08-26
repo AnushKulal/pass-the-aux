@@ -296,6 +296,13 @@ function MessageRowBase({
 /**
  * Rows re-render only when their own message object is replaced — a send being
  * confirmed or a reaction toggling — never because a sibling arrived.
+ *
+ * WHICH IS WHY THE ROW'S ENTRANCE IS NOT IN THIS FILE. Every card lifts and
+ * fades in as it arrives, and that needs the row's position in the list — a
+ * value that shifts by one for EVERY row each time a message lands, and would
+ * therefore redraw the whole visible log once per incoming message to feed a
+ * number that is read once at mount. So it lives one level up, in `MessageCell`
+ * (see `./chat-list`), where re-rendering is free and this promise stays true.
  */
 export const MessageRow = memo(MessageRowBase);
 

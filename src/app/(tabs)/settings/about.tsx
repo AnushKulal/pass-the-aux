@@ -31,30 +31,17 @@ import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { ArrowLeft } from 'lucide-react-native';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View, type TextStyle } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Wordmark } from '@/components/shell/wordmark';
 import { GlassCard } from '@/components/ui';
 import { installedVersionCode } from '@/lib/apk-updates';
 import { useDockReserve } from '@/lib/dock';
-import {
-  Duration,
-  Fonts,
-  Radii,
-  Rule,
-  Space,
-  TOUCH_TARGET,
-  Type,
-  tracking,
-} from '@/lib/theme';
+import { useEntrance } from '@/lib/entrance';
+import { Fonts, Radii, Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
 /** The artboard's scroll body is `padding:14px 18px 130px`. See `(tabs)/profile.tsx`. */
@@ -81,7 +68,6 @@ const readout = (size: number): TextStyle => ({
 
 export default function AboutScreen() {
   const C = useColors();
-  const reduced = useReducedMotion();
   const dockReserve = useDockReserve();
 
   /*
@@ -91,11 +77,33 @@ export default function AboutScreen() {
   */
   const [handoff, setHandoff] = useState<'idle' | 'opening' | 'error'>('idle');
 
-  const enter = useSharedValue(0);
-  useEffect(() => {
-    enter.value = reduced ? 1 : withTiming(1, { duration: Duration.enter });
-  }, [reduced, enter]);
-  const enterStyle = useAnimatedStyle(() => ({ opacity: enter.value }));
+  /*
+    ===================== HOW THIS SCREEN ARRIVES =====================
+
+    The local shared-value entrance this used to hold — opacity only, fired on
+    mount — is `useEntrance` now, along with its three siblings in Settings,
+    Connections and You. It faded without LIFTING, which is the dissolve the
+    user asked to be rid of, and it fired on mount, which in a group that keeps
+    its screens alive means it played once per app launch and never again.
+
+    WHAT ANIMATES. This screen is a short piece of writing followed by four
+    objects, so it reads top to bottom and the arrival should too:
+
+      MODULE  the whole column. The back link, the title and the lead paragraph
+              ride it — the lead is the second half of the heading, not a card,
+              and the design tightens the gap between them to say so.
+      BANDS   the developer card, the build stats, the sync card and the source
+              link, one step apart at `Stagger.feed`.
+
+    The three stat tiles are ONE band rather than three. They are read as a row
+    of related facts, and a cascade running sideways under one running down is
+    two sequences competing for the same eye.
+  */
+  const moduleStyle = useEntrance({ kind: 'module' });
+  const developerIn = useEntrance({ index: 0 });
+  const statsIn = useEntrance({ index: 1 });
+  const syncIn = useEntrance({ index: 2 });
+  const sourceIn = useEntrance({ index: 3 });
 
   const openRepository = useCallback(async () => {
     setHandoff('opening');
@@ -113,7 +121,7 @@ export default function AboutScreen() {
 
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={[styles.root, { backgroundColor: C.bg }]}>
-      <Animated.View style={[styles.flex, enterStyle]}>
+      <Animated.View style={[styles.flex, moduleStyle]}>
         <ScrollView
           contentContainerStyle={[
             styles.content,
@@ -151,7 +159,13 @@ export default function AboutScreen() {
           </Text>
 
           {/* -------------------------------------------------------- developer */}
-          <View style={styles.card}>
+          {/*
+            The band's entrance goes on the spacing wrapper that was already
+            here rather than on a new one — `GlassCard` is a plain View and
+            cannot take an animated style, but this wrapper can, so the card
+            arrives without anything being added around it.
+          */}
+          <Animated.View style={[styles.card, developerIn]}>
             <GlassCard style={styles.developer}>
               {/*
                 The real wordmark rather than the "AUX" monogram tile this
@@ -171,10 +185,10 @@ export default function AboutScreen() {
                 </Text>
               </View>
             </GlassCard>
-          </View>
+          </Animated.View>
 
           {/* ------------------------------------------------------------ build */}
-          <View style={styles.stats}>
+          <Animated.View style={[styles.stats, statsIn]}>
             <Stat label="Version" value={version} />
             <Stat label="Build" value={build > 0 ? String(build) : UNKNOWN} />
             {/*
@@ -185,10 +199,10 @@ export default function AboutScreen() {
               actually matters.
             */}
             <Stat label="Stack" value="Expo" numeric={false} />
-          </View>
+          </Animated.View>
 
           {/* ------------------------------------------------------------- sync */}
-          <View style={styles.cardTight}>
+          <Animated.View style={[styles.cardTight, syncIn]}>
             <GlassCard>
               <Text style={[styles.kicker, { color: C.ink3 }]}>How sync works</Text>
               <Text style={[styles.prose, { color: C.ink2 }]}>
@@ -198,7 +212,7 @@ export default function AboutScreen() {
                 sync_metrics on Supabase.
               </Text>
             </GlassCard>
-          </View>
+          </Animated.View>
 
           {/* ----------------------------------------------------------- source */}
           {/*
@@ -208,56 +222,63 @@ export default function AboutScreen() {
             it is answering a press, not advertising itself. Hand-rolled rather
             than `AuxButton variant="bordered"` for two reasons: the role is a
             link, not a button, and the label carries the handoff's three states.
+
+            THE FALLBACK ADDRESS IS INSIDE THIS BAND, not a band of its own, and
+            that is what keeps it from animating. It appears only after a failed
+            handoff — long after the screen has settled and its entrance has
+            finished — so as a child of an already-arrived wrapper it simply
+            exists. Given a step of its own it would have faded in on a delay,
+            and nobody should wait to be told how to recover from an error.
           */}
-          <Pressable
-            accessibilityRole="link"
-            accessibilityLabel="Open the source repository"
-            accessibilityState={{ disabled: handoff === 'opening', busy: handoff === 'opening' }}
-            disabled={handoff === 'opening'}
-            onPress={() => {
-              void openRepository();
-            }}
-            style={({ pressed }) => [
-              styles.footer,
-              {
-                backgroundColor: C.surface,
-                borderColor: pressed ? C.pill : C.rule,
-              },
-            ]}>
-            {/*
-              ONE HUE ON THIS LABEL, AND IT IS THE FAILURE ONE.
-
-              This used to read `error ? liveText : pressed ? priTint : ink` —
-              a single Text cycling through BOTH accents: coral when the handoff
-              failed, blue while held. Two things were wrong with it. Coral is
-              the LIVE accent — playing, in sync, on aux, unread — and a browser
-              that refused to open is a failure, which has its own pink-red hue
-              (`danger`); an error is not a state of the world worth
-              celebrating. And no single element may carry two accents at all,
-              so the blue press tint moves off the label entirely: the EDGE
-              already turns blue on press (see the note above), which is this
-              control's designated place for the action colour, and having the
-              word turn blue underneath it was the same signal twice.
-            */}
-            <Text
-              style={[
-                styles.footerLabel,
-                { color: handoff === 'error' ? C.danger : C.ink },
+          <Animated.View style={sourceIn}>
+            <Pressable
+              accessibilityRole="link"
+              accessibilityLabel="Open the source repository"
+              accessibilityState={{ disabled: handoff === 'opening', busy: handoff === 'opening' }}
+              disabled={handoff === 'opening'}
+              onPress={() => {
+                void openRepository();
+              }}
+              style={({ pressed }) => [
+                styles.footer,
+                {
+                  backgroundColor: C.surface,
+                  borderColor: pressed ? C.pill : C.rule,
+                },
               ]}>
-              {handoff === 'opening'
-                ? 'Opening…'
-                : handoff === 'error'
-                  ? 'Could not open the browser'
-                  : 'Open source repository'}
-            </Text>
-          </Pressable>
+              {/*
+                ONE HUE ON THIS LABEL, AND IT IS THE FAILURE ONE.
 
-          {/* The fallback the error leaves you with: the address, selectable. */}
-          {handoff === 'error' ? (
-            <Text selectable style={[styles.fallback, { color: C.ink3 }]}>
-              {REPOSITORY}
-            </Text>
-          ) : null}
+                This used to read `error ? liveText : pressed ? priTint : ink` —
+                a single Text cycling through BOTH accents: coral when the
+                handoff failed, blue while held. Two things were wrong with it.
+                Coral is the LIVE accent — playing, in sync, on aux, unread —
+                and a browser that refused to open is a failure, which has its
+                own pink-red hue (`danger`); an error is not a state of the
+                world worth celebrating. And no single element may carry two
+                accents at all, so the blue press tint moves off the label
+                entirely: the EDGE already turns blue on press (see the note
+                above), which is this control's designated place for the action
+                colour, and having the word turn blue underneath it was the same
+                signal twice.
+              */}
+              <Text
+                style={[styles.footerLabel, { color: handoff === 'error' ? C.danger : C.ink }]}>
+                {handoff === 'opening'
+                  ? 'Opening…'
+                  : handoff === 'error'
+                    ? 'Could not open the browser'
+                    : 'Open source repository'}
+              </Text>
+            </Pressable>
+
+            {/* The fallback the error leaves you with: the address, selectable. */}
+            {handoff === 'error' ? (
+              <Text selectable style={[styles.fallback, { color: C.ink3 }]}>
+                {REPOSITORY}
+              </Text>
+            ) : null}
+          </Animated.View>
         </ScrollView>
       </Animated.View>
     </SafeAreaView>

@@ -35,6 +35,13 @@
  * in, so both of those lines would be fabricated. The state the screen can
  * actually prove goes in the JOINED badge and the CTA's own label.
  *
+ * SO THIS SCREEN PASSES NO `isLive`, AND THAT IS WHY IT SURVIVED THE PASS THAT
+ * REWROTE THE WORD. Every other lounge surface was lighting coral off
+ * "a room row exists" — see `@/features/lounges/live`, which now owns the one
+ * definition of live. Explore was accidentally right by having no data to be
+ * wrong with. If the day comes that a public summary can honestly report
+ * liveness, `isLoungeLive` is what decides it; do not derive it here.
+ *
  * An unmatched code says "No lounge with that code" and nothing else — no
  * colour change on the field, no shake. The sentence is the error.
  */
@@ -50,13 +57,7 @@ import {
   View,
   type ListRenderItemInfo,
 } from 'react-native';
-import Animated, {
-  Easing,
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 
 import { LoungeCard, LoungeListSkeleton } from '@/components/lounge/lounge-card';
 import { AuxButton, EmptyState, GlassCard, Screen, useToast } from '@/components/ui';
@@ -68,7 +69,8 @@ import {
   type PublicLoungeSummary,
 } from '@/features/lounges/queries';
 import { useDockReserve } from '@/lib/dock';
-import { Duration, Fonts, Radii, Rule, Space, Type, tracking } from '@/lib/theme';
+import { useEntrance } from '@/lib/entrance';
+import { Fonts, Radii, Rule, Space, Type, tracking } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
 /**
@@ -111,29 +113,34 @@ const SEARCH_FIELD = 50;
 /** Any other wording for an unmatched code is a bug. */
 const NO_MATCH = 'No lounge with that code';
 
-function useModuleEnter() {
-  const reduced = useReducedMotion();
-  const t = useSharedValue(reduced ? 1 : 0);
+/*
+  ===================== HOW THIS SCREEN ARRIVES =====================
 
-  /*
-    An effect, never `entering={FadeIn}`. Reanimated marks an entering view
-    `visibility: hidden` until its animation runs, and on react-native-web that
-    animation never fires — leaving a screen that reports the correct colour,
-    size and layout while being completely invisible.
-  */
-  useEffect(() => {
-    if (reduced) {
-      t.value = 1;
-      return;
-    }
-    t.value = withTiming(1, { duration: Duration.enter, easing: Easing.bezier(0.2, 0.8, 0.2, 1) });
-  }, [reduced, t]);
+  There used to be a local `useModuleEnter` here — a shared value, an effect, an
+  8px lift and a curve one control point off the design's — and the Feed and the
+  Lounges tab each carried their own copy of the same twenty lines. It is
+  `useEntrance` now, and two things that copy got wrong are fixed by the move:
 
-  return useAnimatedStyle(() => ({
-    opacity: t.value,
-    transform: [{ translateY: (1 - t.value) * 8 }],
-  }));
-}
+    - it ran on MOUNT, and a tab navigator never unmounts its screens. Explore
+      animated in exactly once per app launch and was silent on every return to
+      the tab afterwards — which is precisely when the user was looking for it.
+      `useEntrance` keys off focus, so it replays.
+    - it lifted 8px on a module. `auxIn` is 10px; 8 is `auxRow`, a row's travel.
+
+  WHAT ANIMATES. The design's grammar is one module arriving whole (`auxIn`) and
+  then the rows INSIDE it arriving one after another (`auxRow`). Explore has
+  exactly one list, so it gets exactly one of each:
+
+    MODULE  the whole column — masthead, invite-code card, search pill and list
+            frame. One 10px lift on entering the tab.
+    ROWS    `LoungeCard`, staggered by its `index` at 55ms a step.
+
+  The masthead and the two fields are chrome and ride the module rather than
+  cascading on their own: three bands animating independently above a cascading
+  list is a screen assembling itself, not a screen arriving. The skeletons and
+  the error card never stagger — nobody should wait longer for a placeholder,
+  and a sentence explaining a failure is the last thing to delay.
+*/
 
 /**
  * The list with nothing in it: a card standing where the first row would,
@@ -157,7 +164,8 @@ function QuietCard({
 export default function ExploreScreen() {
   const C = useColors();
   const toast = useToast();
-  const moduleStyle = useModuleEnter();
+  /* One arrival for the whole column — see the note above `QuietCard`. */
+  const moduleStyle = useEntrance({ kind: 'module' });
   const dockReserve = useDockReserve();
 
   const [search, setSearch] = useState('');

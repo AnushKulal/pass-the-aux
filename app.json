@@ -55,15 +55,25 @@
       "eas": {
         "projectId": "3c252219-3619-434b-9ab4-f0931d09722a"
       },
-      "patch": 7,
+      "patch": 8,
       "releaseNotes": [
-        "The app icon is fixed - it was being cropped away by Android before it ever drew",
-        "The plus button in the navigation is a whole circle again, not a clipped one",
-        "Sign in and Create account are separate now, and signing in no longer asks you to build a profile you already have",
-        "Password fields have a show/hide button",
-        "The session's bottom bar swipes up for change lobby and games, and light/dark now fades instead of snapping"
+        "The four intro pages are back, and they swipe",
+        "Cards and messages arrive one by one instead of the whole screen cross-fading",
+        "You can tell which tab you are on again, and the plus button no longer crowds the bar",
+        "LIVE only shows when something is actually playing or someone is listening",
+        "Sign in fits on one screen, so Create account is no longer below the fold"
       ],
       "changelog": [
+        {
+          "patch": 8,
+          "notes": [
+            "The four intro pages are back, and they swipe",
+            "Cards and messages arrive one by one instead of the whole screen cross-fading",
+            "You can tell which tab you are on again, and the plus button no longer crowds the bar",
+            "LIVE only shows when something is actually playing or someone is listening",
+            "Sign in fits on one screen, so Create account is no longer below the fold"
+          ]
+        },
         {
           "patch": 7,
           "notes": [

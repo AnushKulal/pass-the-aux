@@ -79,6 +79,46 @@
  * effect never re-runs, and the sheet stays wherever the finger dropped it.
  * Bumping a counter guarantees the settle regardless.
  *
+ * ================= CHANGING THE LOBBY IS TWO STEPS NOW ==================
+ *
+ * The user, verbatim: "after the session is created and the swipe up thing i
+ * dont want a toggle over there to change the lobby mode and suppose i change
+ * then let it give me an option so it works that way".
+ *
+ * This file had TWO controls that switched the lobby mode on a single tap: the
+ * segmented `LobbyModeSwitch` at the top of the docked panel, and the dock's
+ * own SHARE cell, which is visible whether the dock is open or shut. Either
+ * one moved everybody in the room instantly. Both now ASK first, through the
+ * same `ConfirmDialog`, and 'change-lobby.tsx' carries the long argument for
+ * why a segmented control was the wrong shape for this.
+ *
+ * THE SHARE CELL WAS NOT IN THE COMPLAINT AND IS FIXED ANYWAY, because it is
+ * the same switch and it sits in the one row of this component a thumb reaches
+ * without opening anything. Leaving it instant while the panel confirmed would
+ * be two controls disagreeing about how serious the same act is — the exact
+ * failure `mayChangeLobby` below exists to prevent, one level up.
+ *
+ * TWO `LobbyModeConfirm`s, ONE COPY. `SessionDock` mounts one for its SHARE
+ * cell and `LobbySheetBody` mounts one for the picker and the change panel,
+ * because `LobbySheetBody` is also mounted standalone inside the Session's
+ * `<Sheet>` and has to be able to ask on its own. What is NOT duplicated is
+ * anything that could drift: the guard is one function here, the wording and
+ * the tone are one component in 'change-lobby.tsx'. Only the
+ * `useState<LobbyMode | null>` is per-call-site, which is where UI state
+ * belongs.
+ *
+ * A NESTED MODAL, KNOWINGLY. `ConfirmDialog` is a `Modal`, and in the
+ * standalone mounting `LobbySheetBody` is already inside the Session's
+ * `<Sheet>`, which is another one — so that path stacks a second scrim over
+ * the first. 'lounge/lounge-menu-modal.tsx' declined to adopt `ConfirmDialog`
+ * for exactly that reason and swapped its own body instead. The call goes the
+ * other way here: that sheet had ONE question with a fixed answer, while this
+ * has one question asked from two different components in two different
+ * mountings, and a fourth hand-built dialog to keep in step with the kit's is
+ * a worse cost than a darker scrim on the rarer of the two paths. The dock
+ * path — which is the one the user actually asked about — is not nested at
+ * all: the dock is a plain view in the screen, not a Modal.
+ *
  * ==================== THE DRAWER BODY, WHICH IS OLDER ====================
  *
  * Built from design/nocturne/aux-nocturne.dc.html L1286-L1305 (`sheetDrawer`),
@@ -189,8 +229,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   ChangeLobbyPanel,
-  LobbyModeSwitch,
+  LobbyModeConfirm,
+  LobbyModePicker,
   lobbyModeLabel,
+  lobbyModeName,
   type LobbyMode,
 } from '@/components/room/change-lobby';
 import { readout } from '@/components/room/drift';
@@ -229,33 +271,41 @@ import { useColors, useTheme } from '@/lib/theme-context';
 type Panel = 'controls' | 'change' | 'games' | 'table';
 
 /**
- * The rules of changing the lobby, in the one place both controls that change
- * it can reach.
+ * WHO may change the lobby, in the one place every control that asks can reach.
  *
- * There are two now — the drawer's CHANGE LOBBY panel and the dock's SHARE
- * cell — and a guard copied into two call sites is a guard that will disagree
- * with itself the first time either one is edited. Returns whether the switch
- * may be committed, having already said out loud what happened either way.
+ * There are three ways to ask now — the drawer's CHANGE LOBBY panel, the
+ * docked picker and the dock's SHARE cell — and a guard copied into three call
+ * sites is a guard that will disagree with itself the first time any one of
+ * them is edited.
  *
- * Movie night and screen share have no transport behind them, and saying so
- * here is the honest version of the two `Soon` rows this replaced.
+ * IT IS A BACKSTOP, NOT THE UI. None of the three should ever reach a refusal:
+ * `ChangeLobbyPanel` disables a passenger's rows, `LobbyModePicker` draws a
+ * passenger three pieces of text with no `Pressable` in them, and SHARE opens
+ * the panel for a passenger instead of proposing anything. The toast is what
+ * happens if a future control forgets — which is precisely the kind of thing
+ * that gets forgotten, so it says something useful rather than nothing.
  */
-function announceModeSwitch(
-  next: LobbyMode,
-  isHost: boolean,
-  onNotice: (message: string) => void
-): boolean {
+function mayChangeLobby(isHost: boolean, onNotice: (message: string) => void): boolean {
   if (!isHost) {
     onNotice('Only the person on aux can change the lobby');
     return false;
   }
-
-  onNotice(
-    next === 'music'
-      ? 'Back to music'
-      : `${lobbyModeLabel(next)} is switched on for you — the shared transport lands with the video layer`
-  );
   return true;
+}
+
+/**
+ * The receipt, said AFTER the confirm and never before it.
+ *
+ * IT USED TO CARRY THE CAVEAT AND NO LONGER DOES. The old toast read
+ * "… is switched on for you — the shared transport lands with the video
+ * layer", which is the right sentence in the wrong place: telling someone
+ * their tap did less than they thought, after the tap. `switchCopy` in
+ * 'change-lobby.tsx' says it in the dialog now, before they commit, so this is
+ * left as what a toast is good at — confirming that the thing they asked for
+ * happened.
+ */
+function announceModeSwitched(next: LobbyMode, onNotice: (message: string) => void): void {
+  onNotice(next === 'music' ? 'Back to music' : `The lobby is now ${lobbyModeName(next)}`);
 }
 
 export type LobbySheetBodyProps = {
@@ -329,6 +379,11 @@ export const LobbySheetBody = memo(function LobbySheetBody({
   /** Only used when the caller does not control `mode`. */
   const [localMode, setLocalMode] = useState<LobbyMode>('music');
   const activeMode = mode ?? localMode;
+  /**
+   * The mode somebody has ASKED for and not yet confirmed. Null is the resting
+   * state; anything else means the dialog is up and nothing has moved.
+   */
+  const [pendingMode, setPendingMode] = useState<LobbyMode | null>(null);
 
   const games = useGameTable({ people, currentUserId, isHost, onNotice });
 
@@ -355,7 +410,14 @@ export const LobbySheetBody = memo(function LobbySheetBody({
   const [lastVisible, setLastVisible] = useState(visible);
   if (lastVisible !== visible) {
     setLastVisible(visible);
-    if (!visible) setPanel('controls');
+    if (!visible) {
+      setPanel('controls');
+      // An unanswered question does not survive the drawer closing. The dialog
+      // is a Modal — it is its own window on native and a portal on web — so
+      // it would otherwise be left floating over a Session whose dock the user
+      // has just swiped shut, asking about a control they can no longer see.
+      setPendingMode(null);
+    }
   }
 
   /*
@@ -371,16 +433,42 @@ export const LobbySheetBody = memo(function LobbySheetBody({
   */
   const shown: Panel = panel === 'table' && !games.table ? 'controls' : panel;
 
-  const handleMode = useCallback(
+  /*
+    STEP ONE. Nothing changes here — it opens the question. Both the picker at
+    the top of the docked panel and the full CHANGE LOBBY panel hand their pick
+    to this one function, so neither can ever be the one that commits directly.
+  */
+  const requestMode = useCallback(
     (next: LobbyMode) => {
-      if (!announceModeSwitch(next, isHost, onNotice)) return;
-
-      if (onModeChange) onModeChange(next);
-      else setLocalMode(next);
-      setPanel('controls');
+      if (!mayChangeLobby(isHost, onNotice)) return;
+      // Picking the mode you are already in is not a change to confirm. Both
+      // controls already draw the current option as inert, so this only fires
+      // if one of them stops doing that.
+      if (next === activeMode) return;
+      setPendingMode(next);
     },
-    [isHost, onModeChange, onNotice]
+    [activeMode, isHost, onNotice]
   );
+
+  const cancelMode = useCallback(() => setPendingMode(null), []);
+
+  /*
+    STEP TWO, and the only place in this component that moves the lobby.
+
+    `setPanel('controls')` comes along because confirming from inside the
+    CHANGE LOBBY panel means the question has been answered and there is
+    nothing left to read there — the same pop the instant switch used to do.
+  */
+  const commitMode = useCallback(() => {
+    if (pendingMode == null) return;
+
+    if (onModeChange) onModeChange(pendingMode);
+    else setLocalMode(pendingMode);
+
+    announceModeSwitched(pendingMode, onNotice);
+    setPendingMode(null);
+    setPanel('controls');
+  }, [onModeChange, onNotice, pendingMode]);
 
   const handleCamera = useCallback(() => {
     setCameraOn((on) => {
@@ -407,19 +495,30 @@ export const LobbySheetBody = memo(function LobbySheetBody({
   const toTable = useCallback(() => setPanel('table'), []);
   const toCatalogue = useCallback(() => setPanel('games'), []);
 
+  /*
+    ONE RETURN, NOT FOUR EARLY ONES, AND THE CONFIRM DIALOG IS WHY.
+
+    Every panel in this little stack can be the one you are looking at when the
+    question about the lobby mode is up: the picker asks from the controls
+    list, CHANGE LOBBY asks from its own panel, and the dialog has to outlive
+    the pop back to `controls` that answering it performs. Four early returns
+    would mean four copies of the same `<LobbyModeConfirm>` — four places to
+    forget one. The branch picks a BODY; the tail renders it with the dialog
+    beside it, exactly once.
+  */
+  let body: ReactNode;
+
   if (shown === 'change') {
-    return (
+    body = (
       <PanelShell
         title="Change the lobby"
-        kicker="EVERYONE COMES WITH YOU. THE QUEUE IS KEPT."
+        kicker="EVERYONE COMES WITH YOU · YOU CONFIRM BEFORE ANYONE MOVES"
         onBack={back}>
-        <ChangeLobbyPanel mode={activeMode} canChange={isHost} onChange={handleMode} />
+        <ChangeLobbyPanel mode={activeMode} canChange={isHost} onRequest={requestMode} />
       </PanelShell>
     );
-  }
-
-  if (shown === 'table' && games.table) {
-    return (
+  } else if (shown === 'table' && games.table) {
+    body = (
       <PanelShell title="At the table" kicker="THE MUSIC KEEPS GOING" onBack={back}>
         <GameTablePanel
           table={games.table}
@@ -431,10 +530,8 @@ export const LobbySheetBody = memo(function LobbySheetBody({
         />
       </PanelShell>
     );
-  }
-
-  if (shown === 'games') {
-    return (
+  } else if (shown === 'games') {
+    body = (
       <PanelShell
         title="Lobby games"
         kicker="TAKE A SEAT OR WATCH · THE MUSIC KEEPS GOING"
@@ -442,118 +539,148 @@ export const LobbySheetBody = memo(function LobbySheetBody({
         <LobbyGamesPanel table={games.table} onOpen={openGame} onReturn={toTable} />
       </PanelShell>
     );
+  } else {
+    body = (
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.body}>
+        {/*
+          THE FIRST THING IN VIEW AFTER ONE SWIPE, and that placement is the
+          entire answer to "why is change lobby so hard". In a sheet the modes
+          are behind a tile; in the dock they are the headline. The tile below
+          survives because the picker is one word per option and the panel it
+          opens is three paragraphs — the picker is for someone who already
+          knows which mode they want.
+
+          IT IS A PICKER AND NO LONGER A SWITCH, which is the difference the
+          user asked for: choosing here proposes, and `LobbyModeConfirm` at the
+          bottom of this component is what actually moves the room.
+        */}
+        {docked ? (
+          <LobbyModePicker mode={activeMode} canChange={isHost} onRequest={requestMode} />
+        ) : (
+          <Text style={[readout(10), { color: C.ink3 }]}>
+            {lobbyModeLabel(activeMode)} · {people.length} LISTENING
+          </Text>
+        )}
+
+        {/*
+          The 2×2 grid. Two rows of two rather than a wrapping flex row, because
+          a wrap puts the fourth tile on its own line the moment a label grows a
+          character in another language.
+        */}
+        <View style={styles.grid}>
+          <View style={styles.gridRow}>
+            <Tile icon={Repeat} label="CHANGE LOBBY" onPress={toChange} />
+            <Tile
+              icon={deafened ? HeadphoneOff : Headphones}
+              label={deafened ? 'UNDEAFEN' : 'DEAFEN'}
+              on={deafened}
+              onPress={onDeafen}
+            />
+          </View>
+
+          <View style={styles.gridRow}>
+            <Tile
+              icon={cameraOn ? Video : VideoOff}
+              label={cameraOn ? 'CAMERA ON' : 'CAMERA'}
+              on={cameraOn}
+              onPress={handleCamera}
+            />
+            <Tile
+              icon={Gamepad2}
+              label="LOBBY GAMES"
+              // The table is a state of the world once it exists, so the tile
+              // reports it in coral the same way DEAFEN reports being deafened.
+              on={games.table != null}
+              onPress={toGames}
+            />
+          </View>
+        </View>
+
+        <View style={styles.rows}>
+          {/*
+            Mic and chat are DOCK CELLS when docked — eight pixels above this
+            panel and never out of reach — so drawing them again here would be
+            the same control twice on one screen.
+          */}
+          {docked ? null : (
+            <Row
+              icon={micOn && !deafened ? Mic : MicOff}
+              label="Microphone"
+              sub={deafened ? 'DEAFENED — MIC IS OFF' : micOn ? 'ON' : 'OFF'}
+              on={micOn && !deafened}
+              onPress={onMic}
+            />
+          )}
+          {docked ? null : (
+            <Row
+              icon={MessageCircle}
+              label="Session chat"
+              sub="TALK WITHOUT TALKING"
+              navigates
+              onPress={onChat}
+            />
+          )}
+          <Row
+            icon={Plus}
+            label="Add a track"
+            sub="ANYONE IN THE SESSION CAN ADD"
+            navigates
+            onPress={onAddTrack}
+          />
+          <Row
+            icon={SlidersHorizontal}
+            label="Voice settings"
+            sub="APPLIES TO EVERY LOBBY"
+            navigates
+            onPress={() => onNotice('Voice is not live yet')}
+          />
+        </View>
+
+        {/*
+          Danger, not coral. Leaving the Session is destruction, and this is the
+          one register the accent rule reserves for it — the row this replaced
+          was drawn in `live`, which said "this is happening" about a door.
+
+          Docked, LEAVE is the last cell of the dock and in `danger` there too,
+          so this button would be the second copy of it inside one panel.
+        */}
+        {docked ? null : (
+          <AuxButton
+            label={`Leave ${loungeName}`}
+            onPress={onLeave}
+            variant="danger"
+            icon={LogOut}
+            fullWidth
+          />
+        )}
+      </ScrollView>
+    );
   }
 
   return (
-    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.body}>
-      {/*
-        THE FIRST THING IN VIEW AFTER ONE SWIPE, and that placement is the
-        entire answer to "why is change lobby so hard". In a sheet the mode
-        switch is behind a tile; in the dock it is the headline. The tile below
-        survives because the switch is three words per option and the panel it
-        opens is three paragraphs — the switch is for someone who already knows
-        what they want.
-      */}
-      {docked ? (
-        <LobbyModeSwitch mode={activeMode} canChange={isHost} onChange={handleMode} />
-      ) : (
-        <Text style={[readout(10), { color: C.ink3 }]}>
-          {lobbyModeLabel(activeMode)} · {people.length} LISTENING
-        </Text>
-      )}
+    <>
+      {body}
 
       {/*
-        The 2×2 grid. Two rows of two rather than a wrapping flex row, because
-        a wrap puts the fourth tile on its own line the moment a label grows a
-        character in another language.
+        STEP TWO OF THE SWITCH, and it is a SIBLING of the body rather than
+        something a panel renders. `ConfirmDialog` is a Modal — its own window
+        on native, a portal on web — so nothing above it in this tree can clip
+        or translate it, which matters here more than usual: the docked mounting
+        of this body lives inside the dock's `overflow:'hidden'` glass, and a
+        dialog drawn as an ordinary child of that would be sliced off at the
+        panel's edge and dragged around by the dock's own translateY.
+
+        `people.length` is the roster INCLUDING this person; `switchCopy` does
+        the subtraction, in the one place that can then never disagree with the
+        dock's copy of the same question.
       */}
-      <View style={styles.grid}>
-        <View style={styles.gridRow}>
-          <Tile icon={Repeat} label="CHANGE LOBBY" onPress={toChange} />
-          <Tile
-            icon={deafened ? HeadphoneOff : Headphones}
-            label={deafened ? 'UNDEAFEN' : 'DEAFEN'}
-            on={deafened}
-            onPress={onDeafen}
-          />
-        </View>
-
-        <View style={styles.gridRow}>
-          <Tile
-            icon={cameraOn ? Video : VideoOff}
-            label={cameraOn ? 'CAMERA ON' : 'CAMERA'}
-            on={cameraOn}
-            onPress={handleCamera}
-          />
-          <Tile
-            icon={Gamepad2}
-            label="LOBBY GAMES"
-            // The table is a state of the world once it exists, so the tile
-            // reports it in coral the same way DEAFEN reports being deafened.
-            on={games.table != null}
-            onPress={toGames}
-          />
-        </View>
-      </View>
-
-      <View style={styles.rows}>
-        {/*
-          Mic and chat are DOCK CELLS when docked — eight pixels above this
-          panel and never out of reach — so drawing them again here would be
-          the same control twice on one screen.
-        */}
-        {docked ? null : (
-          <Row
-            icon={micOn && !deafened ? Mic : MicOff}
-            label="Microphone"
-            sub={deafened ? 'DEAFENED — MIC IS OFF' : micOn ? 'ON' : 'OFF'}
-            on={micOn && !deafened}
-            onPress={onMic}
-          />
-        )}
-        {docked ? null : (
-          <Row
-            icon={MessageCircle}
-            label="Session chat"
-            sub="TALK WITHOUT TALKING"
-            navigates
-            onPress={onChat}
-          />
-        )}
-        <Row
-          icon={Plus}
-          label="Add a track"
-          sub="ANYONE IN THE SESSION CAN ADD"
-          navigates
-          onPress={onAddTrack}
-        />
-        <Row
-          icon={SlidersHorizontal}
-          label="Voice settings"
-          sub="APPLIES TO EVERY LOBBY"
-          navigates
-          onPress={() => onNotice('Voice is not live yet')}
-        />
-      </View>
-
-      {/*
-        Danger, not coral. Leaving the Session is destruction, and this is the
-        one register the accent rule reserves for it — the row this replaced
-        was drawn in `live`, which said "this is happening" about a door.
-
-        Docked, LEAVE is the last cell of the dock and in `danger` there too,
-        so this button would be the second copy of it inside one panel.
-      */}
-      {docked ? null : (
-        <AuxButton
-          label={`Leave ${loungeName}`}
-          onPress={onLeave}
-          variant="danger"
-          icon={LogOut}
-          fullWidth
-        />
-      )}
-    </ScrollView>
+      <LobbyModeConfirm
+        pending={pendingMode}
+        listeners={people.length}
+        onConfirm={commitMode}
+        onCancel={cancelMode}
+      />
+    </>
   );
 });
 
@@ -867,6 +994,15 @@ export const SessionDock = memo(function SessionDock({
    * the finger let go of it.
    */
   const [settle, setSettle] = useState(0);
+  /**
+   * The mode the SHARE cell has asked for and not yet had confirmed.
+   *
+   * The dock owns this rather than reaching into `LobbySheetBody`'s copy
+   * because the cell is the dock's own control and is reachable with the panel
+   * shut. Only the flag is duplicated — the guard, the wording and the tone all
+   * live in one place each. See the file header.
+   */
+  const [pendingShare, setPendingShare] = useState<LobbyMode | null>(null);
 
   const travel = Math.max(
     PANEL_FLOOR,
@@ -979,15 +1115,41 @@ export const SessionDock = memo(function SessionDock({
   }, [collapse, onAddTrack]);
 
   /*
-    SHARE is a lobby MODE, not a toggle, which is what the artboard's fourth
-    cell actually is once you ask what it would do. It runs the same guard and
-    the same announcement as the panel's own switch, out of one function, so
-    the two can never come to disagree about who is allowed to do this.
+    SHARE IS A LOBBY MODE, NOT A TOGGLE, which is what the artboard's fourth
+    cell actually is once you ask what it would do — and it therefore ASKS,
+    exactly as the panel's picker does.
+
+    IT USED TO SWITCH ON THE TAP. This cell is in the row that is on screen
+    whether the dock is open or shut, which makes it the easiest control in the
+    Session to hit by accident and the last one that should have been instant.
+    A confirm here is not consistency for its own sake: it is the same act, and
+    two controls disagreeing about how serious the same act is teaches people
+    to ignore the one that asks.
+
+    A PASSENGER GETS THE PANEL, NOT A REFUSAL. Tapping used to toast "only the
+    person on aux can change the lobby", which is a control that cannot work
+    dressed as one that can. Opening the dock instead takes them to the mode
+    readout and the line that says whose call it is — an answer to the question
+    they were actually asking, which is what the lobby is set to. When the dock
+    is already open that readout is on screen, so a second tap correctly does
+    nothing.
   */
   const handleShare = useCallback(() => {
-    const next: LobbyMode = sharing ? 'music' : 'screen';
-    if (announceModeSwitch(next, isHost, onNotice)) onModeChange(next);
-  }, [sharing, isHost, onNotice, onModeChange]);
+    if (!isHost) {
+      settleTo(true);
+      return;
+    }
+    setPendingShare(sharing ? 'music' : 'screen');
+  }, [isHost, settleTo, sharing]);
+
+  const cancelShare = useCallback(() => setPendingShare(null), []);
+
+  const commitShare = useCallback(() => {
+    if (pendingShare == null) return;
+    onModeChange(pendingShare);
+    announceModeSwitched(pendingShare, onNotice);
+    setPendingShare(null);
+  }, [onModeChange, onNotice, pendingShare]);
 
   return (
     <View style={[styles.dockLayer, PointerEvents.boxNone]}>
@@ -1132,7 +1294,21 @@ export const SessionDock = memo(function SessionDock({
               // Coral once it is on: a lobby that is sharing a screen is a
               // state of the room, the same as one that is playing.
               tone={sharing ? 'live' : 'quiet'}
-              hint={sharing ? 'Go back to music' : 'Switch the lobby to screen share'}
+              /*
+                The spoken name has to match what the press does, and for a
+                passenger the press opens the lobby rather than switching it.
+                A cell that announces "switch the lobby to screen share" and
+                then declines to is worse than one that never offered.
+              */
+              hint={
+                !isHost
+                  ? sharing
+                    ? 'The lobby is on screen share. Open the lobby controls'
+                    : 'Open the lobby controls'
+                  : sharing
+                    ? 'Go back to music. You will be asked to confirm'
+                    : 'Switch the lobby to screen share. You will be asked to confirm'
+              }
               onPress={handleShare}
             />
             <DockCell
@@ -1186,6 +1362,24 @@ export const SessionDock = memo(function SessionDock({
           </View>
         </BlurView>
       </Animated.View>
+
+      {/*
+        THE SHARE CELL'S QUESTION, and it is deliberately a sibling of the
+        shell rather than a child of it.
+
+        The shell is translated in Y on every frame of a drag and its glass
+        clips to the top corners — "a view with overflow:hidden CLIPS what its
+        children draw outside it" is the hazard that shipped the nav FAB with a
+        flat lid. A Modal is its own window on native and a portal on web, so
+        neither would actually reach it today; putting it out here anyway
+        means the answer does not depend on that staying true.
+      */}
+      <LobbyModeConfirm
+        pending={pendingShare}
+        listeners={people.length}
+        onConfirm={commitShare}
+        onCancel={cancelShare}
+      />
     </View>
   );
 });

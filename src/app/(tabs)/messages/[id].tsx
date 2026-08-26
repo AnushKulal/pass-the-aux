@@ -46,6 +46,12 @@
  *  3. **Search is local to what is loaded.** It filters the pages already in
  *     the cache rather than querying.
  *
+ *  4. **The entrance is per-bubble, not per-screen.** The header lifts in as a
+ *     module and the log staggers up from the newest message; because the list
+ *     is inverted, index 0 is the bottom one. Same `useEntrance` call the
+ *     lounge and Session logs make, so the two chat surfaces still cannot be
+ *     told apart by how they arrive.
+ *
  * The bubbles and the composer are `@/components/dm` components and are styled
  * there, not here. The artboard's call and video buttons are deliberately not
  * drawn: there is no call feature behind them, and chrome for a feature that
@@ -73,7 +79,6 @@ import {
 import Animated from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useEnterStyle } from '@/components/auth/onboarding';
 import { ChatNotice, LogStart, styles as kit } from '@/components/chat/bubble-kit';
 import { DmAttachSheet, type AttachOption } from '@/components/dm/attach-sheet';
 import { DmComposer } from '@/components/dm/composer';
@@ -92,6 +97,7 @@ import {
   type DmMessage,
 } from '@/features/dm';
 import { useDockReserveLess } from '@/lib/dock';
+import { useEntrance } from '@/lib/entrance';
 import {
   Fonts,
   Radii,
@@ -452,12 +458,16 @@ export default function DmThreadScreen() {
   }, [trimmedQuery, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   const renderItem = useCallback(
-    ({ item }: ListRenderItemInfo<Decorated>) => (
+    ({ item, index }: ListRenderItemInfo<Decorated>) => (
       <MessageBubble
         message={item.message}
         showHeader={item.showHeader}
         showStamp={item.showStamp}
         daySeparator={item.daySeparator}
+        // Straight through from the list. The bubble is memoised and `index` is
+        // stable for a given position, so threading it costs no re-renders that
+        // the reordering itself would not already have caused.
+        index={index}
         onOpenProfile={openProfile}
       />
     ),
@@ -466,7 +476,22 @@ export default function DmThreadScreen() {
 
   // ---------------------------------------------------------------- entrance
 
-  const enter = useEnterStyle();
+  /*
+    THE SCREEN NO LONGER ARRIVES AS ONE BLOCK.
+
+    This was `useEnterStyle()` spread over an `Animated.View` wrapping the
+    header, the log and the composer together — one opacity ramp for the whole
+    scene, which is the "easy fade" the user asked to be rid of, and it was
+    mount-driven besides. Now the header lifts in as a module and the bubbles
+    stagger up out of the bottom of the log (see `renderItem`), so the thread
+    ASSEMBLES instead of dissolving into view.
+
+    Only the header takes this. The composer is left alone on purpose: it is an
+    input the user may already be reaching for, and the skeleton and the
+    notices below are things the user is WAITING on — none of those should be
+    made to perform before they can be used.
+  */
+  const headerEnter = useEntrance({ kind: 'module' });
 
   /*
     `DmComposer` adds `Space.md` of its own under whatever it is handed, so the
@@ -506,15 +531,20 @@ export default function DmThreadScreen() {
       translucent surface on this screen with nothing to show through it.
     */
     <SafeAreaView edges={['top', 'left', 'right']} style={styles.root}>
-      <Animated.View style={[styles.flex, enter]}>
+      <View style={styles.flex}>
         <View style={styles.constrain}>
           {/*
             No hairline under this header, which is a change. Nocturne separates
             with light and glass rather than with rules, and the artboard's
             header (L721) carries no border — the log cannot scroll under it
             anyway, because the header is a flex sibling and not an overlay.
+
+            `Animated.View` because it carries the module entrance. The search
+            bar underneath is deliberately OUTSIDE it: that one is toggled by a
+            press, and a control that lifted 10px every time it opened would be
+            answering the tap with the screen's arrival animation.
           */}
-          <View style={styles.header}>
+          <Animated.View style={[styles.header, headerEnter]}>
             <CircleIconButton
               icon={ChevronLeft}
               size={CHIP}
@@ -565,7 +595,7 @@ export default function DmThreadScreen() {
               accessibilityLabel="Search this conversation"
               onPress={toggleSearch}
             />
-          </View>
+          </Animated.View>
 
           {searchOpen ? (
             <View style={styles.searchBar}>
@@ -693,7 +723,7 @@ export default function DmThreadScreen() {
             bottomInset={composerLift}
           />
         </View>
-      </Animated.View>
+      </View>
 
       {/*
         Photo, file and track are switched off here rather than in the sheet:

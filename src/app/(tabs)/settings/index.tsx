@@ -42,14 +42,9 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { Redirect, router } from 'expo-router';
 import { ArrowLeft, ChevronRight, Monitor, Moon, Sun, type LucideIcon } from 'lucide-react-native';
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AuxButton, GlassCard, Skeleton, StatusPill, useToast } from '@/components/ui';
@@ -63,16 +58,8 @@ import {
 } from '@/lib/apk-updates';
 import { useAuth } from '@/lib/auth';
 import { useDockReserve } from '@/lib/dock';
-import {
-  Duration,
-  Fonts,
-  Radii,
-  Rule,
-  Space,
-  TOUCH_TARGET,
-  Type,
-  tracking,
-} from '@/lib/theme';
+import { useEntrance } from '@/lib/entrance';
+import { Fonts, Radii, Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
 import type { ThemeChoice } from '@/lib/theme';
 import { useColors, useTheme } from '@/lib/theme-context';
 import { useUpdates } from '@/lib/updates';
@@ -113,7 +100,6 @@ const SEGMENTS: { key: ThemeChoice; label: string; icon: LucideIcon }[] = [
 
 export default function SettingsScreen() {
   const C = useColors();
-  const reduced = useReducedMotion();
   const dockReserve = useDockReserve();
   const toast = useToast();
   const { session, profile, loading, refreshProfile } = useAuth();
@@ -143,11 +129,44 @@ export default function SettingsScreen() {
   const [apk, setApk] = useState<ApkCheck | null>(null);
   const [apkBusy, setApkBusy] = useState<'idle' | 'checking' | 'downloading'>('idle');
 
-  const enter = useSharedValue(0);
-  useEffect(() => {
-    enter.value = reduced ? 1 : withTiming(1, { duration: Duration.enter });
-  }, [reduced, enter]);
-  const enterStyle = useAnimatedStyle(() => ({ opacity: enter.value }));
+  /*
+    ===================== HOW THIS SCREEN ARRIVES =====================
+
+    There was a local entrance here — a shared value, an effect and a plain
+    `withTiming` on OPACITY ONLY — with identical copies in About, Connections
+    and You. All four are `useEntrance` now. What the copy could not do:
+
+      - it faded without LIFTING, so the screen dissolved rather than arrived,
+        and a dissolve is the thing the user objected to by name. The design's
+        `auxIn` is 10px of travel on a decelerate curve, and the travel is most
+        of what makes it read as arrival rather than as appearance.
+      - it ran on MOUNT. This screen is pushed inside the tabs group and the
+        group keeps its screens alive, so the entrance played once and was
+        silent on every return. `useEntrance` keys off focus and replays.
+
+    WHAT ANIMATES. This screen is not one object: it is four groups down a
+    column, each announced by its own kicker. So it gets the module AND the
+    cascade the user described — "every card or the details shows up one by
+    one":
+
+      MODULE  the whole column. The back link, the title and the kickers ride
+              it, because a section head that arrives after the thing it labels
+              is a caption, not a heading.
+      BANDS   the five bodies below, one step apart at `Stagger.feed`. A band is
+              a whole CARD, never the rows inside one — the grouped cards here
+              are single objects with hairlines through them, and stepping their
+              rows apart would tear one card into two.
+
+    The Appearance tiles are a band rather than three, for the same reason: a
+    segmented control is one control, and running a cascade across its segments
+    would make a settled choice look like it was still being made.
+  */
+  const moduleStyle = useEntrance({ kind: 'module' });
+  const appearanceIn = useEntrance({ index: 0 });
+  const accountsIn = useEntrance({ index: 1 });
+  const updateIn = useEntrance({ index: 2 });
+  const apkIn = useEntrance({ index: 3 });
+  const accountIn = useEntrance({ index: 4 });
 
   const runApkCheck = useCallback(async () => {
     setApkBusy('checking');
@@ -257,7 +276,7 @@ export default function SettingsScreen() {
 
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={[styles.root, { backgroundColor: C.bg }]}>
-      <Animated.View style={[styles.flex, enterStyle]}>
+      <Animated.View style={[styles.flex, moduleStyle]}>
         <ScrollView
           contentContainerStyle={[
             styles.content,
@@ -285,163 +304,175 @@ export default function SettingsScreen() {
 
           {/* ------------------------------------------------------ appearance */}
           <Kicker first>Appearance</Kicker>
-          <View accessibilityRole="radiogroup" style={styles.themeRow}>
-            {SEGMENTS.map((segment) => (
-              <ThemeTile
-                key={segment.key}
-                segment={segment}
-                selected={choice === segment.key}
-                onPress={() => setChoice(segment.key)}
-              />
-            ))}
-          </View>
-          <Text style={[styles.helper, { color: C.ink3 }]}>
-            System follows your phone. Aux was built for the dark one.
-          </Text>
+          {/*
+            The helper line travels WITH its tiles rather than as a band of its
+            own. It is the caption for the control above it, and a caption that
+            lands on its own step reads as a fifth thing on the screen.
+          */}
+          <Animated.View style={appearanceIn}>
+            <View accessibilityRole="radiogroup" style={styles.themeRow}>
+              {SEGMENTS.map((segment) => (
+                <ThemeTile
+                  key={segment.key}
+                  segment={segment}
+                  selected={choice === segment.key}
+                  onPress={() => setChoice(segment.key)}
+                />
+              ))}
+            </View>
+            <Text style={[styles.helper, { color: C.ink3 }]}>
+              System follows your phone. Aux was built for the dark one.
+            </Text>
+          </Animated.View>
 
           {/* -------------------------------------------------- music accounts */}
           <Kicker>Music accounts</Kicker>
-          <GlassCard padded={false}>
-            {/*
-              The clip is an INNER view, not `overflow: 'hidden'` on the card.
-              A row's press wash is a full-bleed rectangle and would square off
-              the card's corners without it — but Android clips a view's own
-              boxShadow away along with its children, so putting the clip on the
-              card would silently cost it `raised()` on one platform only.
-              Inset by the hairline the card draws, so the two corners nest.
-            */}
-            <View style={styles.clip}>
-              {accounts === 'ready' ? (
-                <>
+          <Animated.View style={accountsIn}>
+            <GlassCard padded={false}>
+              {/*
+                The clip is an INNER view, not `overflow: 'hidden'` on the card.
+                A row's press wash is a full-bleed rectangle and would square off
+                the card's corners without it — but Android clips a view's own
+                boxShadow away along with its children, so putting the clip on
+                the card would silently cost it `raised()` on one platform only.
+                Inset by the hairline the card draws, so the two corners nest.
+              */}
+              <View style={styles.clip}>
+                {accounts === 'ready' ? (
+                  <>
+                    <SettingRow
+                      tag="SP"
+                      title="Spotify"
+                      subtitle={spotifyLine}
+                      trailing={<ChevronRight size={CHEVRON} strokeWidth={2} color={C.ink3} />}
+                      onPress={() => router.push('/settings/connections')}
+                      divider
+                    />
+                    {/*
+                      A NEUTRAL badge where the artboard draws a blue gradient
+                      "SIGN IN" pill. Blue means "you do this" in this direction,
+                      and YouTube sign-in is not built — a gradient badge would
+                      be a promise the tap cannot keep, which is exactly the kind
+                      of thing the accent rule exists to prevent. The row still
+                      presses, and the toast explains why nothing happens.
+                    */}
+                    <SettingRow
+                      tag="YT"
+                      title="YouTube"
+                      subtitle="Not signed in — Aux plays public audio"
+                      trailing={<StatusPill label="Not linked" tone="outline" />}
+                      onPress={() => toast.show('YouTube sign-in is not built yet.', 'info')}
+                    />
+                  </>
+                ) : accounts === 'loading' ? (
+                  /*
+                    Two rows' worth of placeholder, built the way the rows are:
+                    a 38px block inside 14px of padding, with the same hairline
+                    between them. Sizing the placeholder as one 66px block per
+                    row instead would be 35px taller than the card it stands in
+                    for, and the card would visibly shrink when the profile
+                    lands.
+                  */
+                  <View accessibilityRole="progressbar" accessibilityLabel="Loading your accounts">
+                    <View
+                      style={[
+                        styles.skeletonRow,
+                        { borderBottomWidth: Rule.hair, borderBottomColor: C.ruleSoft },
+                      ]}>
+                      <Skeleton width="100%" height={TAG_TILE} radius={TAG_RADIUS} />
+                    </View>
+                    <View style={styles.skeletonRow}>
+                      <Skeleton width="100%" height={TAG_TILE} radius={TAG_RADIUS} />
+                    </View>
+                  </View>
+                ) : accounts === 'error' ? (
                   <SettingRow
-                    tag="SP"
-                    title="Spotify"
-                    subtitle={spotifyLine}
+                    title="Accounts did not load"
+                    subtitle="Tap to try again."
+                    onPress={retryProfile}
+                  />
+                ) : (
+                  <SettingRow
+                    title="Finish setting up"
+                    subtitle="Pick a handle and these rows fill in."
                     trailing={<ChevronRight size={CHEVRON} strokeWidth={2} color={C.ink3} />}
-                    onPress={() => router.push('/settings/connections')}
-                    divider
+                    onPress={() => router.push('/(auth)/claim-username')}
                   />
-                  {/*
-                    A NEUTRAL badge where the artboard draws a blue gradient
-                    "SIGN IN" pill. Blue means "you do this" in this direction,
-                    and YouTube sign-in is not built — a gradient badge would be
-                    a promise the tap cannot keep, which is exactly the kind of
-                    thing the accent rule exists to prevent. The row still
-                    presses, and the toast is what explains why nothing happens.
-                  */}
-                  <SettingRow
-                    tag="YT"
-                    title="YouTube"
-                    subtitle="Not signed in — Aux plays public audio"
-                    trailing={<StatusPill label="Not linked" tone="outline" />}
-                    onPress={() => toast.show('YouTube sign-in is not built yet.', 'info')}
-                  />
-                </>
-              ) : accounts === 'loading' ? (
-                /*
-                  Two rows' worth of placeholder, built the way the rows are:
-                  a 38px block inside 14px of padding, with the same hairline
-                  between them. Sizing the placeholder as one 66px block per
-                  row instead would be 35px taller than the card it stands in
-                  for, and the card would visibly shrink when the profile lands.
-                */
-                <View accessibilityRole="progressbar" accessibilityLabel="Loading your accounts">
-                  <View
-                    style={[
-                      styles.skeletonRow,
-                      { borderBottomWidth: Rule.hair, borderBottomColor: C.ruleSoft },
-                    ]}>
-                    <Skeleton width="100%" height={TAG_TILE} radius={TAG_RADIUS} />
-                  </View>
-                  <View style={styles.skeletonRow}>
-                    <Skeleton width="100%" height={TAG_TILE} radius={TAG_RADIUS} />
-                  </View>
-                </View>
-              ) : accounts === 'error' ? (
-                <SettingRow
-                  title="Accounts did not load"
-                  subtitle="Tap to try again."
-                  onPress={retryProfile}
-                />
-              ) : (
-                <SettingRow
-                  title="Finish setting up"
-                  subtitle="Pick a handle and these rows fill in."
-                  trailing={<ChevronRight size={CHEVRON} strokeWidth={2} color={C.ink3} />}
-                  onPress={() => router.push('/(auth)/claim-username')}
-                />
-              )}
-            </View>
-          </GlassCard>
-          <Text style={[styles.helper, { color: C.ink3 }]}>
-            Aux never streams audio itself — both accounts stay yours.
-          </Text>
+                )}
+              </View>
+            </GlassCard>
+            <Text style={[styles.helper, { color: C.ink3 }]}>
+              Aux never streams audio itself — both accounts stay yours.
+            </Text>
+          </Animated.View>
 
           {/* -------------------------------------------------- software update */}
           <Kicker>Software update</Kicker>
-          <GlassCard>
-            <View style={styles.updateHead}>
-              <View style={styles.updateHeadText}>
-                <Text style={[styles.rowTitle, { color: C.ink }]}>{updateTitle}</Text>
-                <Text style={[styles.updateMeta, { color: C.ink2 }]}>{updateMeta}</Text>
-              </View>
-              {/*
-                Ink, and it stays ink now that there are two accents rather than
-                one. Coral reports a state of the world (live, playing, in sync,
-                unread) and blue is an action you take; this dot is neither —
-                the button below it is the action, and a blue dot over a blue
-                button would put the same signal on one card twice.
+          <Animated.View style={updateIn}>
+            <GlassCard>
+              <View style={styles.updateHead}>
+                <View style={styles.updateHeadText}>
+                  <Text style={[styles.rowTitle, { color: C.ink }]}>{updateTitle}</Text>
+                  <Text style={[styles.updateMeta, { color: C.ink2 }]}>{updateMeta}</Text>
+                </View>
+                {/*
+                  Ink, and it stays ink now that there are two accents rather
+                  than one. Coral reports a state of the world (live, playing, in
+                  sync, unread) and blue is an action you take; this dot is
+                  neither — the button below it is the action, and a blue dot
+                  over a blue button would put the same signal on one card twice.
 
-                All three surfaces that report this event agree: this dot,
-                `update-banner.tsx`'s mark, and `update-prompt.tsx`'s kicker.
-              */}
-              {update.isAvailable ? (
-                <View style={[styles.updateDot, { backgroundColor: C.ink }]} />
-              ) : null}
-            </View>
-
-            {/*
-              The same notes the sheet shows, for the user who dismissed it
-              and came here to find out what they turned down.
-            */}
-            {update.isAvailable && update.pending.notes.length > 0 ? (
-              <View style={styles.notes}>
-                {update.pending.notes.map((note) => (
-                  <View key={note} style={styles.note}>
-                    <View style={[styles.noteMark, { backgroundColor: C.ink3 }]} />
-                    <Text style={[styles.noteText, { color: C.ink2 }]}>{note}</Text>
-                  </View>
-                ))}
-                {update.pending.hidden > 0 ? (
-                  <View style={styles.note}>
-                    <View style={[styles.noteMark, { backgroundColor: C.ink3 }]} />
-                    <Text style={[styles.noteText, { color: C.ink3 }]}>
-                      {`+${update.pending.hidden} more`}
-                    </Text>
-                  </View>
+                  All three surfaces that report this event agree: this dot,
+                  `update-banner.tsx`'s mark, and `update-prompt.tsx`'s kicker.
+                */}
+                {update.isAvailable ? (
+                  <View style={[styles.updateDot, { backgroundColor: C.ink }]} />
                 ) : null}
               </View>
-            ) : null}
 
-            {/*
-              The kit's gradient pill rather than the hand-rolled `pill` fill
-              this used to draw. Applying an update is unambiguously an ACTION,
-              which is what blue means here, and `sm` is the artboard's 46px
-              in-card control height.
-            */}
-            <View style={styles.updateAction}>
-              <AuxButton
-                label={updateAction}
-                variant="pri"
-                size="sm"
-                fullWidth
-                loading={update.status === 'checking'}
-                onPress={
-                  update.isAvailable ? () => void update.apply() : () => void update.check(true)
-                }
-              />
-            </View>
-          </GlassCard>
+              {/*
+                The same notes the sheet shows, for the user who dismissed it
+                and came here to find out what they turned down.
+              */}
+              {update.isAvailable && update.pending.notes.length > 0 ? (
+                <View style={styles.notes}>
+                  {update.pending.notes.map((note) => (
+                    <View key={note} style={styles.note}>
+                      <View style={[styles.noteMark, { backgroundColor: C.ink3 }]} />
+                      <Text style={[styles.noteText, { color: C.ink2 }]}>{note}</Text>
+                    </View>
+                  ))}
+                  {update.pending.hidden > 0 ? (
+                    <View style={styles.note}>
+                      <View style={[styles.noteMark, { backgroundColor: C.ink3 }]} />
+                      <Text style={[styles.noteText, { color: C.ink3 }]}>
+                        {`+${update.pending.hidden} more`}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
+
+              {/*
+                The kit's gradient pill rather than the hand-rolled `pill` fill
+                this used to draw. Applying an update is unambiguously an ACTION,
+                which is what blue means here, and `sm` is the artboard's 46px
+                in-card control height.
+              */}
+              <View style={styles.updateAction}>
+                <AuxButton
+                  label={updateAction}
+                  variant="pri"
+                  size="sm"
+                  fullWidth
+                  loading={update.status === 'checking'}
+                  onPress={
+                    update.isAvailable ? () => void update.apply() : () => void update.check(true)
+                  }
+                />
+              </View>
+            </GlassCard>
+          </Animated.View>
 
           {/*
             The other kind of update. Over-the-air ships JavaScript; this
@@ -453,49 +484,58 @@ export default function SettingsScreen() {
             and none of its 54 radius-18 rows do. Hand-rolled rather than
             `GlassCard variant="row"` because it presses and `GlassCard` is not
             a Pressable.
+
+            ITS OWN BAND, not part of the card above it. The two updaters ship
+            different things — JavaScript over the air, the whole binary here —
+            and arriving together is the one reading that would make them look
+            like one setting with two buttons.
           */}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Android build. ${apkLine}`}
-            accessibilityState={{ busy: apkBusy !== 'idle', disabled: apkBusy !== 'idle' }}
-            disabled={apkBusy !== 'idle'}
-            onPress={
-              apk?.kind === 'available' ? () => void runApkInstall() : () => void runApkCheck()
-            }
-            style={({ pressed }) => [
-              styles.loneRow,
-              { backgroundColor: pressed ? C.surface2 : C.surface, borderColor: C.rule },
-            ]}>
-            <View style={styles.rowBody}>
-              <Text numberOfLines={1} style={[styles.rowTitle, { color: C.ink }]}>
-                Android build
-              </Text>
-              <Text numberOfLines={2} style={[styles.rowSub, { color: C.ink3 }]}>
-                {apkLine}
-              </Text>
-            </View>
-            {apkBusy !== 'idle' ? <ActivityIndicator size="small" color={C.ink2} /> : null}
-          </Pressable>
+          <Animated.View style={apkIn}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Android build. ${apkLine}`}
+              accessibilityState={{ busy: apkBusy !== 'idle', disabled: apkBusy !== 'idle' }}
+              disabled={apkBusy !== 'idle'}
+              onPress={
+                apk?.kind === 'available' ? () => void runApkInstall() : () => void runApkCheck()
+              }
+              style={({ pressed }) => [
+                styles.loneRow,
+                { backgroundColor: pressed ? C.surface2 : C.surface, borderColor: C.rule },
+              ]}>
+              <View style={styles.rowBody}>
+                <Text numberOfLines={1} style={[styles.rowTitle, { color: C.ink }]}>
+                  Android build
+                </Text>
+                <Text numberOfLines={2} style={[styles.rowSub, { color: C.ink3 }]}>
+                  {apkLine}
+                </Text>
+              </View>
+              {apkBusy !== 'idle' ? <ActivityIndicator size="small" color={C.ink2} /> : null}
+            </Pressable>
+          </Animated.View>
 
           {/* -------------------------------------------------------- account */}
           <Kicker>Account</Kicker>
-          <GlassCard padded={false}>
-            <View style={styles.clip}>
-              <SettingRow
-                title="Edit your profile"
-                subtitle="Photo, bio, activity visibility"
-                trailing={<ChevronRight size={CHEVRON} strokeWidth={2} color={C.ink3} />}
-                onPress={() => router.push('/(auth)/claim-username')}
-                divider
-              />
-              <SettingRow
-                title="About the developer"
-                subtitle="Build info, sync internals, credits"
-                trailing={<ChevronRight size={CHEVRON} strokeWidth={2} color={C.ink3} />}
-                onPress={() => router.push('/settings/about')}
-              />
-            </View>
-          </GlassCard>
+          <Animated.View style={accountIn}>
+            <GlassCard padded={false}>
+              <View style={styles.clip}>
+                <SettingRow
+                  title="Edit your profile"
+                  subtitle="Photo, bio, activity visibility"
+                  trailing={<ChevronRight size={CHEVRON} strokeWidth={2} color={C.ink3} />}
+                  onPress={() => router.push('/(auth)/claim-username')}
+                  divider
+                />
+                <SettingRow
+                  title="About the developer"
+                  subtitle="Build info, sync internals, credits"
+                  trailing={<ChevronRight size={CHEVRON} strokeWidth={2} color={C.ink3} />}
+                  onPress={() => router.push('/settings/about')}
+                />
+              </View>
+            </GlassCard>
+          </Animated.View>
         </ScrollView>
       </Animated.View>
     </SafeAreaView>

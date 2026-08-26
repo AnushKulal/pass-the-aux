@@ -38,6 +38,20 @@
  *  - `usePeople()` is "who could I write to", answered from the lounges you are
  *    in, because in this product that IS the social graph.
  *
+ * HOW IT ARRIVES. The header lifts in as a module and the rows stagger up
+ * under it, 50ms apart, through `useEntrance` — see the note at `chromeEnter`.
+ * The screen-wide cross-fade that used to wrap the whole list is gone.
+ *
+ * THIS SCREEN STILL INLINES A SECOND CONVERSATION ROW. `ThreadRowBase` below is
+ * a near-copy of `<ConversationRow>`, which already exists, already carries the
+ * same metrics, and additionally offers the avatar/name profile target this
+ * copy cannot. They now share an entrance because both call `useEntrance` with
+ * the same arguments, but that is one behaviour deduplicated, not the
+ * duplication resolved — and the two have already drifted once: an unread row
+ * borders `C.rule2` here and `C.liveMid` there. Collapsing them needs a profile
+ * destination for `onOpenProfile`, which this build does not have a route for,
+ * so it is a change with a decision in it rather than a tidy-up.
+ *
  * DELIBERATE DEVIATIONS FROM THE ARTBOARD. Its header carries a search toggle
  * and its people rows carry an "add friend" CTA; there is no inbox search and
  * no friend graph in this build, and inventing chrome for absent features is
@@ -64,7 +78,6 @@ import {
 import Animated from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useEnterStyle } from '@/components/auth/onboarding';
 import { ChatNotice } from '@/components/chat/bubble-kit';
 import { presenceFor, presenceLabel, stampFor } from '@/components/dm/conversation-row';
 import { Avatar, CircleIconButton, Skeleton, StatusPill } from '@/components/ui';
@@ -79,12 +92,14 @@ import {
 } from '@/features/dm';
 import { serverNow } from '@/lib/clock';
 import { useDockReserve } from '@/lib/dock';
+import { useEntrance } from '@/lib/entrance';
 import { supabase } from '@/lib/supabase';
 import {
   Fonts,
   Radii,
   Rule,
   Space,
+  Stagger,
   TOUCH_TARGET,
   Type,
   tracking,
@@ -188,6 +203,8 @@ function usePeople() {
 
 type ThreadRowProps = {
   row: InboxRow;
+  /** Position in the inbox. Drives the 50ms entrance stagger. */
+  index?: number;
   onOpenThread: (conversationId: string) => void;
 };
 
@@ -199,8 +216,17 @@ type ThreadRowProps = {
  * its skin. The recipe is copied exactly — `surface` over a `rule` hairline at
  * radius 18, no shadow — so the two stay the same object.
  */
-function ThreadRowBase({ row, onOpenThread }: ThreadRowProps) {
+function ThreadRowBase({ row, index = 0, onOpenThread }: ThreadRowProps) {
   const C = useColors();
+
+  /*
+    The same call `<ConversationRow>` makes, with the same arguments, because
+    these two rows are the same row twice (see the note on the screen). If one
+    of them ever grows a different entrance the duplication has started to
+    diverge, and that is the moment to collapse them rather than to fork the
+    motion as well.
+  */
+  const entering = useEntrance({ index, kind: 'row', step: Stagger.messages });
 
   const person = row.other;
   const name = person ? person.display_name.trim() || person.username : 'Someone';
@@ -226,83 +252,85 @@ function ThreadRowBase({ row, onOpenThread }: ThreadRowProps) {
     .join(', ');
 
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={summary}
-      accessibilityHint="Opens the conversation"
-      onPress={open}
-      style={({ pressed }) => [
-        styles.row,
-        {
-          /*
-            The value step that replaced the lift. Both states press one rung
-            further up the same ladder, so the feedback is identical and only
-            the resting brightness separates them.
-          */
-          backgroundColor: unread
-            ? pressed
-              ? C.surface3
-              : C.surface2
-            : pressed
-              ? C.surface2
-              : C.surface,
-          borderColor: unread ? C.rule2 : C.rule,
-        },
-      ]}>
-      {/*
-        The presence dot is the kit's punched hole — a coral disc ringed in the
-        ground colour, which is what the artboard draws (`border:2.5px solid
-        var(--aux-bg)`) even where the avatar sits on a card.
-      */}
-      <Avatar name={name} uri={person?.avatar_url} size={AVATAR} presence={live} />
+    <Animated.View style={entering}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={summary}
+        accessibilityHint="Opens the conversation"
+        onPress={open}
+        style={({ pressed }) => [
+          styles.row,
+          {
+            /*
+              The value step that replaced the lift. Both states press one rung
+              further up the same ladder, so the feedback is identical and only
+              the resting brightness separates them.
+            */
+            backgroundColor: unread
+              ? pressed
+                ? C.surface3
+                : C.surface2
+              : pressed
+                ? C.surface2
+                : C.surface,
+            borderColor: unread ? C.rule2 : C.rule,
+          },
+        ]}>
+        {/*
+          The presence dot is the kit's punched hole — a coral disc ringed in the
+          ground colour, which is what the artboard draws (`border:2.5px solid
+          var(--aux-bg)`) even where the avatar sits on a card.
+        */}
+        <Avatar name={name} uri={person?.avatar_url} size={AVATAR} presence={live} />
 
-      <View style={styles.rowText}>
-        <View style={styles.nameLine}>
+        <View style={styles.rowText}>
+          <View style={styles.nameLine}>
+            <Text
+              numberOfLines={1}
+              style={[
+                styles.name,
+                { color: C.ink, fontFamily: unread ? Fonts.extrabold : Fonts.semibold },
+              ]}>
+              {name}
+            </Text>
+            {/* Coral only for ONLINE — it is a state of the world, and the other
+                two states are not. */}
+            {status ? (
+              <Text style={[styles.status, { color: live ? C.liveText : C.ink3 }]}>{status}</Text>
+            ) : null}
+          </View>
+
           <Text
             numberOfLines={1}
             style={[
-              styles.name,
-              { color: C.ink, fontFamily: unread ? Fonts.extrabold : Fonts.semibold },
+              styles.preview,
+              {
+                color: !hasPreview ? C.ink3 : unread ? C.ink : C.ink2,
+                fontFamily: unread ? Fonts.semibold : Fonts.regular,
+              },
             ]}>
-            {name}
+            {preview}
           </Text>
-          {/* Coral only for ONLINE — it is a state of the world, and the other
-              two states are not. */}
-          {status ? (
-            <Text style={[styles.status, { color: live ? C.liveText : C.ink3 }]}>{status}</Text>
-          ) : null}
         </View>
 
-        <Text
-          numberOfLines={1}
-          style={[
-            styles.preview,
-            {
-              color: !hasPreview ? C.ink3 : unread ? C.ink : C.ink2,
-              fontFamily: unread ? Fonts.semibold : Fonts.regular,
-            },
-          ]}>
-          {preview}
-        </Text>
-      </View>
-
-      <View style={styles.meta}>
-        <Text style={[styles.stamp, { color: C.ink3 }]}>{stamp}</Text>
-        {/*
-          The one accent on the row. `StatusPill accent + live` is the artboard's
-          badge exactly: coral fill, `onLive` warm-black numeral, and the centred
-          14px halo — which is why it is a pill and not a hand-rolled View.
-        */}
-        {unread ? (
-          <StatusPill
-            tone="accent"
-            live
-            label={row.unreadCount > 99 ? '99+' : String(row.unreadCount)}
-            accessibilityLabel={`${row.unreadCount} unread`}
-          />
-        ) : null}
-      </View>
-    </Pressable>
+        <View style={styles.meta}>
+          <Text style={[styles.stamp, { color: C.ink3 }]}>{stamp}</Text>
+          {/*
+            The one accent on the row. `StatusPill accent + live` is the artboard's
+            badge exactly: coral fill, `onLive` warm-black numeral, and the centred
+            14px halo — which is why it is a pill and not a hand-rolled View.
+          */}
+          {unread ? (
+            <StatusPill
+              tone="accent"
+              live
+              label={row.unreadCount > 99 ? '99+' : String(row.unreadCount)}
+              accessibilityLabel={`${row.unreadCount} unread`}
+            />
+          ) : null}
+        </View>
+      </Pressable>
+    </Animated.View>
   );
 }
 
@@ -316,6 +344,8 @@ const ThreadRow = memo(ThreadRowBase);
 
 type PersonRowProps = {
   person: DmAuthor;
+  /** Position in the PEOPLE list. Drives the entrance stagger. */
+  index?: number;
   /** Open (or reuse) the thread with them. */
   onMessage: (userId: string) => void;
   /** True while `open_direct_conversation` is in flight for this person. */
@@ -329,50 +359,55 @@ type PersonRowProps = {
  * trailing glyph is left as the affordance and swaps to a spinner while
  * `open_direct_conversation` is in flight.
  */
-function PersonRowBase({ person, onMessage, busy = false }: PersonRowProps) {
+function PersonRowBase({ person, index = 0, onMessage, busy = false }: PersonRowProps) {
   const C = useColors();
   const name = person.display_name.trim() || person.username;
   const live = presenceFor(person, serverNow()) === 'online';
 
+  /* Same row, same arrival — PEOPLE is a list of the same object as the inbox. */
+  const entering = useEntrance({ index, kind: 'row', step: Stagger.messages });
+
   const message = useCallback(() => onMessage(person.id), [onMessage, person.id]);
 
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`Message ${name}`}
-      accessibilityState={{ disabled: busy, busy }}
-      disabled={busy}
-      onPress={message}
-      style={({ pressed }) => [
-        styles.row,
-        styles.person,
-        { backgroundColor: pressed ? C.surface2 : C.surface, borderColor: C.rule },
-        busy && styles.blocked,
-      ]}>
-      <Avatar name={name} uri={person.avatar_url} size={PERSON_AVATAR} presence={live} />
+    <Animated.View style={entering}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Message ${name}`}
+        accessibilityState={{ disabled: busy, busy }}
+        disabled={busy}
+        onPress={message}
+        style={({ pressed }) => [
+          styles.row,
+          styles.person,
+          { backgroundColor: pressed ? C.surface2 : C.surface, borderColor: C.rule },
+          busy && styles.blocked,
+        ]}>
+        <Avatar name={name} uri={person.avatar_url} size={PERSON_AVATAR} presence={live} />
 
-      <View style={styles.rowText}>
-        <View style={styles.nameLine}>
-          <Text numberOfLines={1} style={[styles.personName, { color: C.ink }]}>
-            {name}
+        <View style={styles.rowText}>
+          <View style={styles.nameLine}>
+            <Text numberOfLines={1} style={[styles.personName, { color: C.ink }]}>
+              {name}
+            </Text>
+            {/* PREMIUM is coral: the palette reserves the accent for it by name. */}
+            {person.is_premium ? <StatusPill tone="accent" label="Premium" /> : null}
+          </View>
+
+          <Text numberOfLines={1} style={[styles.personSub, { color: C.ink3 }]}>
+            @{person.username}
           </Text>
-          {/* PREMIUM is coral: the palette reserves the accent for it by name. */}
-          {person.is_premium ? <StatusPill tone="accent" label="Premium" /> : null}
         </View>
 
-        <Text numberOfLines={1} style={[styles.personSub, { color: C.ink3 }]}>
-          @{person.username}
-        </Text>
-      </View>
-
-      <View style={styles.personAction}>
-        {busy ? (
-          <ActivityIndicator size="small" color={C.ink3} />
-        ) : (
-          <MessageCircle size={18} strokeWidth={2} color={C.ink2} />
-        )}
-      </View>
-    </Pressable>
+        <View style={styles.personAction}>
+          {busy ? (
+            <ActivityIndicator size="small" color={C.ink3} />
+          ) : (
+            <MessageCircle size={18} strokeWidth={2} color={C.ink2} />
+          )}
+        </View>
+      </Pressable>
+    </Animated.View>
   );
 }
 
@@ -444,7 +479,26 @@ export default function MessagesScreen() {
   const { mutate: openConversation } = useOpenConversation();
   const [messagingId, setMessagingId] = useState<string | null>(null);
 
-  const enter = useEnterStyle();
+  /*
+    THE SCREEN NO LONGER ARRIVES AS ONE BLOCK.
+
+    This was `useEnterStyle()` on an `Animated.View` around the whole FlatList:
+    one opacity ramp for the header, every row and the PEOPLE section together,
+    fired on mount. That is the "easy fade" — and being mount-driven it also
+    played exactly once per app launch, because a tab screen is never
+    unmounted, so returning to Messages showed nothing at all.
+
+    Now the chrome lifts in as a MODULE (10px / 280ms) and the rows stagger
+    under it as ROWS (8px / 240ms, 50ms apart). One style object serves both
+    the header and the PEOPLE heading on purpose: they are the same kind of
+    thing arriving, and giving the second one its own identical hook would say
+    they were different.
+
+    Nothing is spread over the skeletons, the notices or the empty state. Those
+    are all things the user is WAITING on, and making a thing you are waiting
+    for perform on its way in is how a fast screen comes to feel slow.
+  */
+  const chromeEnter = useEntrance({ kind: 'module' });
 
   const openThread = useCallback(
     (conversationId: string) => {
@@ -472,8 +526,11 @@ export default function MessagesScreen() {
   );
 
   const renderItem = useCallback(
-    ({ item }: ListRenderItemInfo<InboxRow>) => (
-      <ThreadRow row={item} onOpenThread={openThread} />
+    // `index` comes straight from the list. The row stays memoised — its
+    // position only changes when the inbox actually re-sorts, which is a
+    // re-render it was taking anyway.
+    ({ item, index }: ListRenderItemInfo<InboxRow>) => (
+      <ThreadRow row={item} index={index} onOpenThread={openThread} />
     ),
     [openThread],
   );
@@ -501,7 +558,7 @@ export default function MessagesScreen() {
 
   const header = useMemo(
     () => (
-      <View style={styles.head}>
+      <Animated.View style={[styles.head, chromeEnter]}>
         <CircleIconButton
           icon={ChevronLeft}
           size={40}
@@ -528,15 +585,23 @@ export default function MessagesScreen() {
             {isPending ? 'Loading' : unread > 0 ? `${unread} unread` : 'All caught up'}
           </Text>
         </View>
-      </View>
+      </Animated.View>
     ),
-    [C.ink, C.ink3, C.liveText, goBack, isPending, unread],
+    [C.ink, C.ink3, C.liveText, chromeEnter, goBack, isPending, unread],
   );
 
   const footer = useMemo(
     () => (
       <>
-        <Text style={[styles.section, { color: C.ink }]}>People</Text>
+        {/*
+          The entrance goes on a wrapping `Animated.View`, not on an
+          `Animated.Text`. `useEntrance` is typed as a ViewStyle — which is the
+          honest type, since `boxShadow` alone means the two style shapes are
+          not interchangeable — and a heading is a block here anyway.
+        */}
+        <Animated.View style={chromeEnter}>
+          <Text style={[styles.section, { color: C.ink }]}>People</Text>
+        </Animated.View>
 
         {peoplePending ? <PeopleSkeleton /> : null}
 
@@ -559,10 +624,11 @@ export default function MessagesScreen() {
         ) : null}
 
         <View style={styles.rows}>
-          {(peopleRows ?? []).map((person) => (
+          {(peopleRows ?? []).map((person, index) => (
             <PersonRow
               key={person.id}
               person={person}
+              index={index}
               busy={messagingId === person.id}
               onMessage={messagePerson}
             />
@@ -572,6 +638,7 @@ export default function MessagesScreen() {
     ),
     [
       C.ink,
+      chromeEnter,
       messagePerson,
       messagingId,
       peopleFailed,
@@ -584,7 +651,7 @@ export default function MessagesScreen() {
 
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={styles.root}>
-      <Animated.View style={[styles.flex, enter]}>
+      <View style={styles.flex}>
         <FlatList
           data={isPending || isError ? [] : rows}
           keyExtractor={keyExtractor}
@@ -620,7 +687,7 @@ export default function MessagesScreen() {
             />
           }
         />
-      </Animated.View>
+      </View>
     </SafeAreaView>
   );
 }

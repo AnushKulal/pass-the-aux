@@ -72,6 +72,7 @@ import {
 } from '@/components/ui';
 import { useAddToQueue } from '@/features/rooms/queries';
 import {
+  TrackResolveError,
   confirmMatch,
   resolveTrack,
   type TrackMatchCandidate,
@@ -80,6 +81,7 @@ import {
 import { useTrackSearch, type TrackSearchResult } from '@/features/tracks/search';
 import {
   Fonts,
+  PointerEvents,
   Radii,
   Rule,
   Sheet as SheetMetrics,
@@ -116,6 +118,53 @@ export type AddTrackSheetProps = {
 /** What the user can actually do with this result once it is in the queue. */
 function providerLine(provider: TrackSearchResult['provider']): string {
   return provider === 'spotify' ? 'Spotify + YouTube' : 'YouTube only';
+}
+
+/**
+ * What went wrong, and what the person reading it can do about it.
+ *
+ * SEARCH RUNS ENTIRELY ON THE SERVER — the `search-tracks` Edge Function holds
+ * the Spotify token and the YouTube key, because neither may ship inside the
+ * app — so every way this fails is invisible from the device unless the failure
+ * is spelled out. The one that keeps happening is a function deployed without
+ * its secrets: it answers, it answers with an error, and a card reading "Search
+ * is having a moment" over the raw message is indistinguishable from a flaky
+ * connection. So the generic branch names the actual suspect. A bug report that
+ * says "it says the search function is missing its provider keys" is
+ * actionable; "the add track button does nothing" is not, and that is the
+ * report this screen has been generating.
+ *
+ * `error.message` is already the server's own words where there are any —
+ * `edgeFunctionError` unwraps the function's JSON body precisely so this can be
+ * "the YouTube quota ran out" rather than "non-2xx status code" — so it is used
+ * as the TITLE and the line under it is the instruction.
+ */
+function searchFailure(error: Error): { title: string; description: string } {
+  const code = error instanceof TrackResolveError ? error.code : 'internal';
+
+  if (code === 'network') {
+    return {
+      title: 'No connection to the Aux server',
+      description: 'Search runs on the server. Check your connection, then try again.',
+    };
+  }
+  if (code === 'unauthorized') {
+    return {
+      title: 'Search would not authorise',
+      description: 'Your session may have expired. Sign out and back in, then try again.',
+    };
+  }
+  if (code === 'quota_exceeded') {
+    return {
+      title: "YouTube's search quota is spent for today",
+      description: 'It resets tomorrow. Linking Spotify Premium searches Spotify instead.',
+    };
+  }
+
+  return {
+    title: error.message,
+    description: 'Retry — and if it keeps failing, the search function is missing its API keys.',
+  };
 }
 
 export function AddTrackSheet({ roomId, visible, onClose }: AddTrackSheetProps) {
@@ -252,6 +301,22 @@ export function AddTrackSheet({ roomId, visible, onClose }: AddTrackSheetProps) 
   */
   const searchingOverResults = search.isSearching && search.results.length > 0;
 
+  /*
+    A FAILED SEARCH IS ITS OWN STATE, NOT A DECORATION ON AN EMPTY LIST.
+
+    This used to be the first branch of `ListEmptyComponent`, which made it a
+    property of "the list happens to have no rows" — so the message survived
+    only for as long as that stayed true, and any path that left a stale row on
+    screen (or any future `keepPreviousData` behaviour that holds data through
+    an error) would have hidden the one thing the user needed to read. An error
+    is a fact about the request, so it is rendered from the request.
+
+    Withheld while a retry is in flight: `error` stays set across a refetch, and
+    a card offering "Try again" underneath a search that is already running
+    again says the retry did not take. The skeleton branch below takes over.
+  */
+  const failure = search.error && !search.isSearching ? searchFailure(search.error) : null;
+
   return (
     <Modal
       visible={visible}
@@ -267,9 +332,16 @@ export function AddTrackSheet({ roomId, visible, onClose }: AddTrackSheetProps) 
           style={StyleSheet.absoluteFill}
         />
 
+        {/*
+          `boxNone` because this slot now claims 82% of the window (see
+          `keyboard` below). It is a spacer, not a surface: without it the 10px
+          gutters either side of the sheet and the band under it would swallow
+          the taps the scrim `Pressable` behind is there to catch, and
+          tap-outside-to-dismiss would stop working over most of the screen.
+        */}
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.keyboard}>
+          style={[styles.keyboard, PointerEvents.boxNone]}>
           {/*
             THE SHADOW HAS TO LIVE ON AN OUTER VIEW. The glass below clips its
             children to the rounded corner, and Android throws away a view's own
@@ -359,6 +431,15 @@ export function AddTrackSheet({ roomId, visible, onClose }: AddTrackSheetProps) 
                   onConfirm={handleConfirm}
                   onSkip={handleSkipConfirmation}
                 />
+              ) : failure ? (
+                <View style={styles.failure}>
+                  <EmptyState
+                    icon={WifiOff}
+                    title={failure.title}
+                    description={failure.description}
+                    primary={{ label: 'Try again', onPress: handleRetry }}
+                  />
+                </View>
               ) : search.isSearching && search.results.length === 0 ? (
                 <View style={styles.list}>
                   {Array.from({ length: SKELETON_ROWS }, (_, index) => (
@@ -374,14 +455,7 @@ export function AddTrackSheet({ roomId, visible, onClose }: AddTrackSheetProps) 
                   showsVerticalScrollIndicator={false}
                   contentContainerStyle={styles.list}
                   ListEmptyComponent={
-                    search.error ? (
-                      <EmptyState
-                        icon={WifiOff}
-                        title="Search is having a moment"
-                        description={search.error.message}
-                        primary={{ label: 'Try again', onPress: handleRetry }}
-                      />
-                    ) : search.isIdle ? (
+                    search.isIdle ? (
                       <EmptyState
                         icon={Music}
                         title="What are we listening to?"
@@ -617,8 +691,30 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   keyboard: {
-    // 82% rather than full height: the strip of scrim above is the affordance
-    // that says "this is a sheet you can dismiss".
+    /*
+      `flex: 1` IS WHY "ADD A TRACK" OPENED ONTO NOTHING.
+
+      This slot carried `maxHeight` and padding and no height of its own, while
+      `shell` and `glass` below are both `flex: 1`. React Native's `flex: 1`
+      resolves in Yoga to `flexBasis: 0pt`, so a flex child inside an
+      auto-height parent contributes ZERO to that parent's content height — the
+      parent measures itself at 0 and hands the child 0 back. `maxHeight` caps
+      a height; it never supplies one. The sheet was 0px tall on device: the
+      Modal opened, the scrim painted, and the field, the results and the error
+      card all rendered inside a box with no height. Identical fault, identical
+      fix, in the Session's own `Sheet` — see 'src/app/room/[id].tsx'.
+
+      IT LOOKS FINE ON WEB, which is how it shipped: CSS sizes an auto-height
+      flex column by its content and then lets the growing child fill that,
+      where Yoga measures the column at zero. The browser cannot show this
+      fault, so nothing found in a browser will ever find it — see the longer
+      note in 'src/app/room/[id].tsx', which was measured.
+
+      `flex: 1` gives the slot the scrim's height and `maxHeight` trims it to
+      82% — which is still the original intent: the strip of scrim above is the
+      affordance that says "this is a sheet you can dismiss".
+    */
+    flex: 1,
     maxHeight: '82%',
     /* L1166's `margin:0 10px`. It lives on the PARENT rather than as a margin
        on the sheet, because the sheet is `width:'100%'` and a margin would put
@@ -710,6 +806,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: GUTTER,
     paddingBottom: Space.xxl,
     gap: Space.sm + 1,
+  },
+  /**
+   * The failure card takes the whole results area and centres in it, rather
+   * than sitting at the top of an empty list where it reads as the first row of
+   * something. Same gutter as the list so the card's edges line up with the
+   * results it replaces.
+   */
+  failure: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: GUTTER,
+    paddingBottom: Space.xxl,
   },
   /**
    * Layout only — fill, edge and corner belong to `GlassCard`. `minHeight` is

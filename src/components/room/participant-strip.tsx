@@ -94,6 +94,14 @@
  *
  * When the backend starts publishing per-participant drift, only `readingFor`
  * needs to change.
+ *
+ * WHAT MOVES WHEN A ROSTER ARRIVES: THE ROWS, AND ONLY THE ROWS. Both lists run
+ * the design's `auxRow` cascade off `renderItem`'s own `index` (`useEntrance`,
+ * 'src/lib/entrance.ts') — people landing one after another, which is what a
+ * roster is. The dial, its rings, the orbit markers, the ±400ms plot, the
+ * legend and the skeletons are given nothing: they are instruments, and a
+ * measurement that fades up on a schedule of its own reads as a reading being
+ * taken rather than as a chart arriving. The full argument is on `DriftRow`.
  */
 
 import { Users, Volume2, VolumeX } from 'lucide-react-native';
@@ -108,8 +116,10 @@ import {
   type DimensionValue,
   type ListRenderItemInfo,
 } from 'react-native';
+import Animated from 'react-native-reanimated';
 
 import { Avatar, CircleIconButton, EmptyState, Skeleton } from '@/components/ui';
+import { useEntrance } from '@/lib/entrance';
 import {
   Fonts,
   PointerEvents,
@@ -292,11 +302,15 @@ export function ParticipantStrip({
   }, [refetch]);
 
   const renderItem = useCallback(
-    ({ item }: ListRenderItemInfo<ParticipantView>) => {
+    // `index` is `renderItem`'s own — taken from here rather than threaded in
+    // from anywhere, so the row keeps its memoisation and still knows where in
+    // the cascade it belongs.
+    ({ item, index }: ListRenderItemInfo<ParticipantView>) => {
       const isMe = item.userId === currentUserId;
       return (
         <DriftRow
           participant={item}
+          index={index}
           isOnAux={item.userId === hostId}
           isMe={isMe}
           // Only the viewer's own row consumes this. Handing everyone else a
@@ -386,6 +400,8 @@ type DriftRowProps = RowControlProps & {
   isMe: boolean;
   /** The viewer's own measured drift. Only applied to the viewer's own row. */
   driftMs: number;
+  /** Position in the roster. Drives the arrival stagger, nothing else. */
+  index: number;
 };
 
 const DriftRow = memo(function DriftRow({
@@ -393,12 +409,35 @@ const DriftRow = memo(function DriftRow({
   isOnAux,
   isMe,
   driftMs,
+  index,
   muted = false,
   speaking = false,
   onSelect,
   onOpen,
 }: DriftRowProps) {
   const C = useColors();
+
+  /*
+    The design's `auxRow`: an 8px lift, one row after another, 55ms a step.
+    `useEntrance` from 'src/lib/entrance.ts'.
+
+    A ROSTER IS A LIST OF PEOPLE AND THEY ARRIVE ONE AT A TIME. That is the
+    whole of it — six listeners landing in sequence is the roster saying who is
+    here, in the order it is about to show you.
+
+    IT IS THE CARD THAT ARRIVES, NEVER THE READING INSIDE IT. The mark in the
+    plot, the rung word and the drift figure are all at their final values on
+    this row's first frame; only the row's own opacity and offset move. What is
+    forbidden is giving a readout an entrance of ITS OWN — a number that fades
+    up on a delay separate from the card around it is indistinguishable from a
+    number still being computed, which is why the dial, the ±400ms plot and the
+    legend below are left alone entirely.
+
+    `index` comes straight off `renderItem`, so nothing has to be threaded
+    through a closure and the row stays memoised. The delay is capped at 8 steps
+    inside the hook, so a full lounge finishes arriving instead of trickling.
+  */
+  const entrance = useEntrance({ index });
 
   const reading = useMemo(
     () => readingFor(isMe, participant.isSynced, driftMs, C),
@@ -464,7 +503,13 @@ const DriftRow = memo(function DriftRow({
   );
 
   return (
-    <View style={[styles.row, { backgroundColor: C.surfaceSolid, borderColor: C.rule }, raised(C)]}>
+    <Animated.View
+      style={[
+        styles.row,
+        { backgroundColor: C.surfaceSolid, borderColor: C.rule },
+        raised(C),
+        entrance,
+      ]}>
       {press ? (
         <Pressable
           accessibilityRole="button"
@@ -488,7 +533,7 @@ const DriftRow = memo(function DriftRow({
         onSelect={onSelect}
         userId={participant.userId}
       />
-    </View>
+    </Animated.View>
   );
 });
 
@@ -711,11 +756,12 @@ export function SyncOrbit({
   }, [refetch]);
 
   const renderItem = useCallback(
-    ({ item }: ListRenderItemInfo<ParticipantView>) => {
+    ({ item, index }: ListRenderItemInfo<ParticipantView>) => {
       const isMe = item.userId === currentUserId;
       return (
         <OrbitRow
           participant={item}
+          index={index}
           isOnAux={item.userId === hostId}
           isMe={isMe}
           driftMs={isMe ? driftMs : 0}
@@ -955,6 +1001,8 @@ type OrbitRowProps = RowControlProps & {
   isOnAux: boolean;
   isMe: boolean;
   driftMs: number;
+  /** Position in the roster. Drives the arrival stagger, nothing else. */
+  index: number;
 };
 
 const OrbitRow = memo(function OrbitRow({
@@ -962,6 +1010,7 @@ const OrbitRow = memo(function OrbitRow({
   isOnAux,
   isMe,
   driftMs,
+  index,
   muted = false,
   speaking = false,
   onSelect,
@@ -970,6 +1019,23 @@ const OrbitRow = memo(function OrbitRow({
   const C = useColors();
   const reading = readingFor(isMe, participant.isSynced, driftMs, C);
   const press = rowPress(participant.userId, isMe, onSelect, onOpen);
+
+  /*
+    The same arrival `DriftRow` has, for the same reason and by construction:
+    this is ONE row object drawn in two lists, and a row that moves differently
+    depending on which list rendered it is precisely the drift this file's
+    header spends four paragraphs removing. The long version of the argument —
+    and the line between a card arriving and a reading animating — is on
+    `DriftRow`.
+
+    The DIAL ABOVE THIS LIST GETS NOTHING. It is the instrument: rings at ±40
+    and ±220, every listener plotted by their real distance from the Session's
+    position, the room clock in the middle. It rides the stage module in
+    'src/app/room/[id].tsx' like the rest of the tab and is never animated on
+    its own, because a measurement fading up on its own schedule reads as a
+    reading being taken rather than as a chart arriving.
+  */
+  const entrance = useEntrance({ index });
 
   const content = (
     <>
@@ -1004,7 +1070,13 @@ const OrbitRow = memo(function OrbitRow({
   }${muted ? ', muted for you' : ''}`;
 
   return (
-    <View style={[styles.row, { backgroundColor: C.surfaceSolid, borderColor: C.rule }, raised(C)]}>
+    <Animated.View
+      style={[
+        styles.row,
+        { backgroundColor: C.surfaceSolid, borderColor: C.rule },
+        raised(C),
+        entrance,
+      ]}>
       {press ? (
         <Pressable
           accessibilityRole="button"
@@ -1028,7 +1100,7 @@ const OrbitRow = memo(function OrbitRow({
         onSelect={onSelect}
         userId={participant.userId}
       />
-    </View>
+    </Animated.View>
   );
 });
 

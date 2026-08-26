@@ -536,6 +536,14 @@ export const TOUCH_TARGET = 44;
 export const Duration = {
   press: 160,
   enter: 280,
+  /**
+   * One row arriving in a list - the design's `auxRow` at .24s.
+   *
+   * Shorter than `enter` on purpose: a row is one of many and its entrance is
+   * staggered against its neighbours, so the same duration a whole module gets
+   * would leave the list still assembling long after the eye has moved on.
+   */
+  row: 240,
   sheet: 300,
   scrim: 200,
 } as const;

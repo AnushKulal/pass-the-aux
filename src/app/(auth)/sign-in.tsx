@@ -56,7 +56,6 @@ import Animated from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
-  BrandRule,
   OnboardingField,
   PrimaryCta,
   SecondaryCta,
@@ -99,8 +98,6 @@ const PROVIDER_NAME: Record<Provider, string> = {
 const GUTTER = 18;
 /** The wordmark at its sign-in size — design L111. */
 const LOGO = 54;
-/** The brand rule under it — 52 wide here, 64 on Intro (L112). */
-const RULE_W = 52;
 /** The provider button and its leading glyph chip (L136). */
 const PROVIDER_HEIGHT = 54;
 const PROVIDER_CHIP = 26;
@@ -230,14 +227,21 @@ export default function SignInScreen() {
               <Wordmark size={LOGO} />
 
               {/*
-                Was an inline `LinearGradient` here, claiming to be the one
-                element in the app that paints both accents — while Intro drew
-                the same object 12px wider and made the same claim. `BrandRule`
-                now owns the gradient and the reasoning, once.
-              */}
-              <BrandRule width={RULE_W} style={styles.accentRule} />
+                NO BRAND RULE AND NO KICKER HERE, and they were both here until
+                the column stopped fitting.
 
-              <Text style={[styles.kicker, { color: C.ink3 }]}>PASS THE AUX</Text>
+                Sign in carried a wordmark, a gradient rule, a tracked kicker, a
+                title AND a lede before the first field — five pieces of
+                masthead on a screen whose entire job is two inputs and a
+                button. The cost was not aesthetic: it pushed "Create account"
+                off the bottom, so the second of the two reasons anyone opens
+                this screen was reachable only by scrolling to find it, which is
+                exactly what was reported.
+
+                Intro keeps the full mark, kicker and rule — it is the screen
+                that introduces the app, and it has room. This one keeps the
+                wordmark for continuity and drops the rest.
+              */}
 
               {/* The screen's heading, standing where the segmented switch was.
                   A title that names ONE job is what a screen reader lands on
@@ -319,14 +323,30 @@ export default function SignInScreen() {
                 }}
               />
               {/*
-                No handler, and no pretend one. `disabled` is the whole state:
-                the tag names the reason on the button itself, and the footnote
-                below spells it out once for anyone who wants the why.
-              */}
-              <ProviderButton glyph="A" label="Continue with Apple Music" tag="iOS only" disabled />
-            </View>
+                DISABLED, BUT NOT FOR THE REASON THIS USED TO GIVE.
 
-            <View style={styles.spacer} />
+                It said "iOS only", and that is wrong: MusicKit JS runs in any
+                modern browser, an Android WebView included, so Apple Music
+                sign-in on Android is genuinely possible. Two things stop it
+                being useful here, and neither is the platform:
+
+                  - minting the developer token MusicKit needs requires a paid
+                    Apple Developer Program membership and a MusicKit key
+                  - even with a signed-in user, Apple publishes no way for a
+                    third-party Android app to PLAY Apple Music audio. Sign-in
+                    would buy an identity and a library, not a playback source,
+                    and a playback source is what a Session needs.
+
+                So the honest state is "not wired", with the real blocker named,
+                rather than a platform claim that is not true.
+              */}
+              <ProviderButton
+                glyph="A"
+                label="Continue with Apple Music"
+                tag="Not wired"
+                disabled
+              />
+            </View>
 
             <View style={[styles.divide, { backgroundColor: C.rule }]} />
 
@@ -347,8 +367,7 @@ export default function SignInScreen() {
             />
 
             <Text style={[styles.footnote, { color: C.ink3 }]}>
-              No Spotify needed — Aux plays through YouTube by default. Apple Music has no sign-in
-              here: Apple ships MusicKit for iOS and the web only.
+              No Spotify needed — Aux plays through YouTube by default.
             </Text>
             <Text style={[styles.terms, { color: C.ink3 }]}>
               By continuing you agree to the terms. We never post anything.
@@ -518,15 +537,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   /** Spacing only — `BrandRule` carries the width, height and radius. */
-  accentRule: {
-    marginTop: Space.xxl,
-    marginBottom: Space.md,
-  },
-  kicker: {
-    fontFamily: Fonts.extrabold,
-    fontSize: 10,
-    letterSpacing: tracking(10, 0.2),
-  },
   title: {
     textAlign: 'center',
     letterSpacing: tracking(TITLE, -0.03),
@@ -610,11 +620,6 @@ const styles = StyleSheet.create({
   },
 
   /** Collapses first when the keyboard takes the bottom half of the screen. */
-  spacer: {
-    flexGrow: 1,
-    flexShrink: 1,
-    minHeight: Space.xxl,
-  },
   /**
    * The rule above the create-account block. Its own style rather than `hair`,
    * which is `flex: 1` because it lives inside the horizontal OR row — reused

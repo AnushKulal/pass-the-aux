@@ -63,6 +63,26 @@
  * tree shape when `glow` toggles, so a bleed that followed play/pause would
  * remount the artwork `Image` on every tap.
  *
+ * ------------------------------------------- NOTHING IN HERE ANIMATES ITSELF
+ *
+ * Deliberate, and worth saying out loud because the obvious next edit to this
+ * file is to give the card its own fade-and-lift.
+ *
+ * The player is ONE OBJECT and it arrives as one, but the arrival belongs to
+ * the stage that holds it: 'src/app/room/[id].tsx' wraps the whole now-playing
+ * stage in a single `useEntrance({ kind: 'module' })` and everything in this
+ * file rides it. Adding a second entrance here would compound with that one —
+ * the card would fade inside a fading column, at a different duration — and it
+ * would split one module into two, which is how a screen starts looking like it
+ * is assembling itself rather than arriving.
+ *
+ * THE SCRUBBER AND THE SYNC ROW ARE HARD NOs SPECIFICALLY. Both report live
+ * state, and a readout that fades up on a delay of its own is indistinguishable
+ * from a number still being computed. Riding the module is fine — the value is
+ * final on its first frame and only the column's opacity moves — but neither
+ * may ever be handed an `index`, a `step` or a style of its own. Same for
+ * `PlaybackError`: nobody staggers the thing the user is stuck waiting on.
+ *
  * --------------------------------------------------------- still load-bearing
  *
  *  - The playhead is driven by a local 250ms ticker over
