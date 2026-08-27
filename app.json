@@ -55,11 +55,25 @@
       "eas": {
         "projectId": "3c252219-3619-434b-9ab4-f0931d09722a"
       },
-      "patch": 9,
+      "patch": 10,
       "releaseNotes": [
-        "Settings now notices a new app build on its own, instead of waiting to be asked"
+        "The navigation bar has labels now, and an underline marks the tab you are on",
+        "The app icon is the gradient A, and both it and the splash mark are centred properly",
+        "After the four intro pages you pick a door: new here, or already a member",
+        "The update card no longer draws its buttons in the wrong place",
+        "The banner at the top no longer sits under the status bar"
       ],
       "changelog": [
+        {
+          "patch": 10,
+          "notes": [
+            "The navigation bar has labels now, and an underline marks the tab you are on",
+            "The app icon is the gradient A, and both it and the splash mark are centred properly",
+            "After the four intro pages you pick a door: new here, or already a member",
+            "The update card no longer draws its buttons in the wrong place",
+            "The banner at the top no longer sits under the status bar"
+          ]
+        },
         {
           "patch": 9,
           "notes": [
