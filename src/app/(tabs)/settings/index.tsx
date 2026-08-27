@@ -41,7 +41,16 @@
 
 import { LinearGradient } from 'expo-linear-gradient';
 import { Redirect, router, useIsFocused } from 'expo-router';
-import { ArrowLeft, ChevronRight, Monitor, Moon, Sun, type LucideIcon } from 'lucide-react-native';
+import {
+  ArrowLeft,
+  ChevronRight,
+  Minus,
+  Monitor,
+  Moon,
+  Sun,
+  Waves,
+  type LucideIcon,
+} from 'lucide-react-native';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated from 'react-native-reanimated';
@@ -58,6 +67,7 @@ import {
 } from '@/lib/apk-updates';
 import { useAuth } from '@/lib/auth';
 import { useDockReserve } from '@/lib/dock';
+import { useMotion, type MotionMode } from '@/lib/motion';
 import { useEntrance } from '@/lib/entrance';
 import { Fonts, Radii, Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
 import type { ThemeChoice } from '@/lib/theme';
@@ -107,6 +117,18 @@ const SEGMENTS: { key: ThemeChoice; label: string; icon: LucideIcon }[] = [
   { key: 'system', label: 'System', icon: Monitor },
 ];
 
+/**
+ * The two motion systems, offered as a choice rather than fixed at build time.
+ *
+ * `Waves` for the spring and `Minus` for the flat one is not decoration: one is
+ * a curve that settles, the other is a straight line, and the glyphs say which
+ * is which faster than the words underneath them do.
+ */
+const MOTION_SEGMENTS: { key: MotionMode; label: string; icon: LucideIcon }[] = [
+  { key: 'spring', label: 'Spring', icon: Waves },
+  { key: 'classic', label: 'Classic', icon: Minus },
+];
+
 export default function SettingsScreen() {
   const C = useColors();
   const dockReserve = useDockReserve();
@@ -115,6 +137,7 @@ export default function SettingsScreen() {
   // The control surface for the whole theming system. Everything that calls
   // `useColors()` is downstream of this one setter.
   const { choice, setChoice } = useTheme();
+  const motion = useMotion();
 
   /*
     The same cache entry AuthProvider already holds — identical key, identical
@@ -375,6 +398,30 @@ export default function SettingsScreen() {
             </View>
             <Text style={[styles.helper, { color: C.ink3 }]}>
               System follows your phone. Aux was built for the dark one.
+            </Text>
+
+            {/*
+              THE WAY OUT OF THE MOTION REBUILD, and it lives here rather than in
+              a constant somebody has to edit and rebuild for.
+
+              Every entrance in the app moved from a fixed duration onto a
+              spring, which is a change reaching 26 files through one hook. A
+              change that broad should not be a one-way door, and "revert
+              whenever I want" has to mean flipping a switch on the device, not
+              shipping an APK. Both systems stay compiled — see `@/lib/motion`.
+            */}
+            <View accessibilityRole="radiogroup" style={styles.motionRow}>
+              {MOTION_SEGMENTS.map((segment) => (
+                <MotionTile
+                  key={segment.key}
+                  segment={segment}
+                  selected={motion.mode === segment.key}
+                  onPress={() => motion.setMode(segment.key)}
+                />
+              ))}
+            </View>
+            <Text style={[styles.helper, { color: C.ink3 }]}>
+              Spring is how the app moves now. Classic is the older, flatter one.
             </Text>
           </Animated.View>
 
@@ -648,6 +695,52 @@ function Kicker({ children, first = false }: { children: ReactNode; first?: bool
  * transparent ring inside the border and read as a gap between the fill and its
  * own glow.
  */
+/**
+ * One motion choice. Deliberately the same object as `ThemeTile` at a smaller
+ * size — the two controls sit a few pixels apart, and a second visual language
+ * between them would make one look like a different KIND of setting.
+ */
+function MotionTile({
+  segment,
+  selected,
+  onPress,
+}: {
+  segment: (typeof MOTION_SEGMENTS)[number];
+  selected: boolean;
+  onPress: () => void;
+}) {
+  const C = useColors();
+  const Icon = segment.icon;
+
+  return (
+    <Pressable
+      accessibilityRole="radio"
+      accessibilityState={{ selected }}
+      accessibilityLabel={`${segment.label} motion`}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.motionTile,
+        {
+          backgroundColor: selected ? C.surface2 : C.surface,
+          borderColor: selected ? C.rule3 : C.rule,
+        },
+        pressed ? { opacity: 0.7 } : null,
+      ]}>
+      <Icon size={16} strokeWidth={selected ? 2.4 : 2} color={selected ? C.ink : C.ink3} />
+      <Text
+        style={[
+          styles.motionLabel,
+          {
+            color: selected ? C.ink : C.ink3,
+            fontFamily: selected ? Fonts.extrabold : Fonts.semibold,
+          },
+        ]}>
+        {segment.label}
+      </Text>
+    </Pressable>
+  );
+}
+
 function ThemeTile({
   segment,
   selected,
@@ -825,6 +918,24 @@ const styles = StyleSheet.create({
 
   /* ---------------------------------------------------------- appearance */
 
+  motionRow: {
+    flexDirection: 'row',
+    gap: Space.sm,
+    marginTop: Space.md,
+  },
+  motionTile: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: Radii.md,
+    borderWidth: Rule.hair,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+  },
+  motionLabel: {
+    fontSize: 12,
+  },
   themeRow: {
     flexDirection: 'row',
     gap: 10,

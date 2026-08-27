@@ -55,15 +55,23 @@
       "eas": {
         "projectId": "3c252219-3619-434b-9ab4-f0931d09722a"
       },
-      "patch": 10,
+      "patch": 11,
       "releaseNotes": [
-        "The navigation bar has labels now, and an underline marks the tab you are on",
-        "The app icon is the gradient A, and both it and the splash mark are centred properly",
-        "After the four intro pages you pick a door: new here, or already a member",
-        "The update card no longer draws its buttons in the wrong place",
-        "The banner at the top no longer sits under the status bar"
+        "Everything now moves on springs instead of fixed timings, so things settle rather than finish",
+        "Cards surface into place rather than sliding up the page",
+        "The mark under the navigation slides between tabs instead of blinking across",
+        "Settings > Appearance has a Motion switch: Spring is the new one, Classic is exactly how it was"
       ],
       "changelog": [
+        {
+          "patch": 11,
+          "notes": [
+            "Everything now moves on springs instead of fixed timings, so things settle rather than finish",
+            "Cards surface into place rather than sliding up the page",
+            "The mark under the navigation slides between tabs instead of blinking across",
+            "Settings > Appearance has a Motion switch: Spring is the new one, Classic is exactly how it was"
+          ]
+        },
         {
           "patch": 10,
           "notes": [

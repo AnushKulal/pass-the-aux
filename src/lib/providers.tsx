@@ -41,6 +41,7 @@ import { ToastProvider } from '@/components/ui';
 import { AuthProvider, useAuth } from '@/lib/auth';
 import { queryClient } from '@/lib/query';
 import { useColors } from '@/lib/theme-context';
+import { MotionProvider } from '@/lib/motion';
 import { UpdateProvider } from '@/lib/updates';
 import { usePlayback, type MusicService } from '@/playback/store';
 
@@ -336,6 +337,13 @@ export function Providers({ children }: { children: ReactNode }) {
         it has to follow the theme or a light-mode launch flashes black.
       */}
       <View style={[styles.root, { backgroundColor: C.bg }]}>
+        {/*
+          OUTSIDE everything that animates, and above SafeAreaProvider, because
+          `useEntrance` is called from 26 files spread across every group below
+          and each one has to read the same answer. It holds no network state
+          and no session, so nothing here depends on it being lower.
+        */}
+        <MotionProvider>
         <SafeAreaProvider>
           <QueryClientProvider client={queryClient}>
             <AuthProvider>
@@ -362,6 +370,7 @@ export function Providers({ children }: { children: ReactNode }) {
             </AuthProvider>
           </QueryClientProvider>
         </SafeAreaProvider>
+        </MotionProvider>
       </View>
     </GestureHandlerRootView>
   );

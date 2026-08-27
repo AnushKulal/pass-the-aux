@@ -64,29 +64,31 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { Compass, House, MessageCircle, Plus, User, type LucideIcon } from 'lucide-react-native';
-import { memo, useEffect, type RefObject } from 'react';
+import { memo, useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
-  Easing,
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
-  withTiming,
+  withSpring,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { BottomTabBarProps } from 'expo-router/js-tabs';
 
 import { useTotalUnread } from '@/features/dm';
 import { Dock, Fonts, Radii, Rule, ZIndex, bloom, floating, tracking } from '@/lib/theme';
+import { SETTLE } from '@/lib/entrance';
+import { useMotionMode } from '@/lib/motion';
 import { useColors, useTheme } from '@/lib/theme-context';
 
 /**
- * The house curve, cubic-bezier(.2,.85,.2,1) - the same decelerate the design
- * uses for every entrance and the same one `src/lib/entrance.ts` carries. The
- * mark under the active tab is a micro-interaction, not an entrance, so it
- * borrows the curve rather than the hook.
+ * The four NAV slots, left to right, skipping the centre button.
+ *
+ * The mark indexes into this, so it is the one place the bar's order is stated.
+ * Create is absent on purpose: it is an action, it is never "where you are",
+ * and a selection mark that could land on it would say otherwise.
  */
-const MARK_CURVE = Easing.bezier(0.2, 0.85, 0.2, 1);
+const ORDER = ['index', 'explore', 'messages', 'profile'] as const;
 
 /** The two declared tabs that sit left of the centre action. */
 const LEFT: { name: string; icon: LucideIcon; label: string }[] = [
@@ -169,6 +171,8 @@ export function NavBar({ state, navigation, blurTarget }: NavBarProps) {
   const { scheme } = useTheme();
   const insets = useSafeAreaInsets();
   const unread = useTotalUnread();
+  const reduced = useReducedMotion();
+  const mode = useMotionMode();
 
   const dark = scheme === 'dark';
   /*
@@ -181,6 +185,61 @@ export function NavBar({ state, navigation, blurTarget }: NavBarProps) {
   const glass = blurred ? GLASS : NO_BLUR;
 
   const current = state.routes[state.index]?.name ?? '';
+
+  /**
+   * ONE MARK FOR THE WHOLE BAR, WHICH SLIDES.
+   *
+   * Each cell used to draw its own underline and cross-fade it, so changing tab
+   * meant one mark dying while another was born two cells away — two events the
+   * eye has to connect for itself. A single mark that TRAVELS is the same
+   * information carried by one continuous object, and it is the detail that
+   * separates a tab bar that feels built from one that feels assembled.
+   *
+   * Positions are MEASURED rather than computed. The arithmetic is knowable —
+   * five known widths under `space-between` inside a known padding — but it
+   * would silently break the first time a label gets longer, a cell is added,
+   * or a font scales, and a selection mark landing between two tabs is worse
+   * than one that fades. `onLayout` cannot be wrong about where a thing is.
+   */
+  const cellX = useRef<number[]>([]);
+  const [measured, setMeasured] = useState(0);
+  const markX = useSharedValue(0);
+  const markReady = useSharedValue(0);
+
+  const activeIndex = ORDER.findIndex((name) =>
+    name === 'messages' ? current.startsWith('messages') : current === name,
+  );
+
+  const measureCell = useCallback((slot: number, x: number, width: number) => {
+    const centre = x + width / 2;
+    if (cellX.current[slot] === centre) return;
+    cellX.current[slot] = centre;
+    // Re-run the placement effect. A counter rather than the array itself,
+    // because mutating a ref does not re-render and the effect has to be told.
+    setMeasured((n) => n + 1);
+  }, []);
+
+  useEffect(() => {
+    const centre = activeIndex >= 0 ? cellX.current[activeIndex] : undefined;
+    if (centre === undefined) return;
+
+    const target = centre - Dock.underline / 2;
+
+    if (markReady.value === 0) {
+      // FIRST PLACEMENT IS INSTANT. Springing from x=0 on mount would send the
+      // mark skating across the bar every cold start, announcing a tab change
+      // that never happened.
+      markX.value = target;
+      markReady.value = 1;
+      return;
+    }
+    markX.value = reduced || mode === 'classic' ? target : withSpring(target, SETTLE);
+  }, [activeIndex, measured, reduced, mode, markX, markReady]);
+
+  const markStyle = useAnimatedStyle(() => ({
+    opacity: markReady.value,
+    transform: [{ translateX: markX.value }],
+  }));
 
   const goTab = (name: string) => {
     const index = state.routes.findIndex((r) => r.name === name);
@@ -226,9 +285,20 @@ export function NavBar({ state, navigation, blurTarget }: NavBarProps) {
         */}
         <View style={[styles.tint, { backgroundColor: C.nav, opacity: glass.tint }]} />
 
-        {LEFT.map((cell) => (
+        {/*
+          Above the tint, below the cells: it is a mark ON the glass, and a cell
+          that overlapped it would be a cell floating over its own indicator.
+        */}
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.mark, markStyle, { backgroundColor: C.pill }]}
+        />
+
+        {LEFT.map((cell, slot) => (
           <NavCell
             key={cell.name}
+            slot={slot}
+            onMeasure={measureCell}
             icon={cell.icon}
             label={cell.label}
             focused={current === cell.name}
@@ -255,6 +325,8 @@ export function NavBar({ state, navigation, blurTarget }: NavBarProps) {
         <CreateButton />
 
         <NavCell
+          slot={2}
+          onMeasure={measureCell}
           icon={MessageCircle}
           label="Messages"
           focused={current.startsWith('messages')}
@@ -262,6 +334,8 @@ export function NavBar({ state, navigation, blurTarget }: NavBarProps) {
           onPress={() => router.push('/messages')}
         />
         <NavCell
+          slot={3}
+          onMeasure={measureCell}
           icon={User}
           label="You"
           focused={current === 'profile'}
@@ -280,6 +354,10 @@ type CellProps = {
   focused: boolean;
   badge?: number;
   onPress: () => void;
+  /** Where this cell sits in `ORDER`, so the shared mark can find it. */
+  slot: number;
+  /** Reports this cell's measured centre to the bar that owns the mark. */
+  onMeasure: (slot: number, x: number, width: number) => void;
 };
 
 const NavCell = memo(function NavCell({
@@ -288,6 +366,8 @@ const NavCell = memo(function NavCell({
   focused,
   badge = 0,
   onPress,
+  slot,
+  onMeasure,
 }: CellProps) {
   const C = useColors();
 
@@ -357,30 +437,6 @@ const NavCell = memo(function NavCell({
   */
   const ink = focused ? C.ink : C.ink3;
 
-  /*
-    The mark grows out of the centre rather than appearing.
-
-    220ms on the house curve — inside the 250-500ms band for a real transition,
-    and deliberately at its short end because this is a micro-interaction
-    confirming a tap the user already made, not a transition carrying them
-    somewhere. Scale rather than opacity so it reads as the mark ARRIVING under
-    the label it belongs to; a fade would just be the colour appearing.
-  */
-  const reduced = useReducedMotion();
-  const mark = useSharedValue(focused ? 1 : 0);
-
-  useEffect(() => {
-    mark.value = reduced
-      ? focused
-        ? 1
-        : 0
-      : withTiming(focused ? 1 : 0, { duration: 220, easing: MARK_CURVE });
-  }, [focused, reduced, mark]);
-
-  const markStyle = useAnimatedStyle(() => ({
-    opacity: mark.value,
-    transform: [{ scaleX: 0.4 + mark.value * 0.6 }],
-  }));
 
   return (
     <Pressable
@@ -390,6 +446,7 @@ const NavCell = memo(function NavCell({
       accessibilityState={{ selected: focused }}
       accessibilityLabel={badge > 0 ? label + ', ' + badge + ' unread' : label}
       onPress={onPress}
+      onLayout={(e) => onMeasure(slot, e.nativeEvent.layout.x, e.nativeEvent.layout.width)}
       style={({ pressed }) => [styles.cell, pressed ? styles.held : null]}>
       {/*
         First in the tree, so the glyph and the badge both paint on top of it.
@@ -426,15 +483,6 @@ const NavCell = memo(function NavCell({
         {label}
       </Text>
 
-      {/*
-        The underline is ALWAYS in the tree and only ever changes colour, so the
-        glyph and the word do not jump 3px when you change tab. A selection mark
-        that reflows the thing it marks is worse than none.
-      */}
-      <Animated.View
-        pointerEvents="none"
-        style={[styles.underline, markStyle, { backgroundColor: C.pill }]}
-      />
     </Pressable>
   );
 });
@@ -595,7 +643,19 @@ const styles = StyleSheet.create({
     letterSpacing: tracking(Dock.labelSize, 0.01),
     includeFontPadding: false,
   },
-  underline: {
+  /**
+   * The travelling mark. Absolute, so it can be anywhere along the capsule
+   * without belonging to a cell — the whole point is that it outlives the cell
+   * it happens to be under.
+   *
+   * `bottom` rather than `top`: the bar's height is set by its tallest content
+   * and the mark has to sit a fixed distance from the capsule's floor, not a
+   * computed distance from its ceiling.
+   */
+  mark: {
+    position: 'absolute',
+    left: 0,
+    bottom: 10,
     width: Dock.underline,
     height: Dock.underlineHeight,
     borderRadius: Radii.pill,
