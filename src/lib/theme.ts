@@ -477,19 +477,54 @@ export const Dock = {
   inset: 16,
   /** How far it floats clear of the bottom. */
   bottom: 42,
-  height: 68,
-  radius: 34,
+  /** 76, not 68: a glyph, a 5px gap, a 10px label and the air around them. */
+  height: 76,
+  radius: 38,
   /** Padding inside the capsule, before the first cell. */
   padding: 14,
 
   /** Each destination: a 48px round hit area around a 22px glyph. */
-  cell: 48,
-  icon: 22,
+  /**
+   * A cell is now a COLUMN - glyph over label - so it is taller than it is
+   * round, and wider than a bare icon needs.
+   *
+   * The bar carried icons alone and the reference the user supplied carries a
+   * word under every one. That is not decoration: with five destinations and no
+   * text, which tab you are on has to be read entirely from a highlight, and
+   * that highlight then has to shout loudly enough to beat the create button
+   * beside it. A label makes the answer literal and lets every other cue get
+   * quieter.
+   */
+  cell: 56,
+  cellHeight: 46,
+  icon: 21,
+  /** The word under the glyph. 10px is the reference's own proportion at 76. */
+  labelSize: 10,
+  labelGap: 5,
+
+  /**
+   * The active mark: a short bar UNDER the cell, not a pill behind it.
+   *
+   * A filled pill behind the glyph is the same shape language as the create
+   * button one cell over, which is exactly why the two were competing. An
+   * underline cannot be mistaken for a button because nothing is ever pressed
+   * by pressing a 3px bar.
+   */
+  underline: 18,
+  underlineHeight: 3,
 
   /** The centre action, lifted out of the capsule so it reads as primary. */
-  fab: 60,
-  fabLift: 20,
-  fabIcon: 26,
+  /**
+   * The centre button: bigger than a cell, smaller than it used to be.
+   *
+   * 60 was the size that crowded four cells into whatever was left and made the
+   * bar read as one button with attendants. 50 is still unmistakably the
+   * emphasis against a 21px glyph, and it fits inside the 76 capsule without
+   * escaping the blur's corner clip - which is what forced the old one to be an
+   * absolutely-positioned sibling.
+   */
+  fab: 50,
+  fabIcon: 24,
 
   /**
    * DO NOT READ THIS DIRECTLY. Use `useDockReserve()` from '@/lib/dock'.
@@ -505,7 +540,14 @@ export const Dock = {
    * including the Feed - so the name now says it is only half the answer, and
    * the hook that completes it is the only thing that reads it.
    */
-  reserveBase: 42 + 68 + 16,
+  /*
+    DERIVED, not retyped. This read `42 + 68 + 16` with the 68 written out by
+    hand, so raising the bar's height to fit its labels would have left every
+    scroll container in the app reserving 8px too little - the exact class of
+    bug this constant was renamed to prevent, reintroduced by a magic number
+    sitting inside the fix.
+  */
+  reserveBase: 42 + 76 + 16,
 } as const;
 
 /** Horizontal filter chips. */

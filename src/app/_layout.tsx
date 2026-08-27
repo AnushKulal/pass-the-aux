@@ -156,6 +156,14 @@ function RootNavigator({ fontsSettled }: { fontsSettled: boolean }) {
           ONLY navigator transition left in it, which makes the claim louder
           rather than weaker.
 
+          THAT SENTENCE WAS NOT TRUE WHEN IT WAS WRITTEN, and it is worth
+          saying so rather than quietly repairing it. This stack stopped
+          animating and the tab navigator's cross-fade went to zero, but the
+          NESTED `(auth)` stack was still pushing `slide_from_right` — so the
+          loudest transition in the app was a lateral slide into sign-in, which
+          is exactly what got complained about next. `(auth)/_layout` now takes
+          the same `none`, for the same reason, and the claim holds as written.
+
           It survives the cull because it is not a dissolve competing with the
           content's own arrival — it is the design's `auxSheetIn`, a travel with
           no opacity at all (aux-nocturne.dc.html L19), the same move

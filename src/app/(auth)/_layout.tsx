@@ -135,7 +135,62 @@ export default function AuthLayout() {
       screenOptions={{
         headerShown: false,
         contentStyle: { backgroundColor: C.bg },
-        animation: 'slide_from_right',
+        /*
+          WAS `slide_from_right`. It is gone, and nothing lateral replaces it.
+
+          The complaint was the slide into the login page, and the sharpest
+          version of why it was wrong is the call that produced it: nothing
+          PUSHES sign-in. `intro` gets there with `router.replace` on both of
+          its paths — the seen-before redirect and `leave()` — and
+          `create-account` does the same after a successful signup. A replace is
+          not a step deeper into anything, since the screen you came from ceases
+          to exist, so a push-from-the-right was narrating a hierarchy move that
+          never happened. The returning-user path was the worst of it: `intro`
+          renders one held frame while AsyncStorage answers, so what slid in
+          from the right was a storage lookup finishing, dressed as navigation.
+
+          `none` is the same decision the root Stack and the tab navigator
+          already made, for the same reason: every screen in this group animates
+          its own CONTENT in. Sign in, create account, claim username and
+          profile setup all hold `useEnterStyle` (@/components/auth/onboarding)
+          and intro runs `useEntrance` per section — both the design's `auxIn`,
+          a 10px lift with a fade on the house curve. A navigator transition on
+          top of that is a second move competing with the one that means
+          something.
+
+          Mount-driven arrival is CORRECT here in a way it is not under the
+          tabs. `useEnterStyle` runs off an effect with no `focused` dependency,
+          which is exactly right for a stack: push mounts the incoming screen,
+          pop unmounts it, replace does both — so the entrance replays every
+          time someone actually arrives. `useEntrance` needs its focus key only
+          because a tab navigator never unmounts what it has shown once.
+
+          VERIFIED AGAINST THE INSTALLED NAVIGATOR, because the tabs layout's
+          "`none` is unsafe on web" finding is about a DIFFERENT view and does
+          NOT carry over to this one:
+
+            - Native. `NativeStackView.native.js` hands `options.animation`
+              straight to `ScreenStackItem` as `stackAnimation`, and `'none'` is
+              a member of react-native-screens' `StackAnimationTypes`. The one
+              place the navigator second-guesses this option is the iOS
+              `gestureDirection: 'vertical'` block, and it only substitutes
+              `slide_from_bottom` when `animation` is `undefined` — an explicit
+              value is never overridden. These screens are `card`, hence
+              horizontal, so it does not apply regardless.
+            - Web. The web build of `NativeStackView.js` NEVER READS
+              `options.animation` — the string does not occur in the file. It
+              lays every route out absolutely filled and toggles
+              `display: 'flex' | 'none'` on the ones that are not focused. So
+              the hazard that forced the tab navigator to keep `fade` — that
+              under `none` its interpolated `sceneStyle` is skipped, leaving
+              every visited screen stacked at full opacity — has no analogue
+              here. This stack hides blurred screens with `display`,
+              unconditionally, and has been swapping instantly on web all along
+              no matter what this line said.
+
+          So on web this changes nothing, and on native it removes the slide.
+        */
+        animation: 'none',
       }}
     />
   );

@@ -4,8 +4,8 @@
  * Built from design/nocturne/aux-nocturne.dc.html, screens "intro1" through
  * "intro4" (L41-106) — the wordmark page, the "no audio passes through Aux"
  * page, the sync-tolerance page and the provider page, over a fixed page
- * counter, a four-segment progress rail, a Next button that becomes
- * "Get started", and a quiet link beneath it.
+ * counter, a four-segment progress rail and a Next button that becomes
+ * "Continue" — and then the fork, which the design does not draw.
  *
  * FOUR PAGES AGAIN, AND THE RECORD OF WHY IT WAS EVER ONE.
  *
@@ -23,15 +23,47 @@
  * settle. Anyone tempted to collapse this to one page a second time should know
  * that it has already been tried, and reversed by the person it was tried for.
  *
+ * THE DECK NOW ENDS IN A FORK, AND THE FORK IS NOT A FIFTH PAGE.
+ *
+ * The last page used to end with one loud "Get started" that went to
+ * create-account, and a quiet link to sign-in under it. Which door you were
+ * taking was therefore a matter of noticing small text — bad on the one screen
+ * where a brand-new user and a returning one are equally likely, because this
+ * screen only ever renders on a device that has never seen it, and a device
+ * that has never seen it says nothing about whether its owner has an account.
+ * So the deck hands over to TWO PEER CARDS, each naming its destination on its
+ * face: "New to Aux" -> create-account, "Already a member" -> sign-in.
+ *
+ * IT REPLACES THE DECK RATHER THAN JOINING IT, and the reason is the chrome. A
+ * fifth page would sit under the same page counter, the same progress rail and
+ * the same Next button as the four before it, and every one of those needs a
+ * special case on it: the counter would be numbering a page that is not pitch,
+ * the rail would grow a segment for a screen nobody is reading, and the button
+ * has no honest label at all — "Next" above two destinations is a third door
+ * nobody asked for, and "Get started" beside them is one of the two doors,
+ * offered twice. The fork wants the whole screen, which is exactly what a slot
+ * in a pager cannot give it. So `stage` swaps the deck out for it.
+ *
+ * The handover costs no new animation, which was the other half of the choice.
+ * `useEntrance` keys off FOCUS and this screen stays focused, so a component
+ * mounted into it animates in on the design's own curve — the identical
+ * mechanism that makes pages two, three and four arrive as you swipe toward
+ * them. There is no cross-fade of two screens here, because there are not two
+ * screens.
+ *
  * Shown ONCE. A flag in AsyncStorage forwards a returning user straight to
  * sign-in, which is why four pages of explanation cost a person four swipes in
- * their life rather than four swipes per launch.
+ * their life rather than four swipes per launch. That flag is written by the
+ * fork's cards and by nothing else, so a person who reaches the fork and quits
+ * before choosing gets the deck again — they never took a door.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
+import { ArrowLeft, ArrowRight } from 'lucide-react-native';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -49,14 +81,22 @@ import Animated, {
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { BrandRule, PrimaryCta, SecondaryLink } from '@/components/auth/onboarding';
+import { BrandRule, PrimaryCta } from '@/components/auth/onboarding';
 import { Wordmark } from '@/components/shell/wordmark';
 import { GlassCard, StatusPill } from '@/components/ui';
 import { useEntrance } from '@/lib/entrance';
-import { Duration, Fonts, Radii, Rule, Space, tracking, Type } from '@/lib/theme';
+import { Duration, Fonts, Radii, Rule, Space, raised, tracking, Type } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
 const SEEN_KEY = 'aux:intro-seen';
+
+/**
+ * The two ways out of this screen, and there are exactly two.
+ *
+ * A union rather than a `string`, so a fork card cannot be wired to a route
+ * that does not exist and `leave` cannot be handed one.
+ */
+type Door = '/(auth)/create-account' | '/(auth)/sign-in';
 
 /**
  * The screen gutter, and this screen used to say 30.
@@ -103,6 +143,13 @@ const RAIL_H = 4;
 const RAIL_GAP = 6;
 
 /**
+ * The fork's back tile, matching `(auth)/create-account` and
+ * `(auth)/claim-username` — the artboard's chrome button (L147). 40 is the
+ * tile; `hitSlop` is what takes the TARGET past 44 without moving the layout.
+ */
+const BACK_TILE = 40;
+
+/**
  * The pages, as components rather than as data.
  *
  * Each one owns its own `useEntrance` calls, which is only possible if each one
@@ -128,6 +175,18 @@ export default function IntroScreen() {
    * being read would flash it at every returning user for one frame.
    */
   const [status, setStatus] = useState<'checking' | 'show'>('checking');
+
+  /**
+   * The pitch, or the door.
+   *
+   * One screen with two layouts rather than two routes, because the fork is not
+   * somewhere you navigate TO — it is where the deck ends. A second route would
+   * put an entry in the history stack that a hardware Back could land on with
+   * the seen-flag already written, and would need the flag read a second time
+   * to know whether it should even render. See the header for why the fork is
+   * not simply a fifth page in the pager.
+   */
+  const [stage, setStage] = useState<'deck' | 'fork'>('deck');
 
   useEffect(() => {
     let cancelled = false;
@@ -156,8 +215,14 @@ export default function IntroScreen() {
    * renders on a FIRST LAUNCH, so "Get started" was sending brand-new users to
    * a form for an account they do not have, and the door out of that — the
    * secondary link — went to exactly the same place.
+   *
+   * Its two callers are now the fork's two cards, and this is still the only
+   * place the seen-flag is written: whichever door you take, the deck does not
+   * come back. That is the invariant, not a convenience — a person who picks a
+   * door, lands on a form and taps Back must get the form's own answer, never
+   * four pages of pitch a second time.
    */
-  const leave = useCallback((to: '/(auth)/create-account' | '/(auth)/sign-in') => {
+  const leave = useCallback((to: Door) => {
     void AsyncStorage.setItem(SEEN_KEY, '1').catch(() => undefined);
     router.replace(to);
   }, []);
@@ -225,7 +290,20 @@ export default function IntroScreen() {
 
   const onPagerLayout = useCallback((e: LayoutChangeEvent) => {
     const measured = e.nativeEvent.layout.width;
-    setPageWidth((prev) => (measured <= 0 || prev === measured ? prev : measured));
+    if (measured <= 0) return;
+    setPageWidth((prev) => (prev === measured ? prev : measured));
+
+    /*
+      A REMOUNT STARTS AT ZERO, and coming back from the fork is a remount.
+
+      The fork replaces the deck, so returning mounts a fresh ScrollView whose
+      offset is 0 while `activeRef` still says page four — the reader would be
+      dropped back at the wordmark. The width effect below cannot fix it: its
+      dependency is the WIDTH, which did not change. Layout fires on mount and
+      on resize and never mid-drag, so re-seating here is safe, and on every
+      other layout it scrolls to where the pager already is.
+    */
+    pager.current?.scrollTo({ x: activeRef.current * measured, animated: false });
   }, []);
 
   /**
@@ -242,7 +320,12 @@ export default function IntroScreen() {
 
   const advance = useCallback(() => {
     if (activeRef.current >= LAST) {
-      leave('/(auth)/create-account');
+      // The end of the pitch is no longer the end of the screen. This used to
+      // call `leave('/(auth)/create-account')` — the button WAS the signup
+      // door — and it now hands over to the fork, which is the thing that
+      // routes. Nothing is written to storage here: reaching the fork is not
+      // choosing a door.
+      setStage('fork');
       return;
     }
     const target = activeRef.current + 1;
@@ -250,10 +333,32 @@ export default function IntroScreen() {
     // high-water mark is that the page's content arrives during the journey.
     setReached((prev) => (target > prev ? target : prev));
     pager.current?.scrollTo({ x: target * pageWidth, animated: true });
-  }, [leave, pageWidth]);
+  }, [pageWidth]);
 
   // The splash is still up, so rendering nothing here is invisible.
   if (status === 'checking') return null;
+
+  /*
+    THE FORK OWNS THE WHOLE SCREEN, which is the reason it is not a page.
+
+    Returned early rather than nested in the deck's tree, so none of the deck's
+    chrome — the page counter, the four-segment rail, the Next button — has to
+    grow a branch for a screen it was never about. The one thing carried across
+    is the ground, and the back tile inside puts the deck back exactly where it
+    was left.
+
+    The return trip remounts the pager, so the page it lands on plays its
+    entrance again — deliberately left alone. `reached` is a high-water mark
+    that survives the swap, so nothing is re-revealed; the reader simply watches
+    the page they left arrive, the same way it arrived the first time.
+  */
+  if (stage === 'fork') {
+    return (
+      <SafeAreaView style={[styles.root, { backgroundColor: C.bg }]}>
+        <Fork onBack={() => setStage('deck')} onChoose={leave} />
+      </SafeAreaView>
+    );
+  }
 
   const last = active === LAST;
 
@@ -307,35 +412,36 @@ export default function IntroScreen() {
         <Rail active={active} />
 
         {/*
-          BLUE, on every page including the last. Advancing a carousel and
-          creating an account are both CONTROL — you make them happen — which is
-          the half of the accent rule blue owns. Nothing on this screen is live,
-          so nothing on it is coral except the sync readout on page three, which
-          genuinely is a statement about being in sync.
+          BLUE, on every page. Advancing a carousel is CONTROL — you make it
+          happen — which is the half of the accent rule blue owns. Nothing on
+          this screen is live, so nothing on it is coral except the sync readout
+          on page three, which genuinely is a statement about being in sync.
+
+          "CONTINUE", NOT "GET STARTED", and that is a correction rather than a
+          synonym. This button used to be the signup door itself and went
+          straight to create-account; it now hands over to the fork, where
+          starting is one of two things on offer. A label that promises a start
+          would be quoting one of the two cards the reader is about to be shown,
+          before they have been shown them.
         */}
         <PrimaryCta
-          label={last ? 'Get started' : 'Next'}
+          label={last ? 'Continue' : 'Next'}
           onPress={advance}
-          accessibilityLabel={last ? 'Get started, create an account' : 'Next page'}
+          accessibilityLabel={last ? 'Continue, choose how to enter Aux' : 'Next page'}
         />
 
         {/*
-          The design puts "Skip for now" in this slot (L104) and this says
-          something else, deliberately.
+          NOTHING UNDER THE BUTTON ANY MORE, where there was a quiet
+          "I already have an account" link — and, before that, the design's
+          "Skip for now" (L104).
 
-          Skip made sense while both controls on this screen led to the same
-          door. They no longer do — "Get started" goes to create-account and
-          this goes to sign-in, which was a bug fix two commits ago — and a link
-          labelled "Skip for now" on a FIRST LAUNCH would hand a brand-new user
-          the sign-in form for an account they have never made. That is the
-          exact failure that fix removed, and relabelling this would put it
-          straight back.
-
-          Skipping the rest of the pitch is still available, and is now the
-          gesture rather than a control: swipe, or tap Next. What is not
-          available is skipping into the wrong form.
+          That link was the returning user's only door out of this screen, which
+          made it a line of 12px text under a 54px gradient pill: the exact
+          imbalance the fork exists to remove. Putting it back would also let
+          someone take that door WITHOUT passing the fork, so the two would
+          drift — one place that names where it goes, one that does not. The
+          fork is the only exit from the deck now.
         */}
-        <SecondaryLink label="I already have an account" onPress={() => leave('/(auth)/sign-in')} />
       </View>
     </SafeAreaView>
   );
@@ -638,6 +744,168 @@ function IntroFour() {
   );
 }
 
+/* --------------------------------------------------------------------- fork */
+
+/**
+ * The door, and it is two doors drawn the same size.
+ *
+ * The brief this answers is one sentence long: which door you are taking has to
+ * be VISIBLE. So each card carries its destination as a line under its title —
+ * not "Get started" and a link, but "New to Aux / Create an account" and
+ * "Already a member / Sign in", named after the screens they actually reach.
+ *
+ * THEY ARE PEERS AND THE GEOMETRY IS WHAT SAYS SO. Same width, same padding,
+ * same corner, same type at the same size, in the same order every time. A
+ * returning user is not on the lesser path — they are the reason this screen
+ * stopped being a button with a footnote — so nothing here is a "secondary
+ * action" wearing a quieter shape.
+ *
+ * THE ACCENT IS THE ONLY DIFFERENCE, and it is one accent, on one card.
+ * Creating an account is the canonical CREATE act, which is blue: the top card
+ * takes the blue corner bleed (`GlassCard`'s own "this card is something you
+ * can do") and sets its destination line and arrow in `pill`. Signing in is not
+ * a create and it is emphatically not a live state, so it takes no accent at
+ * all rather than reaching for coral — coral means live, playing, in sync in
+ * this app, and "the other button" is not one of those things. Neither card is
+ * gradient-FILLED: a filled pill is what this design means by "the one action
+ * on the screen", and there are two here.
+ *
+ * ORDER, since a stack has one: new first, because this screen only renders on
+ * a device that has never seen it. That is a statement about who is most likely
+ * to be standing here, not about which door is worth more, and it is why the
+ * second card is a card and not a link.
+ */
+function Fork({ onBack, onChoose }: { onBack: () => void; onChoose: (to: Door) => void }) {
+  const C = useColors();
+  const back = useEntrance({ index: 0 });
+  const head = useEntrance({ index: 1, kind: 'module' });
+
+  return (
+    <View style={styles.fork}>
+      {/*
+        THE WAY BACK, and it is here because the deck is shown once per device.
+        Tap Continue a page early and the four pages are gone for good; a person
+        who wanted to re-read the sync page would have no route to it and no way
+        to know they had lost one. It sits in the CHROME rather than under the
+        cards on purpose — a third tappable object in the doors zone is exactly
+        the "third option nobody wants", while a back tile in the corner is the
+        same object `(auth)/create-account` and `(auth)/claim-username` already
+        put there, and it goes backwards rather than out.
+      */}
+      <Animated.View style={back}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Back to the tour"
+          onPress={onBack}
+          hitSlop={4}
+          style={({ pressed }) => [
+            styles.back,
+            { backgroundColor: pressed ? C.surface2 : C.surface, borderColor: C.rule },
+            raised(C),
+          ]}>
+          <ArrowLeft size={17} strokeWidth={2.2} color={C.ink} />
+        </Pressable>
+      </Animated.View>
+
+      <View style={styles.doors}>
+        <Animated.View style={head}>
+          {/*
+            The deck's own page badge, once more, because this is the same
+            screen continuing rather than a new one arriving — and because it
+            answers the only question the handover raises, which is where the
+            four pages went.
+          */}
+          <StatusPill label="That's the tour" tone="outline" />
+
+          <Text
+            accessibilityRole="header"
+            style={[styles.title, styles.forkTitle, { color: C.ink }]}>
+            {'How do you\nwant to start?'}
+          </Text>
+        </Animated.View>
+
+        <View style={styles.doorStack}>
+          <DoorCard
+            index={2}
+            title="New to Aux"
+            route="Create an account"
+            accent
+            onPress={() => onChoose('/(auth)/create-account')}
+          />
+          <DoorCard
+            index={3}
+            title="Already a member"
+            route="Sign in"
+            onPress={() => onChoose('/(auth)/sign-in')}
+          />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * One door.
+ *
+ * ONE LINE OF TITLE AND ONE LINE OF DESTINATION, both capped at one line by
+ * `numberOfLines`. That is not typographic fussiness, it is what makes the two
+ * cards exactly the same height on every screen width the app runs on — a
+ * destination that wrapped to two lines on a 320px phone would quietly make one
+ * door taller than the other, and two doors of different sizes are not peers.
+ * Any longer copy belongs on the screen the card leads to.
+ */
+function DoorCard({
+  index,
+  title,
+  route,
+  accent = false,
+  onPress,
+}: {
+  /** Position in the fork's stagger, not a rank. */
+  index: number;
+  title: string;
+  /** Where the card goes, named after the screen it reaches. */
+  route: string;
+  /** Blue — this door CREATES. Exactly one card on the fork sets it. */
+  accent?: boolean;
+  onPress: () => void;
+}) {
+  const C = useColors();
+  const enter = useEntrance({ index });
+
+  // The destination line and the arrow are one object's worth of accent: both
+  // point at the same place, so they take the same colour.
+  const tone = accent ? C.pill : C.ink2;
+
+  return (
+    <Animated.View style={enter}>
+      <Pressable
+        accessibilityRole="button"
+        // ONE node reading ONE sentence. The title alone does not say where the
+        // card goes, and the whole point of the fork is that it does.
+        accessibilityLabel={`${title}. ${route}.`}
+        onPress={onPress}
+        // A scale, not a fill: `GlassCard` owns its skin and a caller cannot
+        // tint it. The artboard presses a whole card this way (L256).
+        style={({ pressed }) => (pressed ? styles.held : null)}>
+        <GlassCard glow={accent ? 'pri' : undefined}>
+          <View style={styles.doorRow}>
+            <View style={styles.doorText}>
+              <Text numberOfLines={1} style={[styles.doorTitle, { color: C.ink }]}>
+                {title}
+              </Text>
+              <Text numberOfLines={1} style={[styles.doorRoute, { color: tone }]}>
+                {route}
+              </Text>
+            </View>
+            <ArrowRight size={18} strokeWidth={2.4} color={tone} />
+          </View>
+        </GlassCard>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
 /* ------------------------------------------------------------------- styles */
 
 const styles = StyleSheet.create({
@@ -796,6 +1064,78 @@ const styles = StyleSheet.create({
   rungNote: {
     ...Type.body(14),
     flex: 1,
+  },
+
+  /* ---- the fork */
+
+  /**
+   * The same column as `page` and `bar` — the fork replaces the deck, so it has
+   * to stand on the deck's grid or the handover reads as a different screen.
+   */
+  fork: {
+    flex: 1,
+    width: '100%',
+    maxWidth: PAGE_MAX,
+    alignSelf: 'center',
+    paddingHorizontal: GUTTER,
+    // The page counter sits at this offset on the deck, so the tile that takes
+    // its place lands on the same line instead of jumping up the screen.
+    paddingTop: Space.md,
+  },
+  back: {
+    width: BACK_TILE,
+    height: BACK_TILE,
+    // Without this the tile stretches to the column: its parent is a plain
+    // Animated.View, and a flex column stretches its children by default.
+    alignSelf: 'flex-start',
+    borderRadius: Radii.pill,
+    borderWidth: Rule.hair,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  /**
+   * Centred in whatever the tile leaves behind, exactly as the deck's own text
+   * pages centre in whatever the counter and the controls leave behind.
+   */
+  doors: {
+    flex: 1,
+    justifyContent: 'center',
+    gap: Space.xxl,
+  },
+  forkTitle: {
+    // The deck's badge-to-title gap, which is its `stack` gap.
+    marginTop: Space.lg,
+  },
+  doorStack: {
+    gap: Space.md,
+  },
+  doorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.md,
+  },
+  doorText: {
+    flex: 1,
+    // A single-line Text refuses to shrink below its content without this, and
+    // a long title would push the arrow out through the card's own radius.
+    minWidth: 0,
+  },
+  doorTitle: {
+    fontFamily: Fonts.extrabold,
+    fontSize: 16,
+    letterSpacing: tracking(16, -0.01),
+  },
+  doorRoute: {
+    // Semibold, not the body face: this line is a label for a destination, not
+    // prose about it, and it has to hold its own under an extrabold title.
+    fontFamily: Fonts.semibold,
+    fontSize: 13,
+    lineHeight: 18,
+    letterSpacing: tracking(13, 0.01),
+    marginTop: 3,
+  },
+  held: {
+    transform: [{ scale: 0.985 }],
   },
 
   providers: {
