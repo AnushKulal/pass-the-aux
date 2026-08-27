@@ -55,15 +55,17 @@
       "eas": {
         "projectId": "3c252219-3619-434b-9ab4-f0931d09722a"
       },
-      "patch": 8,
+      "patch": 9,
       "releaseNotes": [
-        "The four intro pages are back, and they swipe",
-        "Cards and messages arrive one by one instead of the whole screen cross-fading",
-        "You can tell which tab you are on again, and the plus button no longer crowds the bar",
-        "LIVE only shows when something is actually playing or someone is listening",
-        "Sign in fits on one screen, so Create account is no longer below the fold"
+        "Settings now notices a new app build on its own, instead of waiting to be asked"
       ],
       "changelog": [
+        {
+          "patch": 9,
+          "notes": [
+            "Settings now notices a new app build on its own, instead of waiting to be asked"
+          ]
+        },
         {
           "patch": 8,
           "notes": [

@@ -40,9 +40,9 @@
  */
 
 import { LinearGradient } from 'expo-linear-gradient';
-import { Redirect, router } from 'expo-router';
+import { Redirect, router, useIsFocused } from 'expo-router';
 import { ArrowLeft, ChevronRight, Monitor, Moon, Sun, type LucideIcon } from 'lucide-react-native';
-import { useCallback, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -63,6 +63,15 @@ import { Fonts, Radii, Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/t
 import type { ThemeChoice } from '@/lib/theme';
 import { useColors, useTheme } from '@/lib/theme-context';
 import { useUpdates } from '@/lib/updates';
+
+/**
+ * How long a build-info answer stays fresh enough to reuse.
+ *
+ * A CI build takes roughly sixteen minutes, so five is frequent enough to
+ * notice one and rare enough that walking between Settings, About and
+ * Connections costs a single request rather than three.
+ */
+const CHECK_EVERY_MS = 5 * 60 * 1000;
 
 /**
  * The screen gutter, and `Space` has no step for it — `lg` is 16 and `xl` is 20.
@@ -122,10 +131,21 @@ export default function SettingsScreen() {
   const update = useUpdates();
 
   /**
-   * The APK half, checked on demand rather than on mount: it is a network call
-   * for a 50MB artefact, and doing it automatically would spend someone's
-   * mobile data to answer a question they did not ask.
+   * The APK half, and it now checks ITSELF when this screen is opened.
+   *
+   * It used to check only when you tapped the row, justified here as avoiding
+   * "a network call for a 50MB artefact" on someone's mobile data. That reason
+   * was simply wrong: `checkForNewApk()` fetches `build-info.json`, which is
+   * about HALF A KILOBYTE. The 50MB is the APK itself, and that is only ever
+   * downloaded by `runApkInstall` after an explicit tap. The check was being
+   * withheld to save bandwidth it never used.
+   *
+   * The cost of that mistake was the whole feature: a new build could sit on
+   * the release for days and this row would go on saying you were current,
+   * because nothing had asked. An updater that only reports news when you
+   * already suspect there is news is not an updater.
    */
+  const focused = useIsFocused();
   const [apk, setApk] = useState<ApkCheck | null>(null);
   const [apkBusy, setApkBusy] = useState<'idle' | 'checking' | 'downloading'>('idle');
 
@@ -173,6 +193,39 @@ export default function SettingsScreen() {
     setApk(await checkForNewApk());
     setApkBusy('idle');
   }, []);
+
+  /**
+   * Ask on arrival, quietly.
+   *
+   * Keyed off focus rather than mount for the same reason every entrance on
+   * this screen is: the tabs group keeps its screens alive, so a mount effect
+   * would run once per app launch and this row would then be as stale as it
+   * was before.
+   *
+   * THROTTLED, because focus fires every time you come back from About or
+   * Connections and three requests to answer one question is rude even at half
+   * a kilobyte. `CHECK_EVERY_MS` is deliberately short — a build lands in about
+   * sixteen minutes, so five is frequent enough to catch one and rare enough
+   * that walking around the settings screens costs a single request.
+   *
+   * Never overrides a check the user asked for: if something is already in
+   * flight, or a result is already on screen and still fresh, this does
+   * nothing. And it stays silent on failure — an updater that cannot reach
+   * GitHub must not throw a toast at someone who came here to change the
+   * theme.
+   */
+  const lastApkCheck = useRef(0);
+
+  useEffect(() => {
+    if (!focused) return;
+    if (apkBusy !== 'idle') return;
+
+    const now = Date.now();
+    if (apk !== null && now - lastApkCheck.current < CHECK_EVERY_MS) return;
+
+    lastApkCheck.current = now;
+    void runApkCheck();
+  }, [focused, apkBusy, apk, runApkCheck]);
 
   const runApkInstall = useCallback(async () => {
     if (apk?.kind !== 'available') return;
