@@ -55,14 +55,17 @@
       "eas": {
         "projectId": "3c252219-3619-434b-9ab4-f0931d09722a"
       },
-      "patch": 11,
+      "patch": 12,
       "releaseNotes": [
-        "Everything now moves on springs instead of fixed timings, so things settle rather than finish",
-        "Cards surface into place rather than sliding up the page",
-        "The mark under the navigation slides between tabs instead of blinking across",
-        "Settings > Appearance has a Motion switch: Spring is the new one, Classic is exactly how it was"
+        "Pressing something now pushes it into the glass instead of just dimming it"
       ],
       "changelog": [
+        {
+          "patch": 12,
+          "notes": [
+            "Pressing something now pushes it into the glass instead of just dimming it"
+          ]
+        },
         {
           "patch": 11,
           "notes": [

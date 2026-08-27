@@ -30,7 +30,7 @@
  */
 
 import { useIsFocused } from 'expo-router';
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Easing,
   useAnimatedStyle,
@@ -250,3 +250,77 @@ export function useSheetSlide(visible: boolean, travel: number): AnimatedStyle<V
 
   return useAnimatedStyle(() => ({ transform: [{ translateY: y.value }] }));
 }
+
+/* -------------------------------------------------------------------- press */
+
+/**
+ * A press that pushes the control INTO the glass.
+ *
+ * Every interactive surface in this app dims to 0.6 opacity when touched. That
+ * is the same generation of idea as the fade-up it sits beside: it reports that
+ * a tap registered without saying anything about what was tapped. On a stack of
+ * translucent layers over a lit ground, the meaningful answer is depth — a
+ * pressed thing goes back, and a released thing springs forward.
+ *
+ * WHY STATE AND AN EFFECT RATHER THAN WRITING THE SHARED VALUE IN THE HANDLER,
+ * which would be shorter and is the obvious way to write it: the React Compiler
+ * is on in this project and `react-hooks/immutability` rejects mutating a
+ * shared value inside an event handler. It has already been hit twice here. The
+ * extra render per press is one boolean on a leaf component and is not
+ * measurable; arguing with the compiler would be.
+ */
+const PRESS: WithSpringConfig = {
+  // Faster and firmer than an arrival. A press is a response to something the
+  // finger is doing RIGHT NOW, and anything slower than about 150ms stops
+  // feeling like a consequence of the touch.
+  duration: 160,
+  dampingRatio: 1,
+  mass: 0.6,
+  overshootClamping: true,
+};
+
+export type PressFeedback = {
+  style: AnimatedStyle<ViewStyle>;
+  onPressIn: () => void;
+  onPressOut: () => void;
+};
+
+/**
+ * `to` is how far in it goes. 0.96 on a small control, closer to 1 on a large
+ * card — the same scale factor reads as far more movement across a 350px card
+ * than across a 48px cell, so a single number for both would make one of them
+ * wrong.
+ */
+export function usePressFeedback(to = 0.96): PressFeedback {
+  const reduced = useReducedMotion();
+  const mode = useMotionMode();
+  const [down, setDown] = useState(false);
+  const p = useSharedValue(0);
+
+  useEffect(() => {
+    if (reduced) {
+      p.value = 0;
+      return;
+    }
+    p.value = withSpring(down ? 1 : 0, PRESS);
+  }, [down, reduced, p]);
+
+  const style = useAnimatedStyle(() => ({
+    transform: [{ scale: 1 - p.value * (1 - to) }],
+  }));
+
+  const onPressIn = useCallback(() => setDown(true), []);
+  const onPressOut = useCallback(() => setDown(false), []);
+
+  /*
+    Classic keeps the old behaviour by doing nothing here: callers pair this
+    with their existing `pressed ? styles.held : null`, so under Classic the
+    control dims exactly as it always did and never scales.
+  */
+  return mode === 'classic'
+    ? { style: EMPTY_STYLE, onPressIn: NOOP, onPressOut: NOOP }
+    : { style, onPressIn, onPressOut };
+}
+
+const EMPTY_STYLE = {} as AnimatedStyle<ViewStyle>;
+const NOOP = () => undefined;

@@ -77,7 +77,7 @@ import type { BottomTabBarProps } from 'expo-router/js-tabs';
 
 import { useTotalUnread } from '@/features/dm';
 import { Dock, Fonts, Radii, Rule, ZIndex, bloom, floating, tracking } from '@/lib/theme';
-import { SETTLE } from '@/lib/entrance';
+import { SETTLE, usePressFeedback } from '@/lib/entrance';
 import { useMotionMode } from '@/lib/motion';
 import { useColors, useTheme } from '@/lib/theme-context';
 
@@ -88,6 +88,15 @@ import { useColors, useTheme } from '@/lib/theme-context';
  * Create is absent on purpose: it is an action, it is never "where you are",
  * and a selection mark that could land on it would say otherwise.
  */
+/**
+ * A `Pressable` that can take an animated style.
+ *
+ * `Animated.createAnimatedComponent` rather than wrapping the Pressable in an
+ * `Animated.View`: a wrapper would scale the touch target along with the
+ * visuals, so the hit area would shrink under the finger that is already on it.
+ */
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
 const ORDER = ['index', 'explore', 'messages', 'profile'] as const;
 
 /** The two declared tabs that sit left of the centre action. */
@@ -370,6 +379,7 @@ const NavCell = memo(function NavCell({
   onMeasure,
 }: CellProps) {
   const C = useColors();
+  const press = usePressFeedback(0.9);
 
   /*
     SELECTION IS A PILL BEHIND THE GLYPH, AND THIS FILE USED TO ARGUE AGAINST
@@ -439,15 +449,19 @@ const NavCell = memo(function NavCell({
 
 
   return (
-    <Pressable
+    <AnimatedPressable
       accessibilityRole="tab"
       // Unchanged, and load-bearing: a screen reader has always announced this
       // correctly. Everything above is about making the eye agree with it.
       accessibilityState={{ selected: focused }}
       accessibilityLabel={badge > 0 ? label + ', ' + badge + ' unread' : label}
       onPress={onPress}
+      onPressIn={press.onPressIn}
+      onPressOut={press.onPressOut}
       onLayout={(e) => onMeasure(slot, e.nativeEvent.layout.x, e.nativeEvent.layout.width)}
-      style={({ pressed }) => [styles.cell, pressed ? styles.held : null]}>
+      // 0.9 rather than the 0.96 default: a 56px cell needs a deeper push than
+      // a full-width card before the same amount of movement is legible.
+      style={[styles.cell, press.style]}>
       {/*
         First in the tree, so the glyph and the badge both paint on top of it.
         The badge keeps its exact `right: 5 / top: 6` corner and simply lands on
@@ -483,7 +497,7 @@ const NavCell = memo(function NavCell({
         {label}
       </Text>
 
-    </Pressable>
+    </AnimatedPressable>
   );
 });
 
@@ -545,16 +559,19 @@ const NavCell = memo(function NavCell({
  */
 const CreateButton = memo(function CreateButton() {
   const C = useColors();
+  const createPress = usePressFeedback(0.9);
 
   return (
-    <Pressable
+    <AnimatedPressable
       // `button` where the others are `tab`, and this was always the non-visual
       // half of the distinction — a screen reader has never needed the gradient
       // to tell these apart. Unchanged, and now carrying more of the load.
       accessibilityRole="button"
       accessibilityLabel="Start a session"
       onPress={() => router.push('/room/create')}
-      style={({ pressed }) => [styles.cell, pressed ? styles.held : null]}>
+      onPressIn={createPress.onPressIn}
+      onPressOut={createPress.onPressOut}
+      style={[styles.cell, createPress.style]}>
       {/*
         2.4 where an unfocused nav glyph is 2. This is OPTICAL, not a selection
         cue borrowed from `NavCell`: a plus is two short strokes where a house
@@ -585,7 +602,7 @@ const CreateButton = memo(function CreateButton() {
         style={[styles.create, bloom(C.glow, 'sm')]}>
         <Plus size={Dock.fabIcon} strokeWidth={2.6} color={C.pillInk} />
       </LinearGradient>
-    </Pressable>
+    </AnimatedPressable>
   );
 });
 
