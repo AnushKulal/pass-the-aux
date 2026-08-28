@@ -118,26 +118,74 @@ function RootNavigator({ fontsSettled }: { fontsSettled: boolean }) {
           headerShown: false,
           contentStyle: { backgroundColor: C.bg },
           /*
-            Fade, not slide.
-            A lateral push reads as "one level deeper into a hierarchy", which
-            is the wrong claim in this app: the rail and the tab bar make almost
-            every destination a SIBLING you can reach from anywhere, not a child
-            of the screen you happen to be on. Fading is also what switching
-            tabs already does, so the whole app now moves one single way.
-            The Session below is the one deliberate exception.
+            NOTHING, AND THAT IS THE ANIMATION.
+
+            The reasoning that put a fade here still holds as far as it goes: a
+            lateral push claims "one level deeper into a hierarchy", and the tab
+            bar makes almost every destination a SIBLING rather than a child, so
+            a slide would be a lie about the shape of the app. What was wrong is
+            the conclusion — that the alternative to a directional move is a
+            dissolve.
+
+            Every destination on this stack now animates its own CONTENT in:
+            the tab screens and the settings family through `useEntrance`
+            (@/lib/entrance), the `(auth)` screens through the enter style each
+            one already holds. A stack cross-fade on top of that is a second
+            opacity ramp over the first, and what it costs is legibility of the
+            one that means something — the design's grammar is a module lifting
+            in and the rows inside it following, not a screen dissolving whole.
+            So the container hands the transition to the content and gets out of
+            the way, and the tab navigator in `(tabs)/_layout` does the same.
+
+            The Session below is still the one deliberate exception, and it is
+            the exception for the same reason it always was.
           */
-          animation: 'fade',
+          animation: 'none',
         }}>
-        <Stack.Screen name="(auth)" options={{ animation: 'fade' }} />
-        <Stack.Screen name="(tabs)" options={{ animation: 'fade' }} />
+        {/*
+          Both inherit `none`. Signing in or out is not a move within the app —
+          it is a change of which app you are in — and the screen you land on
+          says so by assembling itself in front of you.
+        */}
+        <Stack.Screen name="(auth)" />
+        <Stack.Screen name="(tabs)" />
         {/*
           A Session is a place you drop INTO — the one destination that is not a
           sibling of the rest. It keeps the vertical rise so that arriving in a
-          party feels unlike any other navigation in the app.
+          party feels unlike any other navigation in the app, and it is now the
+          ONLY navigator transition left in it, which makes the claim louder
+          rather than weaker.
+
+          THAT SENTENCE WAS NOT TRUE WHEN IT WAS WRITTEN, and it is worth
+          saying so rather than quietly repairing it. This stack stopped
+          animating and the tab navigator's cross-fade went to zero, but the
+          NESTED `(auth)` stack was still pushing `slide_from_right` — so the
+          loudest transition in the app was a lateral slide into sign-in, which
+          is exactly what got complained about next. `(auth)/_layout` now takes
+          the same `none`, for the same reason, and the claim holds as written.
+
+          It survives the cull because it is not a dissolve competing with the
+          content's own arrival — it is the design's `auxSheetIn`, a travel with
+          no opacity at all (aux-nocturne.dc.html L19), the same move
+          `useSheetSlide` gives every surface that rises from the bottom edge.
+          `Duration.sheet` is what those already take.
         */}
-        <Stack.Screen name="room/[id]" options={{ animation: 'slide_from_bottom' }} />
+        <Stack.Screen
+          name="room/[id]"
+          options={{ animation: 'slide_from_bottom', animationDuration: Duration.sheet }}
+        />
+        {/*
+          Inherits `none`, and this one gains the most from it. It is an OAuth
+          interstitial that redirects out of itself almost immediately, so any
+          transition at all was a gesture the user never got to finish reading.
+        */}
         <Stack.Screen name="spotify-callback" />
-        <Stack.Screen name="+not-found" options={{ animation: 'fade' }} />
+        {/*
+          Also inherits. A dead end is something you are stuck on rather than
+          something arriving, and dressing it up delays the one sentence that
+          tells you so.
+        */}
+        <Stack.Screen name="+not-found" />
       </Stack>
     </NavigationThemeProvider>
   );

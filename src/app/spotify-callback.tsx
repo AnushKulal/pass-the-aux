@@ -29,6 +29,35 @@ import { useColors } from '@/lib/theme-context';
  * The route exists on native too so both platforms resolve the same path, but
  * native never renders it: `openAuthSessionAsync` intercepts the `aux://`
  * deep link itself.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THIS IS THE ACCOUNT-*LINK* CALLBACK. SPOTIFY *SIGN-IN* DOES NOT LAND HERE,
+ * and now that Aux offers both, that has to be written down rather than
+ * inferred.
+ *
+ * There are two Spotify OAuth flows in this app and they are not variations of
+ * one thing:
+ *
+ *   LINK (this route)   `features/spotify/use-spotify-link`. Raw PKCE against
+ *                       Spotify, asking for PLAYBACK scopes, with the exchange
+ *                       done by the `spotify-auth` Edge Function so the refresh
+ *                       token lives in the RLS-locked `provider_tokens` table
+ *                       and never on the device. The redirect URI is ours —
+ *                       `aux://spotify-callback` / `<origin>/spotify-callback`
+ *                       — which is why this screen exists.
+ *   SIGN-IN             `signInWithProvider('spotify')` in `@/lib/auth`.
+ *                       A Supabase OAuth round trip: the URI Spotify has to
+ *                       have registered is SUPABASE'S `/auth/v1/callback`, not
+ *                       one of ours, and Supabase then redirects to the app
+ *                       origin (web) or `aux://auth-callback` (native). Nothing
+ *                       in that path touches this file.
+ *
+ * DO NOT MERGE THEM. Sign-in cannot stand in for the link, because Supabase
+ * neither persists nor refreshes `provider_token` — a playback scope granted at
+ * sign-in buys a token that is gone by the next cold start. Routing sign-in
+ * through this screen would also break the one thing it is careful about: the
+ * PKCE verifier below never leaves the tab that generated it.
+ * ─────────────────────────────────────────────────────────────────────────────
  */
 export default function SpotifyCallbackScreen() {
   const C = useColors();

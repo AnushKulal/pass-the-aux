@@ -1,26 +1,50 @@
 /**
- * One conversation in the Messages inbox (README §13).
+ * One conversation in the Messages inbox.
  *
- * The row carries THREE facts and TWO destinations, and the design leans on
- * both:
+ * Source: `design/nocturne/aux-nocturne.dc.html` L679–L694 — the inbox row on
+ * the isDms screen.
  *
- *  - **Unread LIFTS.** An unread conversation is a raised card on `surface`
- *    with its name and preview in full ink; a read one lies flat on the ground
- *    in `ink2`. The lift and the weights both come from `row.unreadCount` and
- *    nothing else, and neither may be softened for "consistency" — that
- *    contrast IS the screen.
- *  - **The avatar and the name open the person; the rest opens the thread.**
- *    Two nested 44pt targets inside one big one. React Native's responder system
- *    hands a gesture to exactly one view — the innermost that claims it — so the
- *    outer press does not also fire; react-native-web negotiates the same way,
- *    and `stopPropagation()` on the press event covers the DOM path where a
- *    click could still bubble past it.
+ * ## UNREAD IS CARRIED BY COLOUR NOW, NOT BY LIFT. THIS IS THE CHANGE.
+ *
+ * The previous direction drew an unread row as a RAISED card and a read one as a
+ * flat band, and that lift did the whole job. Nocturne's `raised()` is a single
+ * soft shadow with a negative spread — far quieter than the old paired
+ * soft-UI recipe — and the artboard gives none of its radius-18 surfaces a
+ * shadow at all. Scanning a column of twelve rows for the ones that sit 2px
+ * proud is not a thing eyes do.
+ *
+ * So every row is now the same glass row (fill + hairline + radius 18, no
+ * shadow), and unread is said FOUR times in the register the palette reserves
+ * for a state of the world:
+ *   the edge turns coral (`liveMid`),
+ *   the fill steps one rung up the white ladder,
+ *   the name goes extrabold and the preview to full ink,
+ *   and the count badge is the coral pill with its halo.
+ * Any one of those alone is missable; together they read from across the room.
+ * Coral is right here for the same reason it is right on a LIVE badge — unread
+ * is something that is true of the world right now, not something you do.
+ *
+ * ## Two destinations in one row
+ *
+ * **The avatar and the name open the person; the rest opens the thread.** Two
+ * nested 44pt targets inside one big one. React Native's responder system hands
+ * a gesture to exactly one view — the innermost that claims it — so the outer
+ * press does not also fire; react-native-web negotiates the same way, and
+ * `stopPropagation()` on the press event covers the DOM path where a click could
+ * still bubble past it.
  *
  * Rows stagger in at 50ms steps (`Stagger.messages`). The Feed's 55ms is a
- * different screen with a taller row; do not borrow it.
+ * different screen with a taller row; do not borrow it. The stagger itself is
+ * `useEntrance` now — see the note above the call.
+ *
+ * NOTE FOR WHOEVER TOUCHES THE INBOX SCREEN NEXT: `messages/index.tsx` inlines
+ * its own `ThreadRow` and imports only the three pure helpers below. The metrics
+ * here are deliberately identical to that row's so the screen can swap to
+ * `<ConversationRow>` with no visual diff — and gain the profile target it
+ * currently has no way to offer.
  */
 
-import { memo, useCallback, useEffect, useRef } from 'react';
+import { memo, useCallback } from 'react';
 import {
   Pressable,
   StyleSheet,
@@ -29,54 +53,40 @@ import {
   type GestureResponderEvent,
   type TextStyle,
 } from 'react-native';
-import Animated, {
-  Easing,
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withDelay,
-  withTiming,
-} from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 
-import { Avatar } from '@/components/ui';
+import { Avatar, StatusPill } from '@/components/ui';
 import type { DmAuthor, InboxRow } from '@/features/dm';
 import { serverNow } from '@/lib/clock';
+import { useEntrance } from '@/lib/entrance';
 import {
-  Duration,
   Fonts,
   Radii,
+  Rule,
   Space,
   Stagger,
   TOUCH_TARGET,
   Type,
-  raised,
+  tracking,
 } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
-/** The design's 50px avatar. The row is that plus its 12px band. */
-const AVATAR = 50;
-const ROW_PAD_V = 12;
+/** The artboard's 44px avatar (L683). The row is that plus its 12px band. */
+const AVATAR = 44;
+const ROW_PAD_V = Space.md;
 export const CONVERSATION_ROW_HEIGHT = AVATAR + ROW_PAD_V * 2;
 
-/** The presence dot, and the surface-coloured ring that lifts it off the well. */
-const DOT = 13;
+/** The artboard's 10px between rows (L678). Kept on the row so it is drop-in. */
+const ROW_GAP = 10;
 
-/** 40 + 2 on every side clears the 44pt floor without moving the avatar. */
+/** 44 + 0 on every side already clears the floor; the slop is for the ring. */
 const AVATAR_SLOP = { top: 2, bottom: 2, left: 2, right: 2 };
 /**
  * The name is one line of 15px type, so its target is grown vertically instead.
  * Left slop stays 0: the avatar's target already reaches 2px past its box and
- * the 10px row gap has to keep ≥8px of clear air between the two.
+ * the 12px row gap has to keep ≥8px of clear air between the two.
  */
 const NAME_SLOP = { top: 14, bottom: 14, left: 0, right: Space.sm };
-
-/**
- * The stagger is capped rather than run to the end of the list. A row mounted
- * on scroll would otherwise sit invisible for `index × 50ms` before fading in —
- * at row 20 that is a full second of blank band. Eight steps covers the first
- * screenful, which is the only place the stagger is ever perceived.
- */
-const MAX_STAGGER_STEPS = 8;
 
 /**
  * `Type.readout()` freezes `fontVariant` as a readonly tuple, which RN's
@@ -86,6 +96,17 @@ const MAX_STAGGER_STEPS = 8;
 const readout = (size: number): TextStyle => ({
   ...Type.readout(size),
   fontVariant: ['tabular-nums'],
+});
+
+/**
+ * The badge voice: 800, uppercase, widely tracked. `Type.label` has the case and
+ * the tracking but ships at 600, which goes soft at 9px beside a 15px name.
+ * Same helper the inbox screen holds for the same reason.
+ */
+const badge = (size: number, em: number): TextStyle => ({
+  ...Type.heading(size),
+  letterSpacing: tracking(size, em),
+  textTransform: 'uppercase',
 });
 
 /* ------------------------------------------------------------------ presence */
@@ -186,7 +207,25 @@ function ConversationRowBase({
   onOpenProfile,
 }: ConversationRowProps) {
   const C = useColors();
-  const reduced = useReducedMotion();
+
+  /*
+    WAS a hand-rolled shared value + `withDelay(withTiming())` right here, with
+    its own `MAX_STAGGER_STEPS = 8` and its own curve. It has moved to
+    `useEntrance`, which carries the identical cap and the design's own
+    `auxRow` recipe, for two reasons beyond not keeping three copies of one
+    behaviour:
+
+      - the local copy fired on MOUNT. A FlatList row does not unmount when you
+        leave the inbox and come back, so the entrance played once per app
+        launch and was missing from every return to Messages after the first —
+        exactly the module switch it exists for. `useEntrance` keys off focus.
+      - it ran at `Duration.enter` (280ms) on `Easing.standard`. The design
+        gives a ROW `auxRow` at 240ms on cubic-bezier(.2,.85,.2,1); the
+        primitive's `kind: 'row'` is that, and the 8px lift is unchanged.
+
+    `Stagger.messages` stays: the step is this screen's, not the primitive's.
+  */
+  const entering = useEntrance({ index, kind: 'row', step: Stagger.messages });
 
   const person = row.other;
   const name = person ? person.display_name.trim() || person.username : 'Someone';
@@ -194,6 +233,7 @@ function ConversationRowBase({
 
   const nowMs = serverNow();
   const presence = presenceFor(person, nowMs);
+  const online = presence === 'online';
   const status = presenceLabel(presence);
   const stamp = stampFor(row.previewAt ?? row.lastMessageAt, nowMs);
 
@@ -203,31 +243,6 @@ function ConversationRowBase({
       ? `You: ${row.preview}`
       : row.preview
     : 'No messages yet';
-
-  // ---- entrance: fade + translateY(8) → 0, 50ms per row, off under reduce-motion
-  const enter = useSharedValue(reduced ? 1 : 0);
-  /*
-    Read once, at mount. The inbox reorders itself the moment a message lands
-    (`last_message_at` is the sort key), and reading `index` live would re-run
-    the entrance on rows that never left the screen.
-  */
-  const delay = useRef(Math.min(index, MAX_STAGGER_STEPS) * Stagger.messages);
-
-  useEffect(() => {
-    if (reduced) {
-      enter.value = 1;
-      return;
-    }
-    enter.value = withDelay(
-      delay.current,
-      withTiming(1, { duration: Duration.enter, easing: Easing.bezier(0.2, 0.8, 0.2, 1) }),
-    );
-  }, [enter, reduced]);
-
-  const entering = useAnimatedStyle(() => ({
-    opacity: enter.value,
-    transform: [{ translateY: (1 - enter.value) * 8 }],
-  }));
 
   const openThread = useCallback(() => {
     onOpenThread(row.conversationId);
@@ -276,11 +291,29 @@ function ConversationRowBase({
         onPress={openThread}
         style={({ pressed }) => [
           styles.row,
-          unread
-            ? [{ backgroundColor: pressed ? C.surface2 : C.surface }, raised(C)]
-            : pressed
-              ? { backgroundColor: C.surface }
-              : null,
+          {
+            /*
+              Hand-rolled rather than `GlassCard variant="row"` for one reason:
+              the fill has to move on press AND on unread, and the card
+              deliberately does not expose its skin. The recipe is the card's,
+              copied exactly — `surface` over a `rule` hairline at radius 18,
+              no shadow — so the two stay the same object.
+
+              Both states press one rung further up the same white ladder, so
+              the feedback is identical either way and only the resting
+              brightness separates them.
+            */
+            backgroundColor: unread
+              ? pressed
+                ? C.surface3
+                : C.surface2
+              : pressed
+                ? C.surface2
+                : C.surface,
+            // The coral edge. See the header: this is half of what replaced the
+            // lift, and it is the cue that survives a fast scroll.
+            borderColor: unread ? C.liveMid : C.rule,
+          },
         ]}>
         {/* Target 1: the avatar. */}
         <Pressable
@@ -290,18 +323,14 @@ function ConversationRowBase({
           hitSlop={AVATAR_SLOP}
           onPress={openProfile}
           style={({ pressed }) => [styles.avatarWell, pressed && styles.targetPressed]}>
-          <Avatar name={name} uri={person?.avatar_url} size={AVATAR} />
-
           {/*
-            The accent, ringed in whatever the row is sitting on. Here it IS
-            earned: "here now" is the joinable state this palette reserves the
-            red for, and the design draws this dot in it.
+            The kit's punched hole — a coral disc ringed in the GROUND colour,
+            which is what the artboard draws (`border:2.5px solid var(--aux-bg)`)
+            even where the avatar sits on a card. Hand-rolling it here to ring it
+            in the card colour instead buys a difference of five percent white
+            and a second dot to keep in sync with `Avatar`.
           */}
-          {presence === 'online' ? (
-            <View
-              style={[styles.dot, { backgroundColor: C.live, borderColor: unread ? C.surface : C.bg }]}
-            />
-          ) : null}
+          <Avatar name={name} uri={person?.avatar_url} size={AVATAR} presence={online} />
         </Pressable>
 
         <View style={styles.identity}>
@@ -327,14 +356,19 @@ function ConversationRowBase({
               </Text>
             </Pressable>
 
+            {/*
+              Coral only for ONLINE — being here now is a state of the world.
+              IDLE and OFFLINE are not, and painting them the accent would spend
+              it on the two facts nobody is looking for.
+            */}
             {status ? (
-              <Text style={[styles.status, { color: presence === 'online' ? C.ink2 : C.ink3 }]}>
+              <Text style={[styles.status, { color: online ? C.liveText : C.ink3 }]}>
                 {status}
               </Text>
             ) : null}
           </View>
 
-          {/* The contrast that IS the design: bright and heavier when unread. */}
+          {/* Bright and heavier when unread — the third saying of the same fact. */}
           <Text
             numberOfLines={1}
             style={[
@@ -351,13 +385,19 @@ function ConversationRowBase({
         <View style={styles.meta}>
           <Text style={[styles.stamp, { color: C.ink3 }]}>{stamp}</Text>
 
-          {/* The one accent on the row, and it means exactly one thing. */}
+          {/*
+            `StatusPill accent + live` is the artboard's badge exactly: coral
+            fill, `onLive` warm-black numeral (white on coral fails), and the
+            centred 14px halo. Which is why it is the kit pill and not a
+            hand-rolled circle with a `live` background.
+          */}
           {unread ? (
-            <View style={[styles.badge, { backgroundColor: C.live }]}>
-              <Text style={[styles.badgeText, { color: C.onLive }]} numberOfLines={1}>
-                {row.unreadCount > 99 ? '99+' : row.unreadCount}
-              </Text>
-            </View>
+            <StatusPill
+              tone="accent"
+              live
+              label={row.unreadCount > 99 ? '99+' : String(row.unreadCount)}
+              accessibilityLabel={`${row.unreadCount} unread`}
+            />
           ) : null}
         </View>
       </Pressable>
@@ -377,11 +417,18 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
+    gap: Space.md,
     minHeight: CONVERSATION_ROW_HEIGHT,
-    marginBottom: 9,
-    padding: ROW_PAD_V,
+    marginBottom: ROW_GAP,
+    paddingVertical: ROW_PAD_V,
+    paddingHorizontal: 14,
     borderRadius: Radii.lg,
+    /*
+      Load-bearing, not decoration. `surface` is 5.5% white and has no edge of
+      its own; without the hairline the row reads as a smudge on the ground
+      rather than as a card — and the unread state has nothing to turn coral.
+    */
+    borderWidth: Rule.hair,
   },
   avatarWell: {
     flexShrink: 0,
@@ -389,24 +436,14 @@ const styles = StyleSheet.create({
   targetPressed: {
     opacity: 0.72,
   },
-  dot: {
-    position: 'absolute',
-    right: -2,
-    bottom: -2,
-    width: DOT,
-    height: DOT,
-    borderRadius: Radii.pill,
-    borderWidth: 2.5,
-  },
   identity: {
     flex: 1,
     minWidth: 0,
-    gap: 1,
   },
   nameLine: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
+    gap: Space.sm,
   },
   nameTarget: {
     flexShrink: 1,
@@ -420,16 +457,17 @@ const styles = StyleSheet.create({
     minHeight: 20,
   },
   name: {
-    ...Type.body(14.5),
-    lineHeight: 19,
+    fontSize: 15,
+    lineHeight: 20,
+    flexShrink: 1,
   },
   status: {
-    ...Type.label(10),
+    ...badge(9, 0.08),
     flexShrink: 0,
   },
   preview: {
-    ...Type.body(12.5),
-    lineHeight: 17,
+    ...Type.body(13),
+    lineHeight: 18,
     marginTop: 2,
   },
   meta: {
@@ -437,23 +475,17 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     justifyContent: 'center',
     gap: 6,
-    // Keeps the stamp column from shuffling as `Now` becomes `Mar 4`.
+    // Keeps the stamp column from shuffling as `NOW` becomes `MAR 4`.
     minWidth: 42,
   },
   stamp: {
-    ...readout(11),
-    fontFamily: Fonts.semibold,
-  },
-  badge: {
-    minWidth: 19,
-    height: 19,
-    paddingHorizontal: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 10,
-  },
-  badgeText: {
-    ...readout(10.5),
-    lineHeight: 19,
+    /*
+      L690 sets the stamp at 400, not at the readout's 800 — it is the quietest
+      thing on the row. The tabular figures are what matter and they survive the
+      family swap.
+    */
+    ...readout(10),
+    fontFamily: Fonts.regular,
+    letterSpacing: tracking(10, 0.05),
   },
 });

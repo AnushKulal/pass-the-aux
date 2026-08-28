@@ -1,12 +1,34 @@
 /**
  * Who is in the Session, and where each of them actually is.
  *
- * Two views of the same fact, both exported from here because both are the
- * roster drawn against the drift ladder:
+ * From `design/nocturne/aux-nocturne.dc.html` — the roster card at L996–L1004
+ * (round avatar, name over metadata, right-aligned drift readout, a mic glyph
+ * at the thumb end) and the per-member audio sheet at L1360–L1375.
+ *
+ * THIS FILE IS THE MEMBERS TAB AND IT DRAWS PEOPLE. NOTHING ELSE. Two things
+ * that were not people have been taken out of it in this pass, and both were
+ * put here for reasons that were true at the time:
+ *
+ *   `VoiceControls` — YOUR mic and YOUR deafen, as two tiles at the top of
+ *   both lists. Its own docstring argued the case: the controls "used to live
+ *   one tap deep inside a lobby sheet that had to be found first, and a
+ *   control nobody finds is a control that does not exist". That argument was
+ *   correct and it has been ANSWERED rather than overturned — mic is now the
+ *   first cell of the session dock, permanently on screen and zero taps deep,
+ *   and deafen is a tile in the panel one swipe above it. The user asked for
+ *   the card to go ("i dont need your voice card here"); what they were
+ *   objecting to was a control panel sitting on top of a list of people. Both
+ *   controls are closer to hand now than the card ever put them.
+ *
+ *   The ORBIT'S TITLE BLOCK — `track.title` over `track.artist`, with the
+ *   player's own empty state underneath. See the note where it used to be, in
+ *   `SyncOrbit`'s header.
+ *
+ * What is left is the two rosters, and they are the same people twice:
  *
  *   `ParticipantStrip` — the drift chart. One raised card per listener: avatar,
  *   name over rung, a ±400ms deviation plot against a centre axis, the drift
- *   readout, and the speaker glyph that says whether you are hearing them.
+ *   readout, and the mute button that says whether you are hearing them.
  *   This is the thing that makes the sync engine visible.
  *
  *   `SyncOrbit` — the same people plotted as distance from a centre. Rings at
@@ -14,16 +36,49 @@
  *   dial, never absolutely positioned inside it: a listener who lands in the
  *   bottom slot sits exactly where an inset legend would be.
  *
- * Both are FlatLists that take the rest of the screen as `header`/`footer`, so
- * the Session has exactly one scroller and the roster stays virtualised. Both
- * carry all four states — skeleton cards, an empty notice, an error with a
- * retry, and the roster itself.
+ * Both lists are FlatLists that take the rest of the screen as `header`/
+ * `footer`, so the Session has exactly one scroller and the roster stays
+ * virtualised. Both carry all four states — skeleton cards, an empty notice, an
+ * error with a retry, and the roster itself.
  *
- * MUTE IS THE ROW. Tapping anyone mutes them for you and nobody else, so the
- * affordance has to be visible before it is used: every row carries a speaker
- * glyph at the thumb end, the list is headed by the sentence that says what a
- * tap does, and a muted row keeps a filled well around that glyph so the state
- * survives a glance.
+ * EVERY CARD FILL IN HERE IS `surfaceSolid`, AND THAT IS A CORRECTION. (The
+ * one `surface` left is the dial core at :977, which is not a card: it sits
+ * in an opaque `bgRecessed` well and takes a `rule` edge for its shape.) The
+ * roster row, the skeleton row and the voice card all shipped on `surface`,
+ * which is 5.5% white. `ParticipantStrip` is mounted inside the Session's sync
+ * `<Sheet>` (src/app/room/[id].tsx:678), and that sheet is a `BlurView` — a
+ * 5.5%-white card laid over a blur has nothing to sit on and loses its edge
+ * completely. `SyncOrbit` sits on the plain Session ground rather than in a
+ * sheet, but its rows take the same fill for a reason that is not laziness:
+ * the roster row is ONE object drawn in two lists, and a row that changes fill
+ * depending on which list rendered it is the drift this pass exists to remove.
+ * `surfaceSolid` is the resolved composite of `surface` over `bg`, so the
+ * plain-ground case looks the same either way and the swap costs nothing.
+ *
+ * The dial core keeps `surface`: it is a disc inside an opaque `bgRecessed`
+ * well, not a card over glass, and its `rule` edge is already what gives it
+ * shape there.
+ *
+ * WHICH ACCENT MEANS WHAT HERE. Two of the states this file used to paint
+ * left with the voice card; the rule that governed all of them has not
+ * changed, and the dock is written against the same one:
+ *
+ *   CORAL is audio FLOWING — someone is on aux, someone is speaking, someone
+ *   is in sync. It is the direction's "this is happening right now" and
+ *   nothing else may take it.
+ *   `danger` is audio CUT — you have muted someone. It is subtractive, it is a
+ *   state a person needs to notice and undo, and it is not "happening".
+ *   Neutral (`surface2` + `ink2`) is the resting state.
+ *
+ * BLUE APPEARS EXACTLY ONCE in this file — the retry button on the error
+ * notice, which is the only genuine call to action here. Every other control is
+ * a state being toggled.
+ *
+ * MUTE IS A BUTTON, NOT A GESTURE. Tapping the round speaker at the thumb end
+ * mutes that person for you and nobody else. The row body is still pressable
+ * (it opens per-person controls where a screen provides them), but the mute
+ * affordance is its own 36px control with its own label, because a whole-row
+ * tap is invisible until someone happens to try it.
  *
  * HONESTY RULES, because the backend does not publish per-person milliseconds:
  *
@@ -39,10 +94,17 @@
  *
  * When the backend starts publishing per-participant drift, only `readingFor`
  * needs to change.
+ *
+ * WHAT MOVES WHEN A ROSTER ARRIVES: THE ROWS, AND ONLY THE ROWS. Both lists run
+ * the design's `auxRow` cascade off `renderItem`'s own `index` (`useEntrance`,
+ * 'src/lib/entrance.ts') — people landing one after another, which is what a
+ * roster is. The dial, its rings, the orbit markers, the ±400ms plot, the
+ * legend and the skeletons are given nothing: they are instruments, and a
+ * measurement that fades up on a schedule of its own reads as a reading being
+ * taken rather than as a chart arriving. The full argument is on `DriftRow`.
  */
 
-import { Image } from 'expo-image';
-import { RotateCw, Users, Volume2, VolumeX } from 'lucide-react-native';
+import { Users, Volume2, VolumeX } from 'lucide-react-native';
 import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   FlatList,
@@ -54,8 +116,10 @@ import {
   type DimensionValue,
   type ListRenderItemInfo,
 } from 'react-native';
+import Animated from 'react-native-reanimated';
 
-import { BLURHASH_SURFACE, Skeleton } from '@/components/ui';
+import { Avatar, CircleIconButton, EmptyState, Skeleton } from '@/components/ui';
+import { useEntrance } from '@/lib/entrance';
 import {
   Fonts,
   PointerEvents,
@@ -97,8 +161,12 @@ const MARK_WIDTH = 3;
 const MARK_HEIGHT = 14;
 const SKELETON_ROWS = 3;
 const TICK_MS = 250;
-/** The speaker glyph's well. Sits inside a 44px row target, at the thumb end. */
-const SPEAKER = 32;
+/**
+ * The per-member mute button. 36 rather than 44 so it does not out-shout the
+ * 34px avatar at the other end of the row — `CircleIconButton` grows the touch
+ * target back to 44 with hitSlop, which costs no layout.
+ */
+const MUTE_BUTTON = 36;
 
 /** The dial and its rings. */
 const DIAL_HEIGHT = 340;
@@ -172,9 +240,35 @@ function readingFor(isMe: boolean, isSynced: boolean, driftMs: number, C: Palett
 
 // ------------------------------------------------------------ drift chart
 
-export type ParticipantStripProps = {
+/**
+ * The props both lists share. Every one of the new ones is OPTIONAL and every
+ * one of them draws nothing when it is absent, so the Session screen keeps
+ * compiling and rendering exactly as it did while the wiring lands.
+ */
+type RosterProps = {
   /** Ids this listener has muted locally. Never published, never announced. */
   mutedIds?: ReadonlySet<string>;
+  /**
+   * Ids whose mic is open right now, for the coral ring on their avatar.
+   *
+   * Nothing supplies this yet — there is no voice transport in this build — and
+   * an empty set draws no rings, which is the honest default. It exists so the
+   * ring lands with the transport rather than after it.
+   */
+  speakingIds?: ReadonlySet<string>;
+  /** Tapping the speaker button mutes that person, for this listener only. */
+  onSelectPerson?: (userId: string) => void;
+  /**
+   * Per-person controls — their volume for you, pass them the aux, message
+   * them (design L1360). Given one, the ROW BODY opens it and the speaker
+   * button keeps mute; without one the row body is the mute toggle, which is
+   * what it has always been.
+   */
+  onOpenPerson?: (userId: string) => void;
+  contentBottomInset?: number;
+};
+
+export type ParticipantStripProps = RosterProps & {
   roomId: string | null;
   hostId: string | null;
   currentUserId: string | null;
@@ -182,9 +276,6 @@ export type ParticipantStripProps = {
   header?: ReactNode;
   /** Everything below it. */
   footer?: ReactNode;
-  /** Tapping a row mutes that person, for this listener only. */
-  onSelectPerson?: (userId: string) => void;
-  contentBottomInset?: number;
 };
 
 export function ParticipantStrip({
@@ -194,7 +285,9 @@ export function ParticipantStrip({
   header,
   footer,
   onSelectPerson,
+  onOpenPerson,
   mutedIds,
+  speakingIds,
   contentBottomInset = 0,
 }: ParticipantStripProps) {
   const C = useColors();
@@ -209,11 +302,15 @@ export function ParticipantStrip({
   }, [refetch]);
 
   const renderItem = useCallback(
-    ({ item }: ListRenderItemInfo<ParticipantView>) => {
+    // `index` is `renderItem`'s own — taken from here rather than threaded in
+    // from anywhere, so the row keeps its memoisation and still knows where in
+    // the cascade it belongs.
+    ({ item, index }: ListRenderItemInfo<ParticipantView>) => {
       const isMe = item.userId === currentUserId;
       return (
         <DriftRow
           participant={item}
+          index={index}
           isOnAux={item.userId === hostId}
           isMe={isMe}
           // Only the viewer's own row consumes this. Handing everyone else a
@@ -221,11 +318,13 @@ export function ParticipantStrip({
           // exactly one row instead of the whole list.
           driftMs={isMe ? driftMs : 0}
           muted={mutedIds?.has(item.userId) ?? false}
+          speaking={speakingIds?.has(item.userId) ?? false}
           onSelect={onSelectPerson}
+          onOpen={onOpenPerson}
         />
       );
     },
-    [hostId, currentUserId, driftMs, mutedIds, onSelectPerson]
+    [hostId, currentUserId, driftMs, mutedIds, speakingIds, onSelectPerson, onOpenPerson]
   );
 
   const participants = data ?? [];
@@ -242,8 +341,17 @@ export function ParticipantStrip({
         <>
           {header}
           <View style={styles.hintRow}>
+            {/*
+              The sentence tracks what a tap actually does, because the row has
+              two possible jobs and a hint that describes the other one is worse
+              than none at all.
+            */}
             <Text style={[styles.hint, { color: C.ink3 }]}>
-              {onSelectPerson ? 'Tap anyone to mute them, for you only' : 'Who is in the Session'}
+              {onOpenPerson
+                ? 'Tap a name for their controls'
+                : onSelectPerson
+                  ? 'Mute anyone — for you only'
+                  : 'Who is in the Session'}
             </Text>
             <Text style={[styles.scale, { color: C.ink3 }]}>±400ms</Text>
           </View>
@@ -277,15 +385,23 @@ export function ParticipantStrip({
 
 const keyExtractor = (item: ParticipantView) => item.userId;
 
-type DriftRowProps = {
+type RowControlProps = {
+  /** Muted for THIS listener only. Never published, never announced. */
+  muted?: boolean;
+  /** Their mic is open right now. Draws the coral ring, nothing else. */
+  speaking?: boolean;
+  onSelect?: (userId: string) => void;
+  onOpen?: (userId: string) => void;
+};
+
+type DriftRowProps = RowControlProps & {
   participant: ParticipantView;
   isOnAux: boolean;
   isMe: boolean;
   /** The viewer's own measured drift. Only applied to the viewer's own row. */
   driftMs: number;
-  /** Muted for THIS listener only. Never published, never announced. */
-  muted?: boolean;
-  onSelect?: (userId: string) => void;
+  /** Position in the roster. Drives the arrival stagger, nothing else. */
+  index: number;
 };
 
 const DriftRow = memo(function DriftRow({
@@ -293,10 +409,35 @@ const DriftRow = memo(function DriftRow({
   isOnAux,
   isMe,
   driftMs,
+  index,
   muted = false,
+  speaking = false,
   onSelect,
+  onOpen,
 }: DriftRowProps) {
   const C = useColors();
+
+  /*
+    The design's `auxRow`: an 8px lift, one row after another, 55ms a step.
+    `useEntrance` from 'src/lib/entrance.ts'.
+
+    A ROSTER IS A LIST OF PEOPLE AND THEY ARRIVE ONE AT A TIME. That is the
+    whole of it — six listeners landing in sequence is the roster saying who is
+    here, in the order it is about to show you.
+
+    IT IS THE CARD THAT ARRIVES, NEVER THE READING INSIDE IT. The mark in the
+    plot, the rung word and the drift figure are all at their final values on
+    this row's first frame; only the row's own opacity and offset move. What is
+    forbidden is giving a readout an entrance of ITS OWN — a number that fades
+    up on a delay separate from the card around it is indistinguishable from a
+    number still being computed, which is why the dial, the ±400ms plot and the
+    legend below are left alone entirely.
+
+    `index` comes straight off `renderItem`, so nothing has to be threaded
+    through a closure and the row stays memoised. The delay is capped at 8 steps
+    inside the hook, so a full lounge finishes arriving instead of trickling.
+  */
+  const entrance = useEntrance({ index });
 
   const reading = useMemo(
     () => readingFor(isMe, participant.isSynced, driftMs, C),
@@ -308,14 +449,25 @@ const DriftRow = memo(function DriftRow({
     reading.measured ? `off by ${reading.value}, ${reading.rung}` : reading.rung
   }${muted ? ', muted for you' : ''}`;
 
+  const press = rowPress(participant.userId, isMe, onSelect, onOpen);
+
   const body = (
     <>
-      <InitialTile
+      {/*
+        The ring is the VOICE state — on aux, or talking right now. It is
+        deliberately not wired to `reading`: in-sync already has two readouts on
+        this row (the rung word and the mark in the plot), and a third one in
+        the avatar would leave nothing to say that someone is speaking.
+        `identity` is the signed-in user's own gradient, so you can find your
+        row in a list of six without reading a single name.
+      */}
+      <Avatar
         name={participant.displayName}
-        avatarUrl={participant.avatarUrl}
+        uri={participant.avatarUrl}
         size={TILE}
-        onAux={isOnAux}
-        live={reading.color === C.liveText}
+        live={isOnAux}
+        speaking={speaking}
+        identity={isMe}
       />
 
       <View style={styles.rowMeta}>
@@ -347,53 +499,118 @@ const DriftRow = memo(function DriftRow({
       <Text numberOfLines={1} style={[styles.rowValue, { color: reading.color }]}>
         {reading.value}
       </Text>
-
-      {/*
-        Muted, for this listener only. Ink rather than accent: red is reserved
-        for live/playing/in-sync here, and someone you have quietly turned down
-        is the opposite of an event. The well is what makes it read as a state
-        rather than as an icon that happened to change.
-      */}
-      {onSelect ? (
-        <View
-          style={[
-            styles.speaker,
-            muted
-              ? { backgroundColor: C.bgRecessed, borderColor: C.rule2 }
-              : { borderColor: 'transparent' },
-          ]}>
-          {muted ? (
-            <VolumeX size={16} strokeWidth={2} color={C.ink2} />
-          ) : (
-            <Volume2 size={16} strokeWidth={2} color={C.ink3} />
-          )}
-        </View>
-      ) : null}
     </>
   );
 
-  if (!onSelect) {
-    return (
-      <View accessible accessibilityLabel={label} style={[styles.row, { backgroundColor: C.surface }, raised(C)]}>
-        {body}
-      </View>
-    );
+  return (
+    <Animated.View
+      style={[
+        styles.row,
+        { backgroundColor: C.surfaceSolid, borderColor: C.rule },
+        raised(C),
+        entrance,
+      ]}>
+      {press ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={label}
+          accessibilityState={{ selected: muted }}
+          accessibilityHint={press.hint}
+          onPress={press.onPress}
+          style={({ pressed }) => [styles.rowBody, pressed ? styles.dim : null]}>
+          {body}
+        </Pressable>
+      ) : (
+        <View accessible accessibilityLabel={label} style={styles.rowBody}>
+          {body}
+        </View>
+      )}
+
+      <MemberMuteButton
+        name={participant.displayName}
+        muted={muted}
+        isMe={isMe}
+        onSelect={onSelect}
+        userId={participant.userId}
+      />
+    </Animated.View>
+  );
+});
+
+/**
+ * What a tap on the row body does, and what a screen reader is told it does.
+ *
+ * Two rules, and the second is the one that matters: your OWN row never mutes,
+ * because muting yourself locally would silence audio you were never hearing in
+ * the first place. Your mic is the first cell of the session dock, which is the
+ * control that actually exists for you.
+ */
+function rowPress(
+  userId: string,
+  isMe: boolean,
+  onSelect?: (userId: string) => void,
+  onOpen?: (userId: string) => void
+): { onPress: () => void; hint: string } | null {
+  if (onOpen) {
+    return { onPress: () => onOpen(userId), hint: 'Opens their volume, mute and aux controls' };
   }
+  if (onSelect && !isMe) {
+    return { onPress: () => onSelect(userId), hint: 'Mutes this person, for you only' };
+  }
+  return null;
+}
+
+type MemberMuteButtonProps = {
+  userId: string;
+  name: string;
+  muted: boolean;
+  isMe: boolean;
+  onSelect?: (userId: string) => void;
+};
+
+/**
+ * Mute one person, for you only — the control the roster is really for.
+ *
+ * `danger` WHEN MUTED, and this is the one place in the file that colour is
+ * right: you have cut someone's audio, which is subtractive and undoable and
+ * needs to be visible from across the row. Coral would claim the opposite —
+ * that something is live — and the previous ink-in-a-well treatment made the
+ * single most important control on this screen look like a disabled icon.
+ *
+ * Its own control rather than the whole row, and a SIBLING of the row body
+ * rather than a child of it: nested pressables trade taps on react-native-web,
+ * where a tap on the inner one also fires the outer, which here would mute and
+ * immediately unmute.
+ */
+const MemberMuteButton = memo(function MemberMuteButton({
+  userId,
+  name,
+  muted,
+  isMe,
+  onSelect,
+}: MemberMuteButtonProps) {
+  const handlePress = useCallback(() => onSelect?.(userId), [onSelect, userId]);
+
+  /* No mute at all on this list: every row is short by the same amount. */
+  if (!onSelect) return null;
+
+  /*
+    Your own row keeps the SPACE but loses the control. Muting yourself locally
+    would silence audio you were never hearing, and your mic is the first cell
+    of the session dock — but drop the 36px and your drift
+    readout stops lining up with everyone else's, which on the one screen whose
+    job is comparing numbers is worse than a blank.
+  */
+  if (isMe) return <View style={styles.mutePlaceholder} />;
 
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ selected: muted }}
-      accessibilityHint={muted ? 'Unmutes this person for you' : 'Mutes this person, for you only'}
-      onPress={() => onSelect(participant.userId)}
-      style={({ pressed }) => [
-        styles.row,
-        { backgroundColor: pressed ? C.surface2 : C.surface },
-        raised(C),
-      ]}>
-      {body}
-    </Pressable>
+    <CircleIconButton
+      icon={muted ? VolumeX : Volume2}
+      size={MUTE_BUTTON}
+      tone={muted ? 'danger' : 'chip'}
+      accessibilityLabel={muted ? `Unmute ${name}` : `Mute ${name}, for you only`}
+      onPress={handlePress}
+    />
   );
 });
 
@@ -403,14 +620,19 @@ const ChartSkeleton = memo(function ChartSkeleton() {
   return (
     <View style={styles.skeletonStack}>
       {Array.from({ length: SKELETON_ROWS }, (_, index) => (
-        <View key={index} style={[styles.row, { backgroundColor: C.surface }, raised(C)]}>
-          <Skeleton width={TILE} height={TILE} style={styles.tileSkeleton} />
-          <View style={styles.rowMeta}>
-            <Skeleton width={NAME_WIDTH} height={12} style={styles.lineSkeleton} />
-            <Skeleton width={NAME_WIDTH - 14} height={9} style={styles.lineSkeleton} />
-          </View>
-          <View style={styles.plot}>
-            <View style={[styles.axis, { backgroundColor: C.rule3 }]} />
+        <View
+          key={index}
+          style={[styles.row, { backgroundColor: C.surfaceSolid, borderColor: C.rule }, raised(C)]}>
+          <View style={styles.rowBody}>
+            {/* Round, because the avatar it stands in for is round now. */}
+            <Skeleton width={TILE} height={TILE} style={styles.tileSkeleton} />
+            <View style={styles.rowMeta}>
+              <Skeleton width={NAME_WIDTH} height={12} style={styles.lineSkeleton} />
+              <Skeleton width={NAME_WIDTH - 14} height={9} style={styles.lineSkeleton} />
+            </View>
+            <View style={styles.plot}>
+              <View style={[styles.axis, { backgroundColor: C.rule3 }]} />
+            </View>
           </View>
         </View>
       ))}
@@ -429,7 +651,7 @@ const LadderKey = memo(function LadderKey() {
   return (
     <View style={styles.legend}>
       <View style={styles.legendItem}>
-        <View style={[styles.swatch, { backgroundColor: C.live }]} />
+        <View style={[styles.swatch, { backgroundColor: C.live }, dotGlow(C.live)]} />
         <Text style={[styles.legendLabel, { color: C.liveText }]}>Locked ≤40ms</Text>
       </View>
       <View style={styles.legendItem}>
@@ -444,6 +666,18 @@ const LadderKey = memo(function LadderKey() {
   );
 });
 
+/**
+ * The 8px halo the artboards put under the locked dot (L991, L623).
+ *
+ * Written out rather than routed through `bloom()`, for the same reason
+ * `GlassCard`'s bleed is: every recipe in the theme offsets its shadow
+ * downward, and on a 9px dot a 16px drop is a smear under the legend rather
+ * than light coming off the swatch.
+ */
+function dotGlow(color: string): object {
+  return { boxShadow: [{ offsetX: 0, offsetY: 0, blurRadius: 8, color }] };
+}
+
 // -------------------------------------------------------------- notices
 
 type RosterNoticeProps = {
@@ -452,35 +686,28 @@ type RosterNoticeProps = {
   onPress: () => void;
 };
 
-/** Empty and error, one shape: where you are, and the button out of it. */
+/**
+ * Empty and error, one shape: where you are, and the button out of it.
+ *
+ * `EmptyState` rather than the hand-rolled card this used to be. The card it
+ * replaced was a `surface` fill with a shadow and NO border, which was legible
+ * when `surface` was opaque grey and reads as flat now that it is 5.5% white —
+ * and its retry pill was the app's CTA rebuilt from scratch, one size off.
+ */
 const RosterNotice = memo(function RosterNotice({ title, body, onPress }: RosterNoticeProps) {
-  const C = useColors();
-
   return (
-    <View style={[styles.notice, { backgroundColor: C.surface }, raised(C)]}>
-      <Users size={20} strokeWidth={2} color={C.ink3} />
-      <Text style={[styles.noticeTitle, { color: C.ink }]}>{title}</Text>
-      <Text style={[styles.noticeBody, { color: C.ink2 }]}>{body}</Text>
-
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Try again"
-        onPress={onPress}
-        style={({ pressed }) => [
-          styles.noticeAction,
-          { backgroundColor: C.pill },
-          pressed ? styles.dim : null,
-        ]}>
-        <RotateCw size={15} strokeWidth={2.4} color={C.pillInk} />
-        <Text style={[styles.noticeActionLabel, { color: C.pillInk }]}>Try again</Text>
-      </Pressable>
-    </View>
+    <EmptyState
+      icon={Users}
+      title={title}
+      description={body}
+      primary={{ label: 'Try again', onPress }}
+    />
   );
 });
 
 // ------------------------------------------------------------- sync orbit
 
-export type SyncOrbitProps = {
+export type SyncOrbitProps = RosterProps & {
   roomId: string | null;
   hostId: string | null;
   currentUserId: string | null;
@@ -488,10 +715,6 @@ export type SyncOrbitProps = {
   timeline: RoomTimeline | null;
   header?: ReactNode;
   footer?: ReactNode;
-  /** Ids this listener has muted locally. Never published, never announced. */
-  mutedIds?: ReadonlySet<string>;
-  onSelectPerson?: (userId: string) => void;
-  contentBottomInset?: number;
 };
 
 export function SyncOrbit({
@@ -503,7 +726,9 @@ export function SyncOrbit({
   header,
   footer,
   mutedIds,
+  speakingIds,
   onSelectPerson,
+  onOpenPerson,
   contentBottomInset = 0,
 }: SyncOrbitProps) {
   const C = useColors();
@@ -531,20 +756,23 @@ export function SyncOrbit({
   }, [refetch]);
 
   const renderItem = useCallback(
-    ({ item }: ListRenderItemInfo<ParticipantView>) => {
+    ({ item, index }: ListRenderItemInfo<ParticipantView>) => {
       const isMe = item.userId === currentUserId;
       return (
         <OrbitRow
           participant={item}
+          index={index}
           isOnAux={item.userId === hostId}
           isMe={isMe}
           driftMs={isMe ? driftMs : 0}
           muted={mutedIds?.has(item.userId) ?? false}
+          speaking={speakingIds?.has(item.userId) ?? false}
           onSelect={onSelectPerson}
+          onOpen={onOpenPerson}
         />
       );
     },
-    [hostId, currentUserId, driftMs, mutedIds, onSelectPerson]
+    [hostId, currentUserId, driftMs, mutedIds, speakingIds, onSelectPerson, onOpenPerson]
   );
 
   return (
@@ -588,6 +816,9 @@ export function SyncOrbit({
                 styles.dialCore,
                 {
                   backgroundColor: C.surface,
+                  // The edge is not decoration: a 5.5%-white disc inside a dark
+                  // well has no shape of its own, shadow or no shadow.
+                  borderColor: C.rule,
                   left: dialWidth / 2 - DIAL_CORE / 2,
                   top: DIAL_CENTRE_Y - DIAL_CORE / 2,
                 },
@@ -607,6 +838,7 @@ export function SyncOrbit({
                 total={participants.length}
                 isMe={person.userId === currentUserId}
                 isOnAux={person.userId === hostId}
+                speaking={speakingIds?.has(person.userId) ?? false}
                 driftMs={person.userId === currentUserId ? driftMs : 0}
                 dialWidth={dialWidth}
               />
@@ -620,11 +852,17 @@ export function SyncOrbit({
           */}
           <View style={styles.legend}>
             <View style={styles.legendItem}>
-              <View style={[styles.swatch, { backgroundColor: C.live }]} />
+              <View style={[styles.swatch, { backgroundColor: C.live }, dotGlow(C.live)]} />
               <Text style={[styles.legendLabel, { color: C.liveText }]}>±40 locked</Text>
             </View>
             <View style={styles.legendItem}>
-              <HatchSwatch />
+              {/*
+                A plain `ink2` dot (design L992). The 45° `HatchSwatch` that
+                stood here — three rotated bars in a clipped 9px box, because
+                React Native has no repeating gradient — was inventing a texture
+                the artboards never used, at 9px where it read as a smudge.
+              */}
+              <View style={[styles.swatch, { backgroundColor: C.ink2 }]} />
               <Text style={[styles.legendLabel, { color: C.ink2 }]}>±220 nudge</Text>
             </View>
             <View style={styles.legendItem}>
@@ -633,14 +871,31 @@ export function SyncOrbit({
             </View>
           </View>
 
-          <View style={styles.orbitTitleBlock}>
-            <Text numberOfLines={2} style={[styles.orbitTitle, { color: C.ink }]}>
-              {track?.title ?? 'Nothing playing'}
-            </Text>
-            <Text numberOfLines={1} style={[styles.orbitArtist, { color: C.ink2 }]}>
-              {track?.artist ?? 'Queue a track to start the Session'}
-            </Text>
-          </View>
+          {/*
+            THE TITLE BLOCK THAT USED TO SIT HERE IS GONE. It drew
+            `track.title` over `track.artist`, falling back to "Nothing
+            playing" / "Queue a track to start the Session" — the player's
+            empty state, rendered underneath the roster, on the tab whose whole
+            job is WHO IS HERE. Three things were wrong with it and only the
+            third is about taste:
+
+              · It was a second now-playing readout on a screen that already
+                has one. `NowPlaying` is a FIXED band above the stage switch
+                (see the Session's file header, deviation 1) and does not swap
+                out when this tab is selected, so the title was on screen twice
+                whenever anything was playing.
+              · Its empty face made the Listeners tab announce that the queue
+                was empty. A person tapping "Listeners · 6" is asking about six
+                people; answering with "Queue a track" is answering a question
+                nobody asked, in the space where the answer should have been.
+              · It pushed the roster — the actual content — a further 60px down
+                a list that already opens with a 340px dial.
+
+            `track` is still a prop and still used: the dial's core carries its
+            initial and the Session's clock, which is not a now-playing readout
+            but the REFERENCE POINT every listener on the dial is plotted
+            against. Remove that and the orbit is measuring nothing.
+          */}
         </>
       }
       ListEmptyComponent={
@@ -695,6 +950,7 @@ type OrbitMarkerProps = {
   total: number;
   isMe: boolean;
   isOnAux: boolean;
+  speaking: boolean;
   driftMs: number;
   dialWidth: number;
 };
@@ -705,6 +961,7 @@ const OrbitMarker = memo(function OrbitMarker({
   total,
   isMe,
   isOnAux,
+  speaking,
   driftMs,
   dialWidth,
 }: OrbitMarkerProps) {
@@ -724,12 +981,13 @@ const OrbitMarker = memo(function OrbitMarker({
         reading.measured ? `off by ${reading.value}` : reading.rung
       }`}
       style={[styles.marker, { left: left - ORBIT_TILE / 2, top: top - ORBIT_TILE / 2 - 2 }]}>
-      <InitialTile
+      <Avatar
         name={participant.displayName}
-        avatarUrl={participant.avatarUrl}
+        uri={participant.avatarUrl}
         size={ORBIT_TILE}
-        onAux={isOnAux}
-        live={reading.color === C.liveText}
+        live={isOnAux}
+        speaking={speaking}
+        identity={isMe}
       />
       <Text numberOfLines={1} style={[styles.markerLabel, { color: reading.color }]}>
         {reading.value}
@@ -738,14 +996,13 @@ const OrbitMarker = memo(function OrbitMarker({
   );
 });
 
-type OrbitRowProps = {
+type OrbitRowProps = RowControlProps & {
   participant: ParticipantView;
   isOnAux: boolean;
   isMe: boolean;
   driftMs: number;
-  /** Muted for THIS listener only. Never published, never announced. */
-  muted?: boolean;
-  onSelect?: (userId: string) => void;
+  /** Position in the roster. Drives the arrival stagger, nothing else. */
+  index: number;
 };
 
 const OrbitRow = memo(function OrbitRow({
@@ -753,20 +1010,42 @@ const OrbitRow = memo(function OrbitRow({
   isOnAux,
   isMe,
   driftMs,
+  index,
   muted = false,
+  speaking = false,
   onSelect,
+  onOpen,
 }: OrbitRowProps) {
   const C = useColors();
   const reading = readingFor(isMe, participant.isSynced, driftMs, C);
+  const press = rowPress(participant.userId, isMe, onSelect, onOpen);
+
+  /*
+    The same arrival `DriftRow` has, for the same reason and by construction:
+    this is ONE row object drawn in two lists, and a row that moves differently
+    depending on which list rendered it is precisely the drift this file's
+    header spends four paragraphs removing. The long version of the argument —
+    and the line between a card arriving and a reading animating — is on
+    `DriftRow`.
+
+    The DIAL ABOVE THIS LIST GETS NOTHING. It is the instrument: rings at ±40
+    and ±220, every listener plotted by their real distance from the Session's
+    position, the room clock in the middle. It rides the stage module in
+    'src/app/room/[id].tsx' like the rest of the tab and is never animated on
+    its own, because a measurement fading up on its own schedule reads as a
+    reading being taken rather than as a chart arriving.
+  */
+  const entrance = useEntrance({ index });
 
   const content = (
     <>
-      <InitialTile
+      <Avatar
         name={participant.displayName}
-        avatarUrl={participant.avatarUrl}
+        uri={participant.avatarUrl}
         size={ORBIT_TILE}
-        onAux={isOnAux}
-        live={reading.color === C.liveText}
+        live={isOnAux}
+        speaking={speaking}
+        identity={isMe}
       />
 
       <View style={styles.orbitRowMeta}>
@@ -783,22 +1062,6 @@ const OrbitRow = memo(function OrbitRow({
         <Text style={[styles.orbitRowValue, { color: reading.color }]}>{reading.value}</Text>
         <Text style={[styles.orbitRowRung, { color: C.ink3 }]}>{reading.rung}</Text>
       </View>
-
-      {onSelect ? (
-        <View
-          style={[
-            styles.speaker,
-            muted
-              ? { backgroundColor: C.bgRecessed, borderColor: C.rule2 }
-              : { borderColor: 'transparent' },
-          ]}>
-          {muted ? (
-            <VolumeX size={16} strokeWidth={2} color={C.ink2} />
-          ) : (
-            <Volume2 size={16} strokeWidth={2} color={C.ink3} />
-          )}
-        </View>
-      ) : null}
     </>
   );
 
@@ -806,102 +1069,55 @@ const OrbitRow = memo(function OrbitRow({
     reading.measured ? `off by ${reading.value}, ${reading.rung}` : reading.rung
   }${muted ? ', muted for you' : ''}`;
 
-  if (!onSelect) {
-    return (
-      <View
-        accessible
-        accessibilityLabel={label}
-        style={[styles.row, { backgroundColor: C.surface }, raised(C)]}>
-        {content}
-      </View>
-    );
-  }
-
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ selected: muted }}
-      accessibilityHint={muted ? 'Unmutes this person for you' : 'Mutes this person, for you only'}
-      onPress={() => onSelect(participant.userId)}
-      style={({ pressed }) => [
-        styles.row,
-        { backgroundColor: pressed ? C.surface2 : C.surface },
-        raised(C),
-      ]}>
-      {content}
-    </Pressable>
-  );
-});
-
-// ------------------------------------------------------------------ parts
-
-type InitialTileProps = {
-  name: string;
-  avatarUrl: string | null;
-  size: number;
-  onAux: boolean;
-  live: boolean;
-};
-
-/**
- * A rounded letter tile, with a real photo dropping straight over it. Accent
- * fill is reserved for the person on aux — they are the timeline everyone else
- * is measured against, which is the literal meaning of the colour here.
- */
-const InitialTile = memo(function InitialTile({
-  name,
-  avatarUrl,
-  size,
-  onAux,
-  live,
-}: InitialTileProps) {
-  const C = useColors();
-
-  return (
-    <View
+    <Animated.View
       style={[
-        styles.tile,
-        { width: size, height: size, borderRadius: size >= 32 ? Radii.sm : Radii.xs },
-        {
-          backgroundColor: onAux ? C.live : C.avatar,
-          borderWidth: live && !onAux ? Rule.major : Rule.hair,
-          borderColor: live && !onAux ? C.live : C.rule2,
-        },
+        styles.row,
+        { backgroundColor: C.surfaceSolid, borderColor: C.rule },
+        raised(C),
+        entrance,
       ]}>
-      {avatarUrl ? (
-        <Image
-          source={{ uri: avatarUrl }}
-          style={StyleSheet.absoluteFill}
-          contentFit="cover"
-          cachePolicy="memory-disk"
-          placeholder={{ blurhash: BLURHASH_SURFACE }}
-          accessibilityIgnoresInvertColors
-        />
+      {press ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={label}
+          accessibilityState={{ selected: muted }}
+          accessibilityHint={press.hint}
+          onPress={press.onPress}
+          style={({ pressed }) => [styles.rowBody, pressed ? styles.dim : null]}>
+          {content}
+        </Pressable>
       ) : (
-        <Text style={[styles.tileInitial, { color: onAux ? C.onLive : C.ink2 }]}>
-          {initialFor(name)}
-        </Text>
+        <View accessible accessibilityLabel={label} style={styles.rowBody}>
+          {content}
+        </View>
       )}
-    </View>
+
+      <MemberMuteButton
+        name={participant.displayName}
+        muted={muted}
+        isMe={isMe}
+        onSelect={onSelect}
+        userId={participant.userId}
+      />
+    </Animated.View>
   );
 });
 
-/**
- * The 45° hatch that means "nudging" in the legend. React Native has no
- * repeating gradient, so it is three rotated bars in a clipped 9px box.
- */
-const HatchSwatch = memo(function HatchSwatch() {
-  const C = useColors();
+/*
+  TWO LOCAL PARTS USED TO LIVE HERE AND BOTH ARE GONE ON PURPOSE.
 
-  return (
-    <View style={[styles.swatch, styles.hatch]}>
-      {[-3, 1, 5].map((left) => (
-        <View key={left} style={[styles.hatchBar, { left, backgroundColor: C.ink }]} />
-      ))}
-    </View>
-  );
-});
+  `InitialTile` was a hand-rolled square avatar with its own photo loader.
+  `Avatar` from the kit is the same object done once: round as every avatar in
+  the artboards is, with the coral speaking ring, the identity gradient for your
+  own row and the blurhash placeholder already inside it. The one thing lost is
+  the coral FILL for the person on aux, which the ring now says instead — a
+  filled coral disc under a photograph is invisible anyway.
+
+  `HatchSwatch` drew a 45° hatch for the nudge legend out of three rotated bars
+  in a clipped 9px box. The artboards use a plain dot there; see the note at the
+  orbit legend.
+*/
 
 const styles = StyleSheet.create({
   list: {
@@ -938,11 +1154,23 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Space.sm + 2,
+    gap: Space.sm,
     minHeight: TOUCH_TARGET + Space.md,
     paddingVertical: Space.sm + 1,
     paddingHorizontal: Space.md - 1,
+    borderWidth: Rule.hair,
     borderRadius: Radii.button,
+  },
+  /**
+   * The pressable half. A SIBLING of the mute button, never its parent — see
+   * the note on `MemberMuteButton`.
+   */
+  rowBody: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.sm + 2,
   },
   rowMeta: {
     width: NAME_WIDTH,
@@ -994,50 +1222,16 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     textAlign: 'right',
   },
-  speaker: {
-    width: SPEAKER,
-    height: SPEAKER,
+  mutePlaceholder: {
+    width: MUTE_BUTTON,
     flexGrow: 0,
     flexShrink: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: Radii.sm,
-    borderWidth: Rule.hair,
   },
   tileSkeleton: {
-    borderRadius: Radii.sm,
+    borderRadius: TILE / 2,
   },
   lineSkeleton: {
     borderRadius: Radii.xs,
-  },
-
-  // ------------------------------------------------------------- notices
-  notice: {
-    alignItems: 'flex-start',
-    gap: Space.sm,
-    padding: Space.lg,
-    borderRadius: Radii.lg,
-  },
-  noticeTitle: {
-    ...Type.heading(15),
-  },
-  noticeBody: {
-    ...Type.body(13),
-    maxWidth: 380,
-  },
-  noticeAction: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Space.sm - 2,
-    marginTop: Space.xs,
-    minHeight: TOUCH_TARGET,
-    paddingHorizontal: Space.lg,
-    borderRadius: Radii.sm,
-  },
-  noticeActionLabel: {
-    fontFamily: Fonts.semibold,
-    fontSize: 13,
-    letterSpacing: tracking(13, 0.02),
   },
 
   // ----------------------------------------------------------- sync orbit
@@ -1058,6 +1252,7 @@ const styles = StyleSheet.create({
     height: DIAL_CORE,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: Rule.hair,
     borderRadius: Radii.pill,
   },
   dialInitial: {
@@ -1098,37 +1293,15 @@ const styles = StyleSheet.create({
     ...Type.label(10),
     letterSpacing: tracking(10, 0.09),
   },
+  /** Round, as every legend dot in the artboards is. 4.5, not `Radii.pill`. */
   swatch: {
     width: 9,
     height: 9,
     flexGrow: 0,
     flexShrink: 0,
-    borderRadius: 2,
-  },
-  hatch: {
-    overflow: 'hidden',
-  },
-  hatchBar: {
-    position: 'absolute',
-    top: -5,
-    width: 2,
-    height: 19,
-    transform: [{ rotate: '45deg' }],
+    borderRadius: 4.5,
   },
 
-  orbitTitleBlock: {
-    paddingTop: Space.xs,
-    paddingBottom: Space.sm,
-  },
-  orbitTitle: {
-    ...Type.display(20),
-    lineHeight: 22,
-    letterSpacing: tracking(20, -0.025),
-  },
-  orbitArtist: {
-    ...Type.body(13),
-    marginTop: 3,
-  },
   orbitRowMeta: {
     flex: 1,
     minWidth: 0,
@@ -1160,17 +1333,5 @@ const styles = StyleSheet.create({
     ...Type.heading(10),
     letterSpacing: tracking(10, 0.1),
     textTransform: 'uppercase',
-  },
-
-  // ----------------------------------------------------------------- tile
-  tile: {
-    flexGrow: 0,
-    flexShrink: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  tileInitial: {
-    ...readout(12),
   },
 });

@@ -1,11 +1,26 @@
 /**
  * Voice note — the recording sheet.
  *
- * A pulsing accent dot, a 12-bar live waveform in its own well, a tabular
- * timer, and one full-width send cell. The 12 bars are not a decoration: they are
- * the same twelve values that get written to `attachments.waveform` and drawn
- * again by the voice-note bubble, so what you watch while recording is what the
- * other person sees afterwards.
+ * From `design/nocturne/aux-nocturne.dc.html`: the shared sheet shell at L1163-
+ * L1167 and the `sheetRec` body at L1506-L1520. A pulsing coral dot, a 12-bar
+ * live waveform and a tabular timer in one card, then the blue send cell and a
+ * quiet cancel under it.
+ *
+ * The 12 bars are not a decoration: they are the same twelve values that get
+ * written to `attachments.waveform` and drawn again by the voice-note bubble,
+ * so what you watch while recording is what the other person sees afterwards.
+ *
+ * THE ACCENTS SPLIT CLEANLY HERE, WHICH IS WHY THIS SCREEN IS WORTH READING AS
+ * AN EXAMPLE. The dot, the "Recording" kicker and the bars that are genuinely
+ * hot are CORAL — recording is a state of the world. Send is BLUE — it is the
+ * action. No element carries both, and cancelling is not destruction (nothing
+ * has been sent), so `danger` appears nowhere on this sheet.
+ *
+ * The sheet FLOATS and takes `sheetShadow()`, not `dropped()`: a sheet is lit
+ * by the page it covers, so its shadow falls upward onto that page. `dropped()`
+ * would throw it off the bottom of the screen. Everything inside is opaque —
+ * a 5.5%-white surface laid over the BlurView has nothing to sit on and
+ * dissolves into it, so the transport card is `GlassCard solid`.
  *
  * ## expo-audio is not installed
  *
@@ -13,8 +28,9 @@
  * here captures audio. A bundler resolves `require` at build time, so there is
  * no runtime probe to write — an absent module is a build error, not a caught
  * exception. `RECORDING_AVAILABLE` is therefore a static flag and the sheet
- * renders a truthful disabled state by default: the reason on one line, the
- * transport greyed, and the send cell inert.
+ * renders a truthful disabled state by default: the kicker reads Unavailable,
+ * the dot stops pulsing, the bars go to `track`, the reason sits on one line
+ * and the send cell is inert.
  *
  * Everything the recorder needs is already here and pure:
  *
@@ -27,36 +43,36 @@
  * the recorder, and `onSend` already hands back a finished `VoiceNoteDraft`.
  *
  * Controlled throughout — the sheet holds no recorder state and never touches
- * the data layer.
+ * the data layer. There is deliberately no start/stop transport in it: the host
+ * starts the recorder when it opens the sheet and stops it on send or cancel,
+ * and a button here that the host had no handler for would be a lie.
  */
 
+import { BlurView } from 'expo-blur';
+import { Send, X } from 'lucide-react-native';
 import { useEffect } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
-  cancelAnimation,
   useAnimatedStyle,
   useReducedMotion,
   useSharedValue,
-  withRepeat,
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AuxButton, CircleIconButton, GlassCard, LivePulse, PillButton } from '@/components/ui';
 import {
   Duration,
-  Fonts,
   PointerEvents,
   Radii,
   Rule,
   Sheet as SheetMetrics,
   Space,
-  TOUCH_TARGET,
   Type,
-  dropped,
-  raised,
+  sheetShadow,
   tracking,
 } from '@/lib/theme';
-import { useColors } from '@/lib/theme-context';
+import { useColors, useTheme } from '@/lib/theme-context';
 
 /** The bar count is fixed by the schema and by the bubble that redraws it. */
 export const WAVEFORM_BARS = 12;
@@ -67,16 +83,17 @@ export const MAX_DURATION_MS = 120_000;
 export const RECORDING_AVAILABLE: boolean = false;
 export const RECORDING_UNAVAILABLE_REASON = 'Recording unavailable — expo-audio is not installed';
 
-const DOT = 10;
-const WAVE_HEIGHT = 44;
+/** L1509: a 13px dot with its own coral bloom. */
+const DOT = 13;
+/** L1510: `height:46px` of bars. */
+const WAVE_HEIGHT = 46;
 const BAR_GAP = 3;
 /** A silent bar still has to be visible, or the row reads as broken. */
 const BAR_MIN = 2;
 /** At or above this the mic is genuinely hot — the one accent in the waveform. */
 const BAR_LOUD = 78;
-/** The prototype's pulse: full to .28 and back, once a second. */
-const PULSE_MIN = 0.28;
-const PULSE_MS = 500;
+/** L1508: `padding:18px` inside the transport card, above the house row step. */
+const TRANSPORT_PAD = 18;
 
 const clamp01to100 = (n: number) =>
   Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : 0;
@@ -173,6 +190,7 @@ export function DmRecordSheet({
   maxDurationMs = MAX_DURATION_MS,
 }: DmRecordSheetProps) {
   const C = useColors();
+  const { scheme } = useTheme();
   const insets = useSafeAreaInsets();
   const reduced = useReducedMotion();
 
@@ -185,7 +203,6 @@ export function DmRecordSheet({
   const live = recording && !blocked;
 
   const rise = useSharedValue(0);
-  const pulse = useSharedValue(1);
 
   useEffect(() => {
     if (reduced) {
@@ -197,24 +214,13 @@ export function DmRecordSheet({
     });
   }, [visible, reduced, rise]);
 
-  useEffect(() => {
-    // Under reduced motion the dot holds solid: it still says RECORDING, it
-    // just stops moving.
-    if (reduced || !live || !visible) {
-      cancelAnimation(pulse);
-      pulse.value = 1;
-      return;
-    }
-    pulse.value = withRepeat(withTiming(PULSE_MIN, { duration: PULSE_MS }), -1, true);
-    return () => cancelAnimation(pulse);
-  }, [reduced, live, visible, pulse]);
-
   const sheetStyle = useAnimatedStyle(() => ({
     opacity: rise.value,
     transform: [{ translateY: (1 - rise.value) * 16 }],
   }));
 
-  const dotStyle = useAnimatedStyle(() => ({ opacity: pulse.value }));
+  /** The float: clear of the home indicator, and never flush on a device without one. */
+  const lift = Math.max(insets.bottom, Space.md) + Space.md;
 
   return (
     <Modal
@@ -231,102 +237,129 @@ export function DmRecordSheet({
       />
 
       <View style={[styles.dock, PointerEvents.boxNone]}>
+        {/*
+          The shadow rides on this view, the blur clips inside it. Android
+          throws away a view's own boxShadow along with whatever
+          `overflow: 'hidden'` clips, so a single view would lose its lift on
+          one platform only.
+        */}
         <Animated.View
-          style={[
-            styles.sheet,
-            { backgroundColor: C.bg, paddingBottom: insets.bottom + Space.md },
-            dropped(C, 'lg'),
-            sheetStyle,
-          ]}>
-          <View style={styles.grabberSlot}>
-            <View style={[styles.grabber, { backgroundColor: C.rule3 }]} />
-          </View>
+          style={[styles.shell, { marginBottom: lift }, sheetShadow(C), sheetStyle]}>
+          <BlurView
+            intensity={scheme === 'dark' ? 40 : 60}
+            tint={scheme === 'dark' ? 'dark' : 'light'}
+            // Android does not blur at all without this; the tint alone would
+            // leave a flat translucent slab with nothing happening behind it.
+            experimentalBlurMethod={Platform.OS === 'android' ? 'dimezisBlurView' : undefined}
+            style={[styles.glass, { borderColor: C.chromeBorder }]}>
+            {/*
+              The tint rides ON TOP of the blur rather than being handed to
+              BlurView as a background: underneath, the tint becomes the thing
+              being blurred and the whole sheet reads as fog. It is also the
+              safety net if a platform declines to blur behind a Modal window.
+            */}
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: C.nav }]} />
 
-          <View style={styles.head}>
-            <View style={styles.headText}>
-              <Text style={[styles.title, { color: C.ink }]}>Voice note</Text>
-              <Text
-                accessibilityLiveRegion="polite"
-                style={[styles.kicker, { color: live ? C.liveText : C.ink3 }]}>
-                {blocked ? 'Unavailable' : live ? 'Recording' : 'Ready'}
-              </Text>
+            <View style={styles.grabberSlot}>
+              <View style={[styles.grabber, { backgroundColor: C.rule3 }]} />
             </View>
 
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Cancel"
-              onPress={onCancel}
-              style={({ pressed }) => [
-                styles.close,
-                { backgroundColor: pressed ? C.surface2 : C.surface },
-                raised(C),
-              ]}>
-              <Text style={[styles.closeLabel, { color: C.ink2 }]}>Cancel</Text>
-            </Pressable>
-          </View>
-
-          <View style={styles.body}>
-            <View
-              style={[styles.transport, { backgroundColor: C.bgRecessed, borderColor: C.rule }]}>
-              <Animated.View
-                accessibilityElementsHidden
-                importantForAccessibility="no-hide-descendants"
-                style={[styles.dot, { backgroundColor: live ? C.live : C.ink3 }, dotStyle]}
-              />
-
-              <View
-                accessible
-                accessibilityRole="progressbar"
-                accessibilityLabel="Recording level"
-                style={styles.wave}>
-                {bars.map((value, index) => (
-                  <View
-                    key={index}
-                    style={[
-                      styles.bar,
-                      {
-                        height: Math.max(BAR_MIN, (value / 100) * WAVE_HEIGHT),
-                        backgroundColor: blocked
-                          ? C.track
-                          : value >= BAR_LOUD
-                            ? C.live
-                            : C.ink2,
-                      },
-                    ]}
-                  />
-                ))}
+            <View style={styles.head}>
+              <View style={styles.headMeta}>
+                <Text style={[styles.title, { color: C.ink }]}>Voice note</Text>
+                <Text
+                  accessibilityLiveRegion="polite"
+                  style={[styles.kicker, { color: live ? C.liveText : C.ink3 }]}>
+                  {blocked ? 'Unavailable' : live ? 'Recording' : 'Ready'}
+                </Text>
               </View>
 
-              <Text
-                accessibilityLabel={`${formatDuration(elapsed)} recorded`}
-                style={[styles.timer, { color: C.ink }]}>
-                {formatDuration(elapsed)}
-              </Text>
+              {/*
+                The X dismisses; the Cancel cell below it discards the take.
+                Both land on `onCancel` — nothing has been recorded that could
+                survive one and not the other — and the design draws both
+                (L1507, L1520) because the sheet is tall enough that reaching
+                the top of it one-handed is the awkward option, not the obvious
+                one.
+              */}
+              <CircleIconButton
+                icon={X}
+                tone="chip"
+                accessibilityLabel="Close"
+                onPress={onCancel}
+              />
             </View>
 
-            {blocked ? (
-              <Text style={[styles.reason, { color: C.ink3 }]}>{unavailableReason}</Text>
-            ) : null}
+            <View style={styles.body}>
+              <GlassCard variant="row" solid padded={false} style={styles.transport}>
+                {/*
+                  Coral, pulsing at the artboard's own 1s — `LivePulse` carries
+                  the bloom and the reduced-motion hold. When the recorder is
+                  not running there is no state to announce, so the mark goes
+                  quiet and grey rather than pulsing a lie.
+                */}
+                {live ? (
+                  <LivePulse size={DOT} tempo="recording" />
+                ) : (
+                  <View
+                    accessibilityElementsHidden
+                    importantForAccessibility="no-hide-descendants"
+                    style={[styles.dot, { backgroundColor: C.ink3 }]}
+                  />
+                )}
 
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Send voice note"
-              accessibilityHint={blocked ? (unavailableReason ?? undefined) : undefined}
-              accessibilityState={{ disabled: !canSend }}
-              disabled={!canSend}
-              onPress={() => onSend({ durationMs: elapsed, waveform: bars })}
-              style={({ pressed }) => [
-                styles.send,
-                canSend
-                  ? { backgroundColor: pressed ? C.cream : C.pill }
-                  : { backgroundColor: C.bgRecessed, borderWidth: Rule.hair, borderColor: C.rule },
-                canSend ? dropped(C, 'sm') : null,
-              ]}>
-              <Text style={[styles.sendLabel, { color: canSend ? C.pillInk : C.ink3 }]}>
-                Send voice note
-              </Text>
-            </Pressable>
-          </View>
+                <View
+                  accessible
+                  accessibilityRole="progressbar"
+                  accessibilityLabel="Recording level"
+                  style={styles.wave}>
+                  {bars.map((value, index) => (
+                    <View
+                      key={index}
+                      style={[
+                        styles.bar,
+                        {
+                          height: Math.max(BAR_MIN, (value / 100) * WAVE_HEIGHT),
+                          backgroundColor: blocked
+                            ? C.track
+                            : value >= BAR_LOUD
+                              ? C.live
+                              : C.ink2,
+                        },
+                      ]}
+                    />
+                  ))}
+                </View>
+
+                <Text
+                  accessibilityLabel={`${formatDuration(elapsed)} recorded`}
+                  style={[styles.timer, { color: C.ink }]}>
+                  {formatDuration(elapsed)}
+                </Text>
+              </GlassCard>
+
+              {blocked ? (
+                <Text style={[styles.reason, { color: C.ink3 }]}>{unavailableReason}</Text>
+              ) : null}
+
+              <View style={styles.actions}>
+                <PillButton
+                  label="Send voice note"
+                  icon={Send}
+                  disabled={!canSend}
+                  onPress={() => onSend({ durationMs: elapsed, waveform: bars })}
+                />
+                <AuxButton
+                  label="Cancel"
+                  variant="bordered"
+                  size="lg"
+                  align="center"
+                  fullWidth
+                  onPress={onCancel}
+                />
+              </View>
+            </View>
+          </BlurView>
         </Animated.View>
       </View>
     </Modal>
@@ -344,16 +377,26 @@ const styles = StyleSheet.create({
   dock: {
     flex: 1,
     justifyContent: 'flex-end',
+    /* L1166's `margin:0 10px`. It lives on the PARENT rather than as a margin
+       on the sheet, because the sheet is `width:'100%'` and a margin would put
+       it 20px wider than the screen. */
+    paddingHorizontal: Space.sm + 2,
   },
-  sheet: {
+  /** Carries the shadow and the placement. The glass below carries the skin. */
+  shell: {
     width: '100%',
-    maxWidth: 720,
+    maxWidth: 480,
     alignSelf: 'center',
-    borderTopLeftRadius: SheetMetrics.radius,
-    borderTopRightRadius: SheetMetrics.radius,
+    borderRadius: SheetMetrics.radius,
+  },
+  glass: {
+    overflow: 'hidden',
+    borderRadius: SheetMetrics.radius,
+    borderWidth: Rule.hair,
   },
   grabberSlot: {
-    paddingTop: Space.md + 2,
+    paddingTop: Space.md - 2,
+    paddingBottom: Space.sm,
     alignItems: 'center',
   },
   grabber: {
@@ -366,57 +409,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Space.md,
     paddingHorizontal: Space.xl,
-    paddingTop: Space.lg,
+    paddingTop: Space.xs,
     paddingBottom: Space.md,
   },
-  headText: {
+  headMeta: {
     flex: 1,
     minWidth: 0,
   },
   title: {
-    ...Type.display(20),
-    letterSpacing: tracking(20, -0.025),
+    ...Type.display(18),
+    letterSpacing: tracking(18, -0.015),
   },
+  /** Matches the kicker under every other sheet title in the app. */
   kicker: {
-    ...Type.label(10.5),
-    letterSpacing: tracking(10.5, 0.15),
+    ...Type.label(10),
+    letterSpacing: tracking(10, 0.08),
     marginTop: 3,
   },
-  close: {
-    minHeight: TOUCH_TARGET,
-    flexShrink: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: Space.lg,
-    borderRadius: Radii.md,
-  },
-  closeLabel: {
-    fontFamily: Fonts.semibold,
-    fontSize: 12.5,
-    lineHeight: 16,
-  },
-  dim: {
-    opacity: 0.55,
-  },
   body: {
-    paddingHorizontal: Space.xl,
-    paddingTop: Space.sm,
-    paddingBottom: Space.xl,
-    gap: Space.lg,
+    paddingHorizontal: Space.lg,
+    paddingBottom: Space.xxl,
+    gap: Space.md + 2,
   },
-  /*
-    A well, not `pressed()`. The inset pair needs about 80px of surface before
-    its light half is visible on a dark ground; below that only the dark half
-    lands and it reads as a smudge.
-  */
   transport: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Space.md,
-    paddingHorizontal: Space.lg,
-    paddingVertical: Space.md,
-    borderRadius: Radii.lg,
-    borderWidth: Rule.hair,
+    gap: Space.md + 1,
+    padding: TRANSPORT_PAD,
   },
   dot: {
     width: DOT,
@@ -432,9 +451,13 @@ const styles = StyleSheet.create({
     gap: BAR_GAP,
     height: WAVE_HEIGHT,
   },
+  /*
+    Fully rounded, per L1510. At 3px wide the pill radius shows only as softened
+    ends, which is what keeps a wall of twelve bars from reading as a barcode.
+  */
   bar: {
     flex: 1,
-    borderRadius: 1,
+    borderRadius: Radii.pill,
   },
   timer: {
     // A duration measures. Tabular figures, so the row does not shift on 1:09
@@ -445,19 +468,12 @@ const styles = StyleSheet.create({
   },
   reason: {
     ...Type.body(13),
+    // Pulls up against the card above it: the reason belongs to the transport,
+    // not to the buttons under it.
     marginTop: -Space.sm,
   },
-  send: {
-    minHeight: 56,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: Space.lg,
-    borderRadius: Radii.button,
-  },
-  sendLabel: {
-    fontFamily: Fonts.semibold,
-    fontSize: 15,
-    lineHeight: 20,
+  /** L1519-L1520: the two cells sit 10px apart, tighter than the body gap. */
+  actions: {
+    gap: Space.sm + 2,
   },
 });

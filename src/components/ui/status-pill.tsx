@@ -1,3 +1,38 @@
+/**
+ * The pill that carries a state word or a numeral.
+ *
+ * Built from `design/nocturne/aux-nocturne.dc.html` L811–L813 (the quiet
+ * `surface2` badges and the coral PREMIUM beside them), L1183-ish (the unread
+ * count with its halo) and the twenty `--aux-live-w` wash pills scattered
+ * through the intro and session screens.
+ *
+ * "7 LIVE", "3 LISTENING", "PREMIUM", "NOT LINKED", "ON AUX", a DM unread
+ * count, the provider label sitting on artwork — every one of those was its own
+ * hand-rolled View + Text pair. They are the same object underneath: a short,
+ * uppercase, non-interactive readout of state.
+ *
+ * WHY `tone` IS REQUIRED, RESTATED FOR THE TWO-ACCENT WORLD.
+ *
+ * It used to be required so that nobody spent the one accent by leaving a
+ * default alone. That still holds, but the thing being guarded has changed
+ * shape. Nocturne runs two accents: CORAL is a state of the world (live,
+ * playing, in sync, on aux, unread, premium) and BLUE is an action you take.
+ * A StatusPill is never an action — it takes no press, it cannot be tapped —
+ * so coral is its native register and blue is very nearly never right here.
+ * `cream` survives for the one case that is: a label printed ON a primary
+ * surface, where the pill belongs to the button rather than describing the
+ * world. If you find yourself reaching for it anywhere else, the thing you
+ * want is a `Chip` or an `AuxButton`. And `cream` takes NO coral, not even for
+ * its dot — a badge sitting on the action surface that also carries the state
+ * accent is one element in both, which is the violation this whole note exists
+ * to prevent. See `skinFor`, where it was live until this pass.
+ *
+ * NOT a control, ever. `Chip` is the tappable filter pill, and a badge that
+ * looks pressable but is not is worse than one that plainly is not. That is
+ * also why the 44px touch-target floor does not apply to it and these are
+ * allowed to sit at 24px tall.
+ */
+
 import type { LucideIcon } from 'lucide-react-native';
 import { memo, useEffect } from 'react';
 import { StyleSheet, Text, View, type TextStyle } from 'react-native';
@@ -12,30 +47,21 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { useColors } from '@/lib/theme-context';
-import { DarkPalette, Radii, Rule, Space, Type, type Palette } from '@/lib/theme';
+import { DarkPalette, Radii, Rule, Space, Type, tracking, type Palette } from '@/lib/theme';
 
-/**
- * The pill that carries a state word or a numeral.
- *
- * "7 LIVE", "3 LISTENING", "PREMIUM", "NOT LINKED", "ON AUX", a DM unread
- * count, the provider label sitting on artwork — every one of those was its own
- * hand-rolled View + Text pair. They are the same object underneath: a short,
- * uppercase, non-interactive readout of state. One component means the rule
- * about WHICH of them may spend the accent lives in one place instead of
- * fifteen, which is the whole point — `tone` is a required prop for that
- * reason, so nobody reaches for the accent by leaving a default alone.
- *
- * NOT a control, ever. It takes no press: `Chip` in the theme is the tappable
- * filter pill, and a badge that looks pressable but is not is worse than one
- * that plainly is not. That is also why the 44px touch-target floor does not
- * apply to it and these are allowed to sit at 24px tall.
- */
 export type StatusPillTone =
-  /** `live` fill. RESERVED: live, playing, in sync, on aux, unread, selected. */
+  /** Solid `live` fill. RESERVED: live, playing, in sync, on aux, unread, premium. */
   | 'accent'
-  /** Hairline on nothing. The register for everything the accent may not claim. */
+  /**
+   * The coral WASH — a 15% fill behind a `liveMid` edge, coral text. The
+   * design's most common badge by a wide margin (20 uses): it says the same
+   * thing `accent` does at a volume that can sit inside a card without
+   * shouting over the card's own title.
+   */
+  | 'liveWash'
+  /** `surface2` behind a hairline. The register for everything the accent may not claim. */
   | 'outline'
-  /** The inverted card's badge — reads as a label printed ON the cream. */
+  /** A label printed ON a primary surface. See the note in the header. */
   | 'cream'
   /** A fixed dark ground for sitting on a photo. See `skinFor`. */
   | 'overlay';
@@ -47,7 +73,11 @@ export type StatusPillProps = {
   tone: StatusPillTone;
   /** The leading circle. Add it when the pill reports a live or present count. */
   dot?: boolean;
-  /** Pulses the dot. No effect without `dot` — the label alone never blinks. */
+  /**
+   * Pulses the dot, and on the `accent` tone lights a coral halo behind the
+   * whole pill. No effect without `dot` on the other tones — the label alone
+   * never blinks.
+   */
   live?: boolean;
   /** 12px at `sm`, 14px at `md`. Anything bigger belongs in a row, not a pill. */
   icon?: LucideIcon;
@@ -76,11 +106,28 @@ type Skin = { bg: string; fg: string; border: string; dot: string };
 function skinFor(tone: StatusPillTone, live: boolean, C: Palette): Skin {
   switch (tone) {
     case 'accent':
+      // `onLive` is a warm near-black, not white — white on coral fails. Code
+      // that assumes a filled accent means light text on it is wrong here.
       return { bg: C.live, fg: C.onLive, border: CLEAR, dot: C.onLive };
+    case 'liveWash':
+      return { bg: C.liveWash, fg: C.liveText, border: C.liveMid, dot: C.live };
     case 'cream':
-      // The accent is legible ON cream at full strength; `liveText` is tuned to
-      // sit on the ground and washes out against an off-white card.
-      return { bg: C.cream, fg: C.onCream, border: CLEAR, dot: live ? C.live : C.onCream2 };
+      /*
+        `cream` and `pill` resolve to the same blue in this direction, so this
+        is the primary surface as a badge — and EVERYTHING on it comes out of
+        that surface's own ink ramp.
+
+        THE DOT USED TO READ `live ? C.live : C.onCream2`, which put the state
+        accent (coral) on the action accent (blue) inside one 24px object: the
+        exact thing the header above forbids. Nothing passes `tone="cream"`
+        today, so it never reached a screen — it was a loaded gun in the kit
+        rather than a visible bug, and the next person to reach for the tone
+        would have fired it. `live` now lifts the dot from the muted white to
+        the full one, which is emphasis inside the blue rather than a second
+        hue, and `Dot` still breathes it: motion is not an accent, so a pulsing
+        white dot on a blue badge claims nothing about the colour it is in.
+      */
+      return { bg: C.cream, fg: C.onCream, border: CLEAR, dot: live ? C.onCream : C.onCream2 };
     case 'overlay':
       /*
         Deliberately pinned to the DARK palette rather than `useColors()`.
@@ -88,7 +135,9 @@ function skinFor(tone: StatusPillTone, live: boolean, C: Palette): Skin {
         not get lighter because the user switched to light mode — a pill that
         followed the theme here would turn into white text on a bright album
         cover. `dock` is the token for exactly this job: floating chrome sitting
-        over content.
+        over content, near-opaque because there is no blur underneath it. Do not
+        swap it for `nav`, which is the translucent fill that lives BEHIND a
+        blur and would let the artwork read straight through this pill.
       */
       return {
         bg: DarkPalette.dock,
@@ -98,7 +147,17 @@ function skinFor(tone: StatusPillTone, live: boolean, C: Palette): Skin {
       };
     case 'outline':
     default:
-      return { bg: CLEAR, fg: C.ink2, border: C.rule2, dot: live ? C.liveText : C.ink3 };
+      /*
+        No longer a hairline on nothing, despite the name.
+
+        Every quiet badge in the design is `surface2` behind a `rule` edge
+        (L811, L812). The reason is the ground: `surface` cards are 5.5% white
+        and translucent, so a transparent badge sitting on one has no fill of
+        its own AND barely any edge, and simply disappears. The 9% fill is what
+        makes it an object. The key survives because it is API; the recipe under
+        it changed.
+      */
+      return { bg: C.surface2, fg: C.ink2, border: C.rule, dot: live ? C.liveText : C.ink3 };
   }
 }
 
@@ -127,6 +186,32 @@ const readout = (size: number): TextStyle => ({
   fontVariant: ['tabular-nums'],
 });
 
+/**
+ * The badge voice, and neither type role gives it whole.
+ *
+ * Every badge in the design is 800 at .08–.11em, uppercase. `Type.label` has
+ * the case and the tracking but ships at 600, which goes soft at 9–10px against
+ * the 800 kickers it sits beside; `Type.heading` has the weight but tracks at
+ * .045em and does not uppercase. So this is `heading` with the label's case and
+ * a tracking split between the design's two values. If `Type.label` ever moves
+ * to extrabold — it was proposed and not taken — this collapses back to it.
+ */
+const badge = (size: number): TextStyle => ({
+  ...Type.heading(size),
+  letterSpacing: tracking(size, 0.09),
+  textTransform: 'uppercase',
+});
+
+/**
+ * The coral halo behind a live accent pill (design: the unread count at
+ * `0 0 14px`). `bloom()` cannot express it — every recipe in the theme offsets
+ * its shadow downward, and a halo has to be centred or it reads as the pill
+ * casting onto whatever is under it rather than glowing.
+ */
+function halo(color: string) {
+  return { boxShadow: [{ offsetX: 0, offsetY: 0, blurRadius: 14, spreadDistance: 0, color }] };
+}
+
 export const StatusPill = memo(function StatusPill({
   label,
   tone,
@@ -143,7 +228,7 @@ export const StatusPill = memo(function StatusPill({
   /*
     A count gets the readout voice the type scale reserves for numbers: tabular
     figures, no tracking. Dropping the tracking is the load-bearing half —
-    `Type.label` applies its letter-spacing after the LAST glyph too, which
+    the badge voice applies its letter-spacing after the LAST glyph too, which
     shunts a lone digit visibly left of the centre of the circle it is meant to
     be centred in.
   */
@@ -167,13 +252,16 @@ export const StatusPill = memo(function StatusPill({
           backgroundColor: skin.bg,
           borderColor: skin.border,
         },
+        // Only the solid fill can carry it. A halo behind the 15% wash would
+        // be brighter than the pill it is supposed to be coming off.
+        tone === 'accent' && live && halo(C.glowSoft),
       ]}>
       {dot ? <Dot size={s.dot} color={skin.dot} live={live} /> : null}
       {Icon ? <Icon size={s.icon} strokeWidth={2.4} color={skin.fg} /> : null}
 
       <Text
         numberOfLines={1}
-        style={[numeral ? readout(s.font) : Type.label(s.font), { color: skin.fg }]}>
+        style={[numeral ? readout(s.font) : badge(s.font), { color: skin.fg }]}>
         {label}
       </Text>
     </View>

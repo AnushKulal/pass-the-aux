@@ -2,12 +2,23 @@
  * The one card a screen shows where its content would be — empty, failed, or
  * filtered to nothing.
  *
+ * Built from `design/nocturne/aux-nocturne.dc.html` L272 and L395, which are the
+ * same card twice: the house `--g` recipe at radius 24, a sentence of `ink2`
+ * prose, and a pill CTA that HUGS ITS LABEL rather than spanning the card.
+ *
  * THIS IS THE SHARED ONE. It exists because three screens had each grown their
  * own private `QuietCard` with the same body and slightly different numbers
  * (icon 30 vs 24, title 21 vs 19), and a fourth surface was still drawing the
  * abandoned direction's flush-left bordered block. An empty state is the part
  * of an app a user meets when something has already gone wrong; three dialects
  * of it is three chances to look broken.
+ *
+ * The skin is now `GlassCard` rather than a hand-rolled surface. That is the
+ * point of the change, not a tidy-up: this card used to be a `surface` fill
+ * plus `raisedLarge()` and NO BORDER, which was legible when `surface` was an
+ * opaque grey. `surface` is 5.5% white now, and a translucent fill with a
+ * shadow but no edge reads as flat — the empty state would have been the one
+ * card on the screen that looked broken.
  *
  * Two sizes, because the card has two jobs:
  *   `hero` — stands in for the tallest thing on a screen (the Feed's now-playing
@@ -24,8 +35,9 @@ import type { ReactNode } from 'react';
 import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { AuxButton } from '@/components/ui/aux-button';
+import { GlassCard } from '@/components/ui/glass-card';
 import { useColors } from '@/lib/theme-context';
-import { Radii, Space, Type, raisedLarge, tracking } from '@/lib/theme';
+import { Radii, Rule, Space, Type, tracking } from '@/lib/theme';
 
 export type EmptyStateAction = {
   label: string;
@@ -73,11 +85,20 @@ export function EmptyState({
   const titleSize = TITLE[size];
 
   return (
-    <View style={[styles.root, { backgroundColor: C.surface }, raisedLarge(C), style]}>
+    <GlassCard style={[styles.root, style]}>
+      {/*
+        A WELL, not a plate.
+
+        Artwork inverted in this direction — it is a dark recess with a faint
+        monogram rather than a bright tile — and this stands in for artwork, so
+        it inverts with it. The old `surface3` fill would also have stacked 13%
+        white inside the card's own 5.5% and come out brighter than the title
+        sitting under it, which is the wrong thing to look at first.
+      */}
       <View
         style={[
           styles.tile,
-          { width: tile, height: tile, backgroundColor: C.surface3 },
+          { width: tile, height: tile, backgroundColor: C.bgRecessed, borderColor: C.rule },
         ]}>
         <Icon size={GLYPH[size]} strokeWidth={1.75} color={C.ink3} />
       </View>
@@ -104,11 +125,20 @@ export function EmptyState({
         <View style={styles.actionSlot}>{action}</View>
       ) : primary ? (
         <View style={[styles.actionSlot, styles.actionRow]}>
+          {/*
+            `cream` is the blue primary in this direction — the two tokens
+            resolve to the same value — and `pill` is the shape every CTA in the
+            design takes. Both buttons hug their labels rather than stretching:
+            `AuxButton` already defaults to `alignSelf: 'flex-start'`, which is
+            the design's `inline-flex`, and a full-width button inside a card
+            this small reads as the card's own footer instead of as a choice.
+          */}
           <AuxButton
             label={primary.label}
             onPress={primary.onPress}
             variant="cream"
             size="sm"
+            shape="pill"
             align="center"
           />
           {secondary ? (
@@ -117,23 +147,23 @@ export function EmptyState({
               onPress={secondary.onPress}
               variant="ghost"
               size="sm"
+              shape="pill"
               align="center"
             />
           ) : null}
         </View>
       ) : null}
-    </View>
+    </GlassCard>
   );
 }
 
 const styles = StyleSheet.create({
   root: {
-    padding: Space.xl,
-    borderRadius: Radii.xl,
     alignItems: 'flex-start',
   },
   tile: {
     borderRadius: Radii.lg,
+    borderWidth: Rule.hair,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -142,11 +172,11 @@ const styles = StyleSheet.create({
     marginTop: Space.lg,
   },
   description: {
-    ...Type.body(13.5),
+    ...Type.body(14),
     marginTop: Space.xs,
   },
   actionSlot: {
-    marginTop: Space.xl,
+    marginTop: Space.lg,
   },
   actionRow: {
     flexDirection: 'row',

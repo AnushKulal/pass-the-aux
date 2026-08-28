@@ -131,8 +131,22 @@ jobs:
       # how an old build gets installed while the newest one sits untouched.
       # The "latest" release replaces its asset in place, so the download link
       # never changes and the file on disk is always current.
+      # A MANUAL DISPATCH PUBLISHES TOO, and not only pushes to main.
+      #
+      # Without this a branch build produced an Actions artifact and nothing
+      # else: a zip, behind a GitHub login, on a per-run page. Getting that onto
+      # a phone means signing in on the phone, downloading, extracting, then
+      # installing — which is exactly the friction the "latest" release exists to
+      # remove, and it also leaves the in-app updater blind, because it reads
+      # build-info.json from this release and a branch build never wrote one.
+      #
+      # A manual dispatch is deliberate by definition, so it is a safe thing to
+      # gate on. The cost is real and worth stating: while a branch build is the
+      # newest dispatch, "latest" points at that branch rather than at main, and
+      # every installed app will offer it as an update. Push main again to put
+      # it back.
       - name: Publish to the "latest" release
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -164,10 +178,14 @@ jobs:
           cat build-info.json
 
           gh release delete latest --yes --cleanup-tag 2>/dev/null || true
-          gh release create latest             --title "aux — latest build"             --notes "Built from ${GITHUB_SHA::7} on $(date -u '+%Y-%m-%d %H:%M UTC').
+          gh release create latest             --title "aux — latest build"             --notes "Built from \`${GITHUB_REF_NAME}\` @ ${GITHUB_SHA::7} on $(date -u '+%Y-%m-%d %H:%M UTC').
 
-          Install this one. It is replaced on every push to main, so this link
-          is always the newest build.
+          Install this one. It is replaced by every push to main and by every
+          manual build, so this link is always the newest one published.
+
+          The branch is named above deliberately: a manually dispatched build can
+          come from somewhere other than main, and you should be able to tell
+          what is on your phone without digging through Actions.
 
           **Delete any older aux-*.apk from your phone's Downloads first** —
           Android keeps both and it is easy to install the wrong file."             aux-latest.apk build-info.json

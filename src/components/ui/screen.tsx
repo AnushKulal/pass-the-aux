@@ -1,10 +1,42 @@
+/**
+ * Every route's outer shell.
+ *
+ * Built from `design/nocturne/aux-nocturne.dc.html` — the four screen headers at
+ * L170, L232, L427 and L796, which are identical in structure: `12px 18px` of
+ * padding, a 44px round `--g` button on each end, and NO RULE UNDERNEATH. That
+ * last part is the change. The design contains twelve `border-bottom` hairlines
+ * and every one of them is a row separator inside a card; not one is a chrome
+ * divider across a screen. A header in this direction is separated from the
+ * content below it by the content's own shadow, nothing else.
+ *
+ * The bottom inset is consumed ONLY through `reserveDock`, and only because the
+ * floating nav capsule is positioned against it. Everything else here stays
+ * inset-agnostic: a screen that genuinely reaches the bottom edge for its own
+ * reasons applies useSafeAreaInsets itself.
+ *
+ * `reserveDock` used to pad by a bare constant and under-reserved by exactly the
+ * bottom inset on every device that has one, which put the last row of the list
+ * under the glass. It now asks `useDockReserve()`, which cannot be short.
+ */
+
 import { ArrowLeft } from 'lucide-react-native';
 import { memo, useMemo, useState, type ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useDockReserve } from '@/lib/dock';
+
 import { useColors } from '@/lib/theme-context';
-import { GRID, PointerEvents, Rule, Space, TOUCH_TARGET, Type } from '@/lib/theme';
+import { GRID, PointerEvents, Radii, Rule, Space, TOUCH_TARGET, Type } from '@/lib/theme';
+
+/**
+ * The screen gutter, and `Space` has no step for it — `lg` is 16 and `xl` is 20.
+ * All four artboard headers and all four scroll bodies say 18. Held locally
+ * rather than rounded, because the gutter sets the line length of every screen
+ * in the app and 20 visibly narrows the feed's cards. The token layer wants a
+ * `Space.gutter = 18`; this constant disappears the day it lands.
+ */
+const GUTTER = 18;
 
 export type ScreenProps = {
   children: ReactNode;
@@ -15,19 +47,43 @@ export type ScreenProps = {
   onBack?: () => void;
   /**
    * Overlay the 25px modular grid the whole design is set on. Decorative and
-   * barely visible (`grid` is 4.5% ink) — it belongs on the surfaces that are
+   * barely visible (`grid` is 3% ink) — it belongs on the surfaces that are
    * mostly artwork, like the Session stage, not on every list.
    */
   grid?: boolean;
+  /**
+   * Leave room at the bottom of a `scroll` body for the floating nav capsule.
+   *
+   * The capsule takes NO layout space, so without this the last row of a
+   * scrolling screen inside `(tabs)` sits underneath it — unreadable and
+   * untappable. Every FlatList in the app already pays this itself via
+   * `useDockReserve()`; this is the same reservation for the screens that let
+   * `Screen` own their scroller. Off by default because routes outside the tab
+   * group have no capsule to clear.
+   */
+  reserveDock?: boolean;
+  /**
+   * Paint the app ground behind this screen.
+   *
+   * THE RULE IS POSITIONAL, NOT AESTHETIC: inside `(tabs)` this must be
+   * `false`, everywhere else it must be `true`. The ambient blobs are mounted
+   * ONCE behind the tab navigator, so an opaque `bg` here covers them for that
+   * whole screen — and a covered ground is the failure that takes the glass
+   * with it, because a 5.5%-white card over flat `bg` composites to a grey
+   * plate with nothing behind it (see `GlassCard`). Routes outside the group
+   * have no blobs to reveal and need the fill.
+   *
+   * `true` by default because a missing fill outside the group is instantly
+   * visible, where the reverse mistake is not: a screen INSIDE the group that
+   * forgets to opt out looks completely normal and has simply lost its light.
+   * That is the one to check first when a screen's cards look flat.
+   *
+   * Whichever way this goes, the navigator's own scene background has to agree,
+   * or the problem just moves one layer out.
+   */
+  ground?: boolean;
 };
 
-/**
- * Every route's outer shell.
- *
- * Bottom inset is deliberately not consumed here: screens sit under the tab bar
- * or the docked bar, both of which own their own bottom padding. A screen that
- * genuinely reaches the bottom edge should apply useSafeAreaInsets itself.
- */
 export function Screen({
   children,
   title,
@@ -36,31 +92,22 @@ export function Screen({
   right,
   onBack,
   grid = false,
+  reserveDock = false,
+  ground = true,
 }: ScreenProps) {
   const C = useColors();
+  const dockReserve = useDockReserve();
   const hasHeader = Boolean(title || onBack || right);
 
   return (
-    <SafeAreaView edges={['top', 'left', 'right']} style={[styles.root, { backgroundColor: C.bg }]}>
+    <SafeAreaView
+      edges={['top', 'left', 'right']}
+      style={[styles.root, ground && { backgroundColor: C.bg }]}>
       {grid ? <GridOverlay color={C.grid} /> : null}
 
       {hasHeader ? (
-        <View
-          style={[
-            styles.constrain,
-            styles.header,
-            { borderBottomColor: C.rule },
-            padded && styles.gutter,
-          ]}>
-          {onBack ? (
-            <Pressable
-              onPress={onBack}
-              accessibilityRole="button"
-              accessibilityLabel="Go back"
-              style={({ pressed }) => [styles.back, pressed && styles.backPressed]}>
-              <ArrowLeft size={20} strokeWidth={2} color={C.ink} />
-            </Pressable>
-          ) : null}
+        <View style={[styles.constrain, styles.header, padded && styles.gutter]}>
+          {onBack ? <BackButton onPress={onBack} /> : null}
 
           {title ? (
             <Text numberOfLines={1} style={[styles.title, { color: C.ink }]}>
@@ -77,7 +124,17 @@ export function Screen({
       {scroll ? (
         <ScrollView
           style={styles.flex}
-          contentContainerStyle={[styles.scrollContent, styles.constrain, padded && styles.gutter]}
+          contentContainerStyle={[
+            styles.scrollContent,
+            styles.constrain,
+            padded && styles.gutter,
+            /*
+              Inline rather than a StyleSheet entry, because the value depends on
+              the device inset and a static object cannot carry that. This is the
+              whole reason the old `dockTail` was wrong.
+            */
+            reserveDock ? { paddingBottom: dockReserve } : null,
+          ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
           {children}
@@ -86,6 +143,35 @@ export function Screen({
         <View style={[styles.flex, styles.constrain, padded && styles.gutter]}>{children}</View>
       )}
     </SafeAreaView>
+  );
+}
+
+/**
+ * The back control, and it is a CARD now rather than a bare glyph.
+ *
+ * Every chrome button in the design is the same 44px circle of `--g` behind a
+ * `--gb` hairline (L234 settings, L429 back, L430 invite), pressing to
+ * `surface2`. That matters more here than it looks: on a ground this dark a
+ * bare 20px arrow with nothing behind it stops reading as a target at all, and
+ * the header no longer has a rule under it to imply one.
+ *
+ * No negative margin any more. The circle is a visible object, so its own edge
+ * is what should line up with the gutter, not the optical centre of the arrow.
+ */
+function BackButton({ onPress }: { onPress: () => void }) {
+  const C = useColors();
+
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel="Go back"
+      style={({ pressed }) => [
+        styles.back,
+        { backgroundColor: pressed ? C.surface2 : C.surface, borderColor: C.rule },
+      ]}>
+      <ArrowLeft size={19} strokeWidth={2} color={C.ink} />
+    </Pressable>
   );
 }
 
@@ -153,27 +239,25 @@ const styles = StyleSheet.create({
     maxWidth: 720,
     alignSelf: 'center',
   },
-  /** Every artboard sets its screen gutter to 20, not 16. */
   gutter: {
-    paddingHorizontal: Space.xl,
+    paddingHorizontal: GUTTER,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 54,
+    // The artboard's own `12px … 10px`. Tighter than the 54px minimum this used
+    // to hold, because the 44px button now sets the height on its own.
+    paddingTop: Space.md,
+    paddingBottom: 10,
     gap: Space.md,
-    borderBottomWidth: Rule.hair,
   },
   back: {
     width: TOUCH_TARGET,
     height: TOUCH_TARGET,
+    borderRadius: Radii.pill,
+    borderWidth: Rule.hair,
     alignItems: 'center',
     justifyContent: 'center',
-    // Pulls the optical centre of the arrow back onto the gutter line.
-    marginLeft: -Space.md,
-  },
-  backPressed: {
-    opacity: 0.6,
   },
   title: {
     ...Type.display(22),
@@ -191,6 +275,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingBottom: Space.xxl,
   },
+
   gridLine: {
     position: 'absolute',
   },

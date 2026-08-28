@@ -1,23 +1,49 @@
 /**
- * One direct message, in whichever of the five shapes a DM can take.
+ * One direct message, in whichever of the six shapes a DM can take.
+ *
+ * Source: `design/nocturne/aux-nocturne.dc.html` L744–L777 — the thread's bubble
+ * column and its five attachment shapes.
  *
  * The alignment and the fill are the whole grammar: your own messages are the
- * ACCENT hard against the right edge, theirs a raised `surface` bubble against
- * the left. Both shapes, the day break, the identity line and the stamp come
- * from `@/components/chat/bubble-kit`, which the lounge and Session log render
- * through as well — the two surfaces are one visual language and must stay one.
+ * BLUE primary hard against the right edge, theirs a raised `surface` bubble
+ * against the left. Both shapes, the day break, the identity line and the stamp
+ * come from `@/components/chat/bubble-kit`, which the lounge and Session log
+ * render through as well — the two surfaces are one visual language and must
+ * stay one.
+ *
+ * NOCTURNE MOVED THE OWN-SIDE FILL FROM CORAL TO BLUE, and that reaches in here
+ * twice. Authoring a message is a thing you DID, and things you do are blue;
+ * coral now says only that something is happening right now. Anything drawn on
+ * top of the own-side fill therefore has to be checked against a BLUE field, not
+ * a coral one — see `<VoiceNote>`, whose play disc inverts for exactly this
+ * reason.
  *
  * Kinds, and who draws them:
  *   text   — here
  *   voice  — `<VoiceNote>`
- *   image  — here, a 180px well; the bucket is PRIVATE, so `useSignedUrl`
+ *   image  — here, a well; the bucket is PRIVATE, so `useSignedUrl`
  *   video  — here, the same well with a play badge
  *   file   — here: name, size, type glyph
  *   track  — `<TrackCard>`
  *
+ * The media and file wells are INSET in their bubble rather than bleeding to its
+ * edge the way L759 draws them. Full-bleed needs `overflow:'hidden'` on the
+ * bubble, and on Android a clipping view drops its own `boxShadow` — the whole
+ * thread would lose its lift on one platform only. The card's outer footprint
+ * still matches the artboard (166 + 12 either side = the design's 190).
+ *
  * Grouping is the caller's decision (`showHeader` / `showStamp`), because
  * whether a message starts or ends a run depends on its NEIGHBOURS in an
  * inverted list and this component only ever sees itself.
+ *
+ * THE ENTRANCE IS THE SHARED ONE, DELIBERATELY UNCONFIGURED. A DM thread and a
+ * lounge log are the same object drawn twice — the same `bubble-kit`, the same
+ * run grouping, the same day breaks — so a reader who can tell them apart by
+ * how their messages arrive has found a seam that should not exist.
+ * `useEntrance({ index })` at its defaults is what a chat row gets everywhere:
+ * `auxRow`, an 8px lift over 240ms, 55ms per step. `Stagger.messages` is NOT
+ * borrowed here; that token is the INBOX row's step (see `conversation-row`),
+ * and this is a log, not the inbox.
  */
 
 import { Image } from 'expo-image';
@@ -33,6 +59,7 @@ import {
 } from 'lucide-react-native';
 import { memo, useCallback, useMemo, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import Animated from 'react-native-reanimated';
 
 import {
   Bubble,
@@ -48,15 +75,37 @@ import { TrackCard } from '@/components/dm/track-card';
 import { VoiceNote } from '@/components/dm/voice-note';
 import { BLURHASH_SURFACE } from '@/components/ui';
 import { useSignedUrl, type DmAttachment, type DmMessage } from '@/features/dm';
-import { Duration, Fonts, Radii, Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
+import { useEntrance } from '@/lib/entrance';
+import {
+  DarkPalette,
+  Duration,
+  Fonts,
+  Radii,
+  Rule,
+  Space,
+  TOUCH_TARGET,
+  Type,
+  tracking,
+} from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
-/** The design's photo well. */
-const WELL_WIDTH = 180;
-const WELL_DEFAULT_HEIGHT = 132;
+/**
+ * The photo well, sized so the BUBBLE lands on the artboard's 190px (L759): the
+ * well plus the 12px band the bubble pads it with on either side. The default
+ * height keeps L759's 190×140 proportion for an image whose dimensions the
+ * attachment row never recorded.
+ */
+const WELL_WIDTH = 166;
+const WELL_DEFAULT_HEIGHT = 122;
 /** A panorama must not become a 12px sliver, nor a portrait a whole screen. */
-const WELL_MIN_HEIGHT = 96;
-const WELL_MAX_HEIGHT = 260;
+const WELL_MIN_HEIGHT = 92;
+const WELL_MAX_HEIGHT = 240;
+/**
+ * Concentric with the bubble: a 20px corner minus the 12px band around it. The
+ * radius scale has no 8, and an inner corner ROUNDER than that reads as a
+ * sticker sitting on the bubble rather than a hole cut in it.
+ */
+const WELL_RADIUS = 8;
 
 /** `2.4 MB`. Binary units, one decimal once past a kilobyte. */
 function formatSize(bytes: number | null | undefined): string {
@@ -153,9 +202,24 @@ function MediaWell({
           />
         ) : null}
 
+        {/*
+          A MARKER, not a control, and that is why it is not blue.
+
+          Blue is the action colour, and nothing happens when this is pressed —
+          there is no video player in the app (neither `expo-video` nor
+          `expo-av` is a dependency) and no viewer route to open. A blue play
+          disc would promise playback the build cannot deliver. So it takes the
+          neutral overlay treatment instead and says only "this one moves".
+
+          Pinned to the DARK palette on purpose, exactly as `StatusPill`'s
+          `overlay` tone is: it sits on a photograph, and a photograph does not
+          get lighter because the user switched to light mode. `dock` and not
+          `nav` — this is chrome laid straight ON content with no blur under it,
+          and the translucent one would let the still read through the glyph.
+        */}
         {video ? (
-          <View style={[styles.playBadge, { backgroundColor: C.pill }]}>
-            <Play size={16} strokeWidth={2} color={C.pillInk} fill={C.pillInk} />
+          <View style={[styles.playBadge, { backgroundColor: DarkPalette.dock }]}>
+            <Play size={15} strokeWidth={2} color={DarkPalette.ink} fill={DarkPalette.ink} />
           </View>
         ) : null}
       </View>
@@ -205,6 +269,13 @@ export type MessageBubbleProps = {
   /** Day label to print above this bubble, or null. */
   daySeparator: string | null;
   /**
+   * Position in the log. Drives the entrance stagger, and the list is
+   * `inverted` — so index 0 is the NEWEST message, sitting at the bottom, and
+   * the thread assembles upward from the message you are reading. Straight from
+   * `renderItem`, which already hands it over; nothing derives it.
+   */
+  index?: number;
+  /**
    * The seam for a message-actions sheet (delete lives behind
    * `useDeleteMessage`). Absent here, the bubble simply has no long press.
    */
@@ -218,10 +289,19 @@ function MessageBubbleBase({
   showHeader,
   showStamp = true,
   daySeparator,
+  index = 0,
   onLongPress,
   onOpenProfile,
 }: MessageBubbleProps) {
   const { mine, kind, body } = message;
+
+  /*
+    The whole row arrives as one thing — day break, identity line and bubble
+    together. Animating the bubble alone would leave "Yesterday" and the
+    sender's name already sitting there waiting for their own message.
+  */
+  const entering = useEntrance({ index });
+
   const name = message.author?.display_name?.trim() || message.author?.username || 'Someone';
 
   /*
@@ -279,7 +359,7 @@ function MessageBubbleBase({
   }
 
   return (
-    <View>
+    <Animated.View style={entering}>
       {daySeparator ? <DaySeparator label={daySeparator} /> : null}
 
       {/* The identity line, on the first of the other person's runs only. */}
@@ -317,7 +397,7 @@ function MessageBubbleBase({
           ) : null}
         </View>
       </Pressable>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -330,7 +410,11 @@ export const MessageBubble = memo(MessageBubbleBase);
 const styles = StyleSheet.create({
   well: {
     width: WELL_WIDTH,
-    borderRadius: Radii.md,
+    // WELL_RADIUS (8), not Radii.md (14). The bubble corner is 20 and it pads
+    // this well by 12, so 8 is the concentric inner corner. Radii.md is ROUNDER
+    // than the corner containing it, which is what makes an inset well read as
+    // a sticker stuck onto the bubble instead of a hole cut into it.
+    borderRadius: WELL_RADIUS,
     overflow: 'hidden',
   },
   wellImage: {

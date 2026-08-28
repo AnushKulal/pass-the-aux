@@ -1,25 +1,31 @@
 /**
  * The lounge / Session message bar.
  *
- * The DM composer's bar with the two unwired tiles removed: a recessed field
- * and one raised SEND tile over a hairline. Same 44px geometry, same 14px
- * corner, same inverted-pill send — the two chat surfaces are one visual
- * language, so this file and `@/components/dm/composer` must keep matching.
+ * From `design/nocturne/aux-nocturne.dc.html` L492 (lounge) and L1280
+ * (Session): a floating capsule holding a transparent field and one 44px
+ * gradient send circle. It replaces a full-width bar that sat on the bottom
+ * edge behind a hairline — this one has air on all four sides and reads as an
+ * object over the log rather than a border under it.
  *
- * THE FIELD IS NOT `pressed()`. A 44px well on a dark ground shows only the
- * dark half of the inset pair and reads as dirt; the recipe is for surfaces of
- * about 80px and up. It gets `bgRecessed` and a hairline instead.
+ * THE TWO GROUNDS DRAW THE CAPSULE DIFFERENTLY, AND THE DESIGN IS EXPLICIT.
+ * On the screen it is `--g` + `--gb` + `--sh` — glass, raised. Inside the
+ * Session sheet it is `--aux-bg2` with the same hairline and NO shadow: a
+ * 5.5%-white capsule inside a blurred chrome panel has nothing to be
+ * translucent against, and a drop shadow inside a floating sheet is a shadow
+ * cast by nothing.
  *
- * SEND is the inverted pill and never the accent: in a log the accent means
- * "this message is mine", and it may not be spent twice.
+ * SEND IS THE BLUE GRADIENT, AND IT ALWAYS WAS THE RIGHT COLOUR. Sending is an
+ * action; actions are blue. What changed is that it is now the shared
+ * `CircleIconButton` at tone `pri` rather than a square tile hand-rolled here,
+ * so the send on this bar and the send on the DM bar cannot drift apart again.
  */
 
+import { useQueryClient } from '@tanstack/react-query';
 import { Send } from 'lucide-react-native';
 import { useCallback, useMemo, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   StyleSheet,
   Text,
   TextInput,
@@ -30,8 +36,10 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useSendMessage, type ChatScope } from '@/features/chat/queries';
-import { Radii, Rule, Space, TOUCH_TARGET, Type, dropped } from '@/lib/theme';
+import type { ChatGround } from '@/components/chat/bubble-kit';
+import { CircleIconButton, useToast } from '@/components/ui';
+import { chatKeys, useSendMessage, type ChatScope } from '@/features/chat/queries';
+import { Rule, Space, TOUCH_TARGET, Type, raised } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
 /** Matches the CHECK constraint on messages.body — reject before the round-trip. */
@@ -39,14 +47,35 @@ const MAX_LENGTH = 2000;
 /** A counter that is always on is noise; it only matters once you are near the wall. */
 const COUNTER_FROM = 1900;
 
-const BODY = Type.body(14.5);
+/** L493: `font:400 15px Archivo` in the field. */
+const BODY = Type.body(15);
 const INPUT_PADDING_Y = 12;
-/** The design's 44px bar, which is also the touch floor. */
+/** The design's 44px field, which is also the touch floor. */
 const MIN_INPUT_HEIGHT = TOUCH_TARGET;
 /** Four lines, then the field scrolls instead of eating the whole screen. */
 const MAX_INPUT_HEIGHT = BODY.lineHeight * 4 + INPUT_PADDING_Y * 2;
 
-const TILE = TOUCH_TARGET;
+/** L492: `padding:6px 6px 6px 16px` around the field. */
+const CAPSULE_PAD = 6;
+const CAPSULE_LEAD = Space.lg;
+
+/**
+ * The capsule corner, and a DELIBERATE 28 where the design writes 999.
+ *
+ * At the bar's resting height — 6 + 44 + 6 — those two are the same shape: 28
+ * is exactly half of 56, so a 28 radius IS a pill here. They diverge only once
+ * the field grows to two or three lines, where 999 keeps stretching the corner
+ * with the box and the capsule becomes an oval whose curve eats into its own
+ * 16px left padding, clipping the first character of the top line. 28 stays a
+ * generously rounded rectangle instead.
+ */
+const CAPSULE_RADIUS = 28;
+
+/** The gutter and the drop to the edge, per ground: L492 / L1280. */
+const FRAME: Record<ChatGround, { gutter: number; bottom: number }> = {
+  screen: { gutter: 18, bottom: 14 },
+  sheet: { gutter: Space.lg, bottom: Space.lg },
+};
 
 /** `Type.readout` hands back a readonly fontVariant tuple; TextStyle wants a mutable one. */
 const readout = (size: number): TextStyle => ({
@@ -56,6 +85,8 @@ const readout = (size: number): TextStyle => ({
 
 export type ChatComposerProps = ChatScope & {
   placeholder?: string;
+  /** Screen or Session sheet. See `ChatGround` — it decides the capsule's fill. */
+  ground?: ChatGround;
   /**
    * Distance from the bottom of the screen to the bottom of this composer.
    * Inside the room's bottom sheet the composer is not flush with the window,
@@ -73,6 +104,7 @@ export function ChatComposer({
   loungeId,
   roomId,
   placeholder = 'Message',
+  ground = 'screen',
   keyboardOffset = 0,
   bottomInset,
 }: ChatComposerProps) {
@@ -80,6 +112,8 @@ export function ChatComposer({
   const insets = useSafeAreaInsets();
   const scope = useMemo<ChatScope>(() => ({ loungeId, roomId: roomId ?? null }), [loungeId, roomId]);
   const send = useSendMessage(scope);
+  const client = useQueryClient();
+  const toast = useToast();
 
   const [value, setValue] = useState('');
   const [height, setHeight] = useState(MIN_INPUT_HEIGHT);
@@ -108,8 +142,34 @@ export function ChatComposer({
     */
     setValue('');
     setHeight(MIN_INPUT_HEIGHT);
-    send.mutate(trimmed);
-  }, [canSend, send, trimmed]);
+
+    send.mutate(trimmed, {
+      /*
+        A SEND INTO A LOG THAT NEVER LOADED GOES THROUGH AND SHOWS NOTHING, AND
+        THAT IS WORTH SAYING OUT LOUD.
+
+        Every cache write in `useSendMessage` is guarded `data ? … : data` —
+        correctly, because there is no page array to splice into when the list
+        query failed or has not resolved. The consequence is that the optimistic
+        entry is dropped, the confirmed row is dropped, and the row IS in the
+        database: the field clears, nothing appears, and no error is raised
+        because nothing went wrong. Indistinguishable from a message that was
+        eaten, and unreportable.
+
+        Failures already toast from the mutation itself. This covers the other
+        case — it worked, and you still cannot see it — and it is checked at
+        callback time rather than during render so the bar does not have to
+        subscribe to the log's cache entry to draw itself.
+      */
+      onSuccess: () => {
+        if (client.getQueryData(chatKeys.messages(loungeId, roomId ?? null))) return;
+        toast.show('Sent. The log has not loaded, so it is not on screen.', 'info');
+      },
+    });
+  }, [canSend, client, loungeId, roomId, send, toast, trimmed]);
+
+  const frame = FRAME[ground];
+  const inSheet = ground === 'sheet';
 
   return (
     <KeyboardAvoidingView
@@ -123,17 +183,22 @@ export function ChatComposer({
       keyboardVerticalOffset={keyboardOffset}>
       <View
         style={[
-          styles.bar,
+          styles.frame,
           {
-            backgroundColor: C.bg,
-            borderTopColor: C.rule,
-            paddingBottom: (bottomInset ?? insets.bottom) + Space.md,
+            paddingHorizontal: frame.gutter,
+            paddingBottom: (bottomInset ?? insets.bottom) + frame.bottom,
           },
         ]}>
         <View
           style={[
-            styles.field,
-            { backgroundColor: C.bgRecessed, borderColor: C.rule, height },
+            styles.capsule,
+            {
+              backgroundColor: inSheet ? C.bgRecessed : C.surface,
+              borderColor: C.rule,
+            },
+            // Raised on the page; flat inside the sheet, which is already
+            // floating and casts the only shadow in that stack.
+            inSheet ? null : raised(C),
           ]}>
           <TextInput
             value={value}
@@ -146,9 +211,10 @@ export function ChatComposer({
             // A multiline field already treats Return as a newline; sending is
             // the button's job alone, so submitBehavior stays at its default.
             textAlignVertical="center"
-            selectionColor={C.live}
+            // The caret and the selection band are UI, not a live state — blue.
+            selectionColor={C.pill}
             accessibilityLabel={placeholder}
-            style={[styles.input, { color: C.ink }]}
+            style={[styles.input, { color: C.ink, height }]}
           />
 
           {value.length >= COUNTER_FROM ? (
@@ -158,69 +224,57 @@ export function ChatComposer({
               {remaining}
             </Text>
           ) : null}
-        </View>
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Send message"
-          accessibilityState={{ disabled: !canSend, busy: send.isPending }}
-          disabled={!canSend}
-          onPress={onSend}
-          style={({ pressed }) => [
-            styles.tile,
-            { backgroundColor: pressed ? C.cream : C.pill },
-            dropped(C, 'sm'),
-            !canSend && styles.inert,
-          ]}>
-          <Send size={18} strokeWidth={2.2} color={C.pillInk} />
-        </Pressable>
+          {/*
+            `disabled` rather than hidden. A send button that vanishes on an
+            empty field moves the one control on the bar every time you clear
+            the draft, and the empty state is exactly when someone is hunting
+            for it.
+          */}
+          <CircleIconButton
+            icon={Send}
+            size={44}
+            tone="pri"
+            disabled={!canSend}
+            accessibilityLabel={send.isPending ? 'Sending message' : 'Send message'}
+            onPress={onSend}
+          />
+        </View>
       </View>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  bar: {
-    flexDirection: 'row',
-    // The field grows upward; SEND stays anchored to the bottom edge.
-    alignItems: 'flex-end',
-    gap: 11,
-    paddingHorizontal: Space.lg,
-    paddingTop: Space.md,
-    borderTopWidth: Rule.hair,
+  /** No fill and no hairline: the capsule inside is the whole control. */
+  frame: {
+    paddingTop: Space.sm,
   },
-  field: {
-    flex: 1,
-    minWidth: 0,
+  capsule: {
     flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: Radii.md,
-    // Small recessed things get a hairline, never the inset pair.
+    // The field grows upward; SEND stays anchored to the bottom of the capsule.
+    alignItems: 'flex-end',
+    gap: 9,
+    paddingLeft: CAPSULE_LEAD,
+    paddingRight: CAPSULE_PAD,
+    paddingVertical: CAPSULE_PAD,
+    borderRadius: CAPSULE_RADIUS,
     borderWidth: Rule.hair,
   },
   input: {
     ...BODY,
     flex: 1,
     minWidth: 0,
-    alignSelf: 'stretch',
-    paddingHorizontal: 15,
+    // No horizontal padding of its own — the capsule's 16px lead is the inset,
+    // and doubling it pushes the caret off the left of a one-line draft.
     paddingVertical: INPUT_PADDING_Y,
   },
   counter: {
     // A remaining-character count measures. Tabular figures.
     ...readout(11),
+    // Centred against the capsule's content box rather than pinned to the
+    // bottom with the send: on a three-line draft a bottom-pinned counter sits
+    // under the last line of text and reads as part of the message.
     alignSelf: 'center',
-    paddingRight: Space.md,
-  },
-  tile: {
-    width: TILE,
-    height: TILE,
-    flexShrink: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: Radii.md,
-  },
-  inert: {
-    opacity: 0.45,
   },
 });

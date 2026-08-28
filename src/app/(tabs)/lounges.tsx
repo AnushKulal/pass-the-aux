@@ -1,18 +1,43 @@
 /**
- * Lounges — the communities I belong to. A top-level destination.
+ * Lounges — the communities I belong to.
  *
- * design/v2 "Lounges": a masthead carrying the count and one raised + tile, then
- * raised rows — tag tile, name, one line of counts, and a recessed live pill on
- * the right for the lounges with a Session running. The pill is the only accent
- * on the screen, which is what keeps the red meaning "there is something to walk
- * into".
+ * NOCTURNE HAS NO LOUNGES ARTBOARD, AND THAT IS THE FIRST THING TO KNOW ABOUT
+ * THIS FILE. The direction surfaces lounges as a horizontal strip inside the
+ * Feed (`aux-nocturne.dc.html` L262-274) with a "See all" link, and the bottom
+ * nav spends its fourth cell on Messages instead. This screen keeps its route —
+ * the Feed's link lands here, and so do deep links — it simply lost its slot in
+ * the navigation.
  *
- * This screen used to be reachable only from a left rail that no longer exists,
- * so it was built as a secondary list. It is the third cell in the bottom bar
- * now, which is why the masthead is fixed above the list rather than scrolling
- * with it, and why the empty state is the whole screen rather than a footnote:
- * a brand-new account lands here with nothing, and this is where it finds out
- * what to do about that.
+ * So the row is borrowed rather than transcribed, and it is `LoungeCard`: the
+ * shared component whose own header cites the two places the design DOES draw a
+ * lounge (L268 Explore, L399 the profile's list). It used to be hand-rolled
+ * here, under a comment asserting that `LoungeCard` "still draws the previous
+ * direction's row (radius 22, no border)". That was false — the component had
+ * already been rebuilt for nocturne — and the fork it licensed is why the app
+ * shipped three lounge rows with three different tile radii.
+ *
+ * WHAT THE FORK'S FOOTER RAIL BECAME. The local row carried a bottom rail with
+ * the member count on the left and the coral live state on the right, lifted
+ * from the Feed's lounge tile (L269-272). `LoungeCard` states the same two
+ * facts in its own grammar: the count is the `meta` line under the name in
+ * `ink3`, and the live state is the coral pill in the trailing slot (a number
+ * when there is one to report, a bare dot when a Session is playing to an empty
+ * room). No information was dropped — only a second layout for it.
+ *
+ * WHY THE LIVE STATE IS THE ONLY ACCENT. These are lounges you are already in,
+ * so there is no action to offer per row — the card IS the action. That leaves
+ * coral free to do the one job it has here: say which lounges have something
+ * happening in them right now. No blue appears in the list at all, which is
+ * correct; the only blue on the screen is the empty state's CTA.
+ *
+ * AND THAT JOB WAS BEING DONE WRONG, IN TWO PLACES ON THIS SCREEN. Both the
+ * row's `isLive` and the masthead's "· N live" read `activeSessions > 0`, which
+ * counts rooms that EXIST rather than rooms that are happening. `rooms.is_active`
+ * goes true when a Session row is inserted and stays true until somebody ends
+ * it, so backing straight out of a Session you just started left this screen
+ * claiming a live lounge indefinitely. Both now call `isLoungeLive` from
+ * `@/features/lounges/live`, which is also what the lounge header and the
+ * Session card read — one definition of the word, not three.
  *
  * Redeeming a code lives on Explore, where the design puts it. It stays
  * reachable from the empty state, which is the one moment you have no lounges
@@ -21,7 +46,7 @@
 
 import { router } from 'expo-router';
 import { Plus, Users, WifiOff, type LucideIcon } from 'lucide-react-native';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   FlatList,
   Pressable,
@@ -31,61 +56,48 @@ import {
   View,
   type ListRenderItemInfo,
 } from 'react-native';
-import Animated, {
-  Easing,
-  useAnimatedStyle,
-  useReducedMotion,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
+import Animated from 'react-native-reanimated';
 
 import { JoinCodeModal } from '@/components/lounge/join-code-modal';
 import { LoungeCard, LoungeListSkeleton } from '@/components/lounge/lounge-card';
 import { EmptyState, Screen, Skeleton, useToast } from '@/components/ui';
+import { isLoungeLive } from '@/features/lounges/live';
 import { loungeErrorMessage, useMyLounges, type LoungeSummary } from '@/features/lounges/queries';
-import {
-  Duration,
-  Radii,
-  Space,
-  TOUCH_TARGET,
-  Type,
-  raised,
-  tracking,
-} from '@/lib/theme';
+import { useDockReserve } from '@/lib/dock';
+import { useEntrance } from '@/lib/entrance';
+import { Radii, Rule, Space, TOUCH_TARGET, Type, tracking } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
-const GUTTER = 24;
-const ROW_GUTTER = 14;
-const LIST_TAIL = 48;
+/** 18 in every nocturne artboard. See the note on the same constant in `explore.tsx`. */
+const GUTTER = 18;
 
-/** Matches the row's tile, so the empty card stands where a row would. */
+/*
+  ===================== HOW THIS SCREEN ARRIVES =====================
 
-function useModuleEnter() {
-  const reduced = useReducedMotion();
-  const t = useSharedValue(reduced ? 1 : 0);
+  The third copy of `useModuleEnter` lived here — the Feed and Explore carried
+  the other two — and all three are `useEntrance` now. The copy ran on MOUNT,
+  which in a tab navigator means once per app launch and never again: the
+  screens are kept mounted, so returning to this tab replayed nothing. That is
+  exactly the switch the user was watching. `useEntrance` keys off focus.
 
-  useEffect(() => {
-    if (reduced) {
-      t.value = 1;
-      return;
-    }
-    t.value = withTiming(1, { duration: Duration.enter, easing: Easing.bezier(0.2, 0.8, 0.2, 1) });
-  }, [reduced, t]);
+  One module, one list, the design's own grammar:
 
-  return useAnimatedStyle(() => ({
-    opacity: t.value,
-    transform: [{ translateY: (1 - t.value) * 8 }],
-  }));
-}
+    MODULE  the whole column — masthead, the create button, the list frame. A
+            10px `auxIn` lift on entering the tab.
+    ROWS    `LoungeCard`, staggered by `index` at 55ms a step, so the lounges
+            land one after another rather than all at once.
+
+  The masthead rides the module rather than arriving separately: a title and a
+  count sliding in ahead of the list they describe reads as two events where
+  there is only one. The skeletons and the error card get no entrance at all —
+  a placeholder is something the user is waiting on, and delaying it is the one
+  thing motion must never do.
+*/
 
 /**
- * The screen with no list on it: a raised card standing where the first row
- * would, saying what happened and what to do next.
- */
-/**
- * This screen is where the two-action case earns its keep: a new account with
- * no lounges has two genuinely different routes out — make one, or join one
- * with a code — and neither is a rephrasing of the other.
+ * The screen with no list on it. This is where the two-action case earns its
+ * keep: a new account with no lounges has two genuinely different routes out —
+ * make one, or join one with a code — and neither is a rephrasing of the other.
  *
  * Drawn by `@/components/ui/empty-state`, shared with the Feed and Explore.
  */
@@ -116,7 +128,9 @@ function QuietCard({
 export default function LoungesScreen() {
   const C = useColors();
   const toast = useToast();
-  const moduleStyle = useModuleEnter();
+  /* One arrival for the whole column — see the note above `QuietCard`. */
+  const moduleStyle = useEntrance({ kind: 'module' });
+  const dockReserve = useDockReserve();
 
   const [joinOpen, setJoinOpen] = useState(false);
   const { data, isPending, isError, error, refetch, isRefetching } = useMyLounges();
@@ -134,41 +148,66 @@ export default function LoungesScreen() {
     [toast]
   );
 
-  const renderItem = useCallback(
-    ({ item, index }: ListRenderItemInfo<LoungeSummary>) => (
-      <LoungeCard
-        name={item.lounge.name}
-        iconUrl={item.lounge.icon_url}
-        meta={`${item.memberCount} ${item.memberCount === 1 ? 'member' : 'members'}`}
-        isLive={item.activeSessions > 0}
-        listeners={item.listeners}
-        index={index}
-        accessibilityHint="Opens this lounge"
-        onPress={() => router.push({ pathname: '/lounge/[id]', params: { id: item.lounge.id } })}
-      />
-    ),
-    []
-  );
+  const renderItem = useCallback(({ item, index }: ListRenderItemInfo<LoungeSummary>) => {
+    /*
+      `activeSessions` is deliberately NOT destructured any more. It is the
+      field this row used to light its coral from, and it answers a different
+      question than the one being asked — see the header.
+    */
+    const { lounge, memberCount, listeners } = item;
 
-  /** The masthead's second line is a readout, not a sentence. */
+    return (
+      <LoungeCard
+        name={lounge.name}
+        description={lounge.description.trim()}
+        /*
+          The quiet fact goes in `meta`, in `ink3` at 11px. It is deliberately
+          the softest line in the row: the member count is context, and the
+          coral pill beside it — the thing you actually came to look for — has
+          to win that contest.
+        */
+        meta={`${memberCount} ${memberCount === 1 ? 'member' : 'members'}`}
+        iconUrl={lounge.icon_url}
+        isLive={isLoungeLive(item)}
+        listeners={listeners}
+        index={index}
+        onPress={() => router.push({ pathname: '/lounge/[id]', params: { id: lounge.id } })}
+        accessibilityHint="Opens this lounge"
+      />
+    );
+  }, []);
+
+  /**
+   * The masthead's second line is a readout, not a sentence — so the number in
+   * it has to be one. `isLoungeLive`, the same predicate the rows use: a
+   * masthead saying "2 live" over a list showing no coral was the readout
+   * disagreeing with the thing it was reading out.
+   */
   const summary = useMemo(() => {
     if (isError) return 'Could not reach your lounges';
     const lounges = data ?? [];
     if (lounges.length === 0) return 'No lounges yet';
-    const live = lounges.filter((item) => item.activeSessions > 0).length;
+    const live = lounges.filter(isLoungeLive).length;
     return live > 0 ? `${lounges.length} joined · ${live} live` : `${lounges.length} joined`;
   }, [data, isError]);
 
   return (
-    <Screen padded={false}>
+    /*
+      `ground={false}`, and it is not cosmetic. The ambient blobs are mounted
+      ONCE behind the tab navigator; every card here is 5.5% white and has
+      nothing to show through it unless that ground is visible.
+    */
+    <Screen padded={false} ground={false}>
       <Animated.View style={[styles.flex, moduleStyle]}>
         <View style={styles.masthead}>
           <View style={styles.mastheadText}>
-            <Text style={[styles.title, { color: C.ink }]}>Lounges</Text>
+            <Text accessibilityRole="header" style={[styles.title, { color: C.ink }]}>
+              Lounges
+            </Text>
             {/* A skeleton rather than the word "Loading": the line keeps its
                 height, so the masthead does not reflow when the count lands. */}
             {isPending ? (
-              <Skeleton width={132} height={13} style={styles.summarySkeleton} />
+              <Skeleton width={132} height={13} radius={Radii.sm} style={styles.summarySkeleton} />
             ) : (
               <Text numberOfLines={1} style={[styles.summary, { color: C.ink2 }]}>
                 {summary}
@@ -176,17 +215,23 @@ export default function LoungesScreen() {
             )}
           </View>
 
+          {/*
+            The house chrome button: a 44px CIRCLE of `surface` behind a `rule`
+            hairline, pressing to `surface2` — the same object as the header's
+            back control and the Feed's settings cell (design L234, L429). It
+            was a raised rounded square with no border, which in this direction
+            reads as a flat patch: 5.5% white has no edge of its own, so the
+            border is what makes it a button.
+          */}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Create a lounge"
             onPress={openCreate}
             style={({ pressed }) => [
-              styles.iconTile,
-              { backgroundColor: C.surface },
-              raised(C),
-              pressed && styles.pressed,
+              styles.chromeButton,
+              { backgroundColor: pressed ? C.surface2 : C.surface, borderColor: C.rule },
             ]}>
-            <Plus size={18} strokeWidth={2.5} color={C.ink} />
+            <Plus size={20} strokeWidth={2} color={C.ink} />
           </Pressable>
         </View>
 
@@ -201,7 +246,10 @@ export default function LoungesScreen() {
           </View>
         ) : isPending ? (
           <View style={styles.list}>
-            <LoungeListSkeleton count={4} />
+            {/* `wide` because the real row carries a description line. The
+                skeleton ships beside the row it stands in for, so the two
+                cannot drift apart. */}
+            <LoungeListSkeleton count={4} wide />
           </View>
         ) : (
           <FlatList
@@ -209,7 +257,14 @@ export default function LoungesScreen() {
             keyExtractor={keyExtractor}
             renderItem={renderItem}
             style={styles.flex}
-            contentContainerStyle={styles.listContent}
+            /*
+              The dock reservation is applied INLINE because it depends on the
+              device's bottom inset, which a StyleSheet object cannot carry.
+              This was `Dock.reserve`, a static number that left the last card
+              under the floating nav capsule on every device with a home
+              indicator; `useDockReserve()` does the addition itself.
+            */
+            contentContainerStyle={[styles.listContent, { paddingBottom: dockReserve }]}
             showsVerticalScrollIndicator={false}
             refreshControl={
               <RefreshControl
@@ -217,7 +272,13 @@ export default function LoungesScreen() {
                 onRefresh={() => void refetch()}
                 tintColor={C.ink2}
                 colors={[C.live]}
-                progressBackgroundColor={C.surface}
+                /*
+                  `surfaceSolid`, not `surface`. Android paints this disc behind
+                  the spinner and it sits over whatever is scrolling underneath;
+                  a 5.5%-white fill would let the content read straight through
+                  it. Same hazard as a chip laid over artwork.
+                */
+                progressBackgroundColor={C.surfaceSolid}
               />
             }
             ListEmptyComponent={
@@ -245,9 +306,8 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
   },
-  pressed: {
-    opacity: 0.7,
-  },
+
+  /* ------------------------------------------------------------- masthead */
 
   masthead: {
     flexDirection: 'row',
@@ -255,6 +315,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: Space.md,
     paddingTop: 14,
+    paddingBottom: Space.md,
     paddingHorizontal: GUTTER,
   },
   mastheadText: {
@@ -262,33 +323,40 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   title: {
-    ...Type.display(30),
-    letterSpacing: tracking(30, -0.03),
+    ...Type.display(26),
+    // The artboard's `-.025em`, which sits between `display`'s own steps.
+    letterSpacing: tracking(26, -0.025),
   },
   summary: {
-    ...Type.body(13.5),
-    marginTop: 5,
+    ...Type.body(13),
+    marginTop: 4,
   },
   summarySkeleton: {
     marginTop: 7,
   },
-  iconTile: {
+  chromeButton: {
     width: TOUCH_TARGET,
     height: TOUCH_TARGET,
-    borderRadius: Radii.md,
+    borderRadius: Radii.pill,
+    borderWidth: Rule.hair,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
+  /* ------------------------------------------------------------ the list */
+
   list: {
-    paddingHorizontal: ROW_GUTTER,
-    paddingTop: 24,
+    paddingHorizontal: GUTTER,
+    paddingTop: Space.sm,
   },
+  /*
+    No `gap`. The 12px down the column is `LoungeCard`'s own bottom margin —
+    adding a gap here as well would sum to 24 and pull the list apart.
+    `paddingBottom` is applied at the call site; see the note at the FlatList.
+  */
   listContent: {
     flexGrow: 1,
-    paddingHorizontal: ROW_GUTTER,
-    paddingTop: 24,
-    paddingBottom: LIST_TAIL,
+    paddingHorizontal: GUTTER,
+    paddingTop: Space.sm,
   },
-
 });

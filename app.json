@@ -7,7 +7,7 @@
     "icon": "./assets/images/icon.png",
     "scheme": "aux",
     "userInterfaceStyle": "automatic",
-    "backgroundColor": "#1e2128",
+    "backgroundColor": "#0a0d14",
     "ios": {
       "icon": "./assets/expo.icon",
       "supportsTablet": true
@@ -15,7 +15,7 @@
     "android": {
       "package": "com.anushkulal.aux",
       "adaptiveIcon": {
-        "backgroundColor": "#0f1216",
+        "backgroundColor": "#0a0d14",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -36,10 +36,10 @@
         {
           "image": "./assets/images/splash-icon-light.png",
           "imageWidth": 180,
-          "backgroundColor": "#f3f5f8",
+          "backgroundColor": "#eceef5",
           "dark": {
             "image": "./assets/images/splash-icon.png",
-            "backgroundColor": "#1e2128"
+            "backgroundColor": "#0a0d14"
           }
         }
       ],
@@ -55,13 +55,81 @@
       "eas": {
         "projectId": "3c252219-3619-434b-9ab4-f0931d09722a"
       },
-      "patch": 5,
+      "patch": 13,
       "releaseNotes": [
-        "Server moved to Mumbai — roughly six times faster than before",
-        "You will need to sign in again: this is a new database",
-        "Settings can now check for and install a new app build"
+        "Back from Create account returns to the New here / Already a member choice, instead of dropping you on the login form",
+        "Sign in has a back control when you got there from that choice",
+        "The Android back button steps from the choice back to the intro pages"
       ],
       "changelog": [
+        {
+          "patch": 13,
+          "notes": [
+            "Back from Create account returns to the New here / Already a member choice, instead of dropping you on the login form",
+            "Sign in has a back control when you got there from that choice",
+            "The Android back button steps from the choice back to the intro pages"
+          ]
+        },
+        {
+          "patch": 12,
+          "notes": [
+            "Pressing something now pushes it into the glass instead of just dimming it"
+          ]
+        },
+        {
+          "patch": 11,
+          "notes": [
+            "Everything now moves on springs instead of fixed timings, so things settle rather than finish",
+            "Cards surface into place rather than sliding up the page",
+            "The mark under the navigation slides between tabs instead of blinking across",
+            "Settings > Appearance has a Motion switch: Spring is the new one, Classic is exactly how it was"
+          ]
+        },
+        {
+          "patch": 10,
+          "notes": [
+            "The navigation bar has labels now, and an underline marks the tab you are on",
+            "The app icon is the gradient A, and both it and the splash mark are centred properly",
+            "After the four intro pages you pick a door: new here, or already a member",
+            "The update card no longer draws its buttons in the wrong place",
+            "The banner at the top no longer sits under the status bar"
+          ]
+        },
+        {
+          "patch": 9,
+          "notes": [
+            "Settings now notices a new app build on its own, instead of waiting to be asked"
+          ]
+        },
+        {
+          "patch": 8,
+          "notes": [
+            "The four intro pages are back, and they swipe",
+            "Cards and messages arrive one by one instead of the whole screen cross-fading",
+            "You can tell which tab you are on again, and the plus button no longer crowds the bar",
+            "LIVE only shows when something is actually playing or someone is listening",
+            "Sign in fits on one screen, so Create account is no longer below the fold"
+          ]
+        },
+        {
+          "patch": 7,
+          "notes": [
+            "The app icon is fixed - it was being cropped away by Android before it ever drew",
+            "The plus button in the navigation is a whole circle again, not a clipped one",
+            "Sign in and Create account are separate now, and signing in no longer asks you to build a profile you already have",
+            "Password fields have a show/hide button",
+            "The session's bottom bar swipes up for change lobby and games, and light/dark now fades instead of snapping"
+          ]
+        },
+        {
+          "patch": 6,
+          "notes": [
+            "A new look throughout: deeper background, glass navigation, and one colour reserved for what is live",
+            "Create a session from the button in the middle of the navigation bar",
+            "Mic, deafen and mute-one-person are on the session screen itself, not buried in a sheet",
+            "Direct messages have their own place in the navigation, with an unread count"
+          ]
+        },
         {
           "patch": 5,
           "notes": [

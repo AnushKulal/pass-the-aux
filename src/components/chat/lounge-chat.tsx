@@ -10,7 +10,13 @@ export type LoungeChatProps = {
   bottomInset?: number;
 };
 
-/** Lounge-wide chat: every message with `room_id IS NULL` for this community. */
+/**
+ * Lounge-wide chat: every message with `room_id IS NULL` for this community.
+ *
+ * `ground` is left at its `screen` default here and only here — this log is
+ * drawn straight onto the app ground, so its cards can be the translucent glass
+ * the direction is built on and the ambient blobs bleed through them.
+ */
 export function LoungeChat({ loungeId, keyboardOffset = 0, bottomInset }: LoungeChatProps) {
   return (
     <View style={styles.root}>

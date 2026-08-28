@@ -26,10 +26,102 @@ import { youtubeAdapter } from './youtube-adapter';
  * 'auto' lets a Premium listener with a live device hear the Spotify master.
  * 'youtube' is the escape hatch for people who would rather not have this app
  * hijack the Spotify session they are already using elsewhere.
+ *
+ * STILL TWO VALUES, AND THAT IS A DECISION RATHER THAN AN OVERSIGHT. Account
+ * creation now asks which music service is yours (`MusicService` below), which
+ * looks like a third routing value wanting to be born — 'spotify'. It is not
+ * one, for two reasons:
+ *
+ *   1. Routing genuinely has two outcomes. A preference cannot conjure a
+ *      Premium plan or a live device, so "Spotify when it can actually be
+ *      driven, YouTube when it cannot" is not a new behaviour — it is the
+ *      definition of 'auto'. A 'spotify' value would be a synonym.
+ *   2. `(tabs)/settings/connections` renders this union as a hand-built
+ *      two-segment control with a caption looked up by value. A third value
+ *      would leave that control with nothing selected and an empty caption
+ *      under it — a screen breaking silently because a type grew somewhere
+ *      else.
+ *
+ * `sourcePreferenceForService` below is the seam instead: the account's answer
+ * and the audio routing are allowed to be different vocabularies, and neither
+ * has to lie to keep the other honest.
  */
 export type SourcePreference = 'auto' | 'youtube';
 
 const SOURCE_PREFERENCE_KEY = 'aux:source-preference';
+
+/* ---------------------------------------------------------- music services */
+
+/**
+ * The music service an account calls its own — asked once during account
+ * creation, and the ONE thing profile setup insists on.
+ *
+ * Not the same type as `MusicProvider`, and the difference is the whole point.
+ * `MusicProvider` is the database enum naming a playback backend this app HAS,
+ * so it is exactly 'spotify' | 'youtube'. This names what the listener told us
+ * they use, which has to be able to hold an answer Aux cannot act on yet.
+ *
+ * BE CLEAR ABOUT WHAT EACH ONE ACTUALLY COSTS:
+ *
+ *   'youtube'      No account, no OAuth, nothing to link — YouTube playback in
+ *                  this app is the IFrame player, which never asks anyone to
+ *                  sign in. So "signing in with Google links YouTube" is a UI
+ *                  truth, NOT an auth one: no YouTube link exists in this app to
+ *                  make. What a Google sign-in does is SETTLE THE QUESTION —
+ *                  that user already has a working source, so there is nothing
+ *                  left to ask them.
+ *   'spotify'      A real account, and a real sign-in provider. But signing in
+ *                  with Spotify does NOT by itself give Aux what it needs to
+ *                  drive playback: that comes from the PKCE link in
+ *                  `features/spotify/use-spotify-link`, which asks for playback
+ *                  scopes and has the Edge Function store a refresh token
+ *                  server-side. Supabase's `provider_token` is neither persisted
+ *                  nor refreshed, so it is not a substitute. Until that link is
+ *                  made, a Spotify-signed-in listener hears the same YouTube
+ *                  audio as everyone else — which is exactly what 'auto' does,
+ *                  and why 'auto' is the honest routing answer for them.
+ *   'apple-music'  MODELLED, NOT BUILT. See `MUSIC_SERVICE_SUPPORTED`.
+ */
+export type MusicService = 'youtube' | 'spotify' | 'apple-music';
+
+/**
+ * Whether Aux can actually play from a service today.
+ *
+ * APPLE MUSIC IS FALSE, AND ON ANDROID IT STAYS FALSE. MusicKit ships for iOS
+ * and the web only, there is no Expo module wrapping it, and Supabase has no
+ * apple-music auth provider — so there is neither a sign-in to offer nor an
+ * adapter to write. It is in the union anyway so the picker can show it as a
+ * known, unavailable answer instead of pretending the option does not exist,
+ * and so that the day an adapter appears the type does not have to change
+ * underneath every consumer.
+ *
+ * Anything that lets a person choose a service MUST refuse a false entry.
+ */
+export const MUSIC_SERVICE_SUPPORTED: Record<MusicService, boolean> = {
+  youtube: true,
+  spotify: true,
+  'apple-music': false,
+};
+
+/**
+ * A `Record` rather than a `switch`, so adding a service is a compile error
+ * here until someone decides how its audio is routed.
+ */
+const SERVICE_SOURCE: Record<MusicService, SourcePreference> = {
+  youtube: 'youtube',
+  // Not a placeholder. 'auto' already means "Spotify when this device can be
+  // driven by it, YouTube when it cannot", which is the only promise worth
+  // making to someone who has said Spotify is theirs but may be on a free plan.
+  spotify: 'auto',
+  // An Apple Music listener has no Spotify to control, so 'auto' resolves to
+  // YouTube for them today — and stays correct if they ever link Spotify too.
+  'apple-music': 'auto',
+};
+
+/** The service a listener claims, translated into how this store routes audio. */
+export function sourcePreferenceForService(service: MusicService): SourcePreference {
+  return SERVICE_SOURCE[service];
+}
 
 /** Callbacks the room screen wires in; kept out of state so they never re-render. */
 export type RoomHooks = {
@@ -63,6 +155,22 @@ export type PlaybackStore = {
   detach: () => void;
   resync: () => Promise<void>;
   setSourcePreference: (preference: SourcePreference) => void;
+  /**
+   * Apply the routing a music service implies — but only if nobody has answered
+   * this question already.
+   *
+   * Called after a sign-in, where the service is DERIVED from the identity
+   * provider rather than chosen. A derived answer must never stamp on a stored
+   * one: that one was made by a person in Settings -> Connections, and undoing
+   * it silently on the next cold start is the sort of bug nobody reports because
+   * nobody can reproduce it. An explicit pick goes through
+   * `setSourcePreference`, which does overwrite, because there the person IS
+   * answering.
+   *
+   * Idempotent, and a no-op once anything else has settled the preference this
+   * session — safe to call from an effect on every launch.
+   */
+  adoptServiceDefault: (service: MusicService) => Promise<void>;
   clearError: () => void;
 };
 
@@ -330,6 +438,43 @@ export const usePlayback = create<PlaybackStore>((set, get) => {
       // Apply immediately: changing this mid-Session should move the audio, not
       // wait for the next track.
       void get().resync();
+    },
+
+    async adoptServiceDefault(service) {
+      /*
+        Somebody has already answered this session — `hydratePreference` read a
+        value off disk, or `setSourcePreference` took an explicit choice — so
+        what is in memory is authoritative and this call has nothing to add.
+
+        THE GUARD IS NOT AN OPTIMISATION, IT CLOSES A RACE. The write in
+        `setSourcePreference` is fire-and-forget, so re-reading the key here can
+        return the value BEFORE that write lands and then apply it over the top:
+        pick Spotify, change your mind to YouTube, and the derived default would
+        quietly put you back on 'auto'. Setting the flag before the first await
+        also makes two concurrent adoptions idempotent.
+      */
+      if (preferenceHydrated) return;
+      preferenceHydrated = true;
+
+      let stored: string | null = null;
+      try {
+        stored = await AsyncStorage.getItem(SOURCE_PREFERENCE_KEY);
+      } catch {
+        // A read failure is indistinguishable from "never answered", and
+        // treating it as answered would leave the derived default unset.
+        stored = null;
+      }
+
+      // Something is on disk: that is the answer, whoever gave it. Adopt it so a
+      // cold start that lands here before any room still routes correctly.
+      if (stored === 'auto' || stored === 'youtube') {
+        set({ sourcePreference: stored });
+        return;
+      }
+
+      const preference = sourcePreferenceForService(service);
+      set({ sourcePreference: preference });
+      void AsyncStorage.setItem(SOURCE_PREFERENCE_KEY, preference).catch(() => undefined);
     },
 
     clearError() {
