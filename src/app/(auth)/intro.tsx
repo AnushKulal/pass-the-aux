@@ -63,6 +63,7 @@ import { router } from 'expo-router';
 import { ArrowLeft, ArrowRight } from 'lucide-react-native';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  BackHandler,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -188,6 +189,28 @@ export default function IntroScreen() {
    */
   const [stage, setStage] = useState<'deck' | 'fork'>('deck');
 
+  /**
+   * Android's hardware Back, on the fork, returns to the deck.
+   *
+   * The fork is a STAGE of this screen rather than a route, so the system has
+   * no history entry for it and Back would otherwise skip straight out of the
+   * intro — past a tour the user is still in the middle of, and past the only
+   * control that offers the other door. The on-screen back tile already does
+   * this; the hardware button has to agree with it or the two disagree about
+   * what "back" means on the same screen.
+   *
+   * Returning true means handled. On the deck it returns false so Back keeps
+   * its default meaning and can still leave the app.
+   */
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (stage !== 'fork') return false;
+      setStage('deck');
+      return true;
+    });
+    return () => sub.remove();
+  }, [stage]);
+
   useEffect(() => {
     let cancelled = false;
     void AsyncStorage.getItem(SEEN_KEY)
@@ -216,15 +239,28 @@ export default function IntroScreen() {
    * a form for an account they do not have, and the door out of that — the
    * secondary link — went to exactly the same place.
    *
-   * Its two callers are now the fork's two cards, and this is still the only
-   * place the seen-flag is written: whichever door you take, the deck does not
-   * come back. That is the invariant, not a convenience — a person who picks a
-   * door, lands on a form and taps Back must get the form's own answer, never
-   * four pages of pitch a second time.
+   * Its two callers are the fork's two cards, and this is still the only place
+   * the seen-flag is written: whichever door you take, the deck does not come
+   * back.
+   *
+   * PUSH, NOT REPLACE, AND THAT WAS A REAL BUG. This used `router.replace`,
+   * reasoning that someone who has chosen a door should never be shown four
+   * pages of pitch again. The reasoning was right and the mechanism was wrong:
+   * `replace` removes this screen from the stack, so `create-account`'s Back —
+   * `if (router.canGoBack()) router.back(); else router.replace('/sign-in')` —
+   * found nothing behind it and fell through to SIGN IN. Choosing "New to Aux"
+   * and changing your mind was therefore impossible: Back took you to the login
+   * form rather than to the fork you had just been standing on.
+   *
+   * With `push` the intro stays on the stack, so Back returns here — and
+   * returns to the FORK rather than the deck, because a pushed screen is not
+   * unmounted and `stage` is still 'fork'. The original invariant survives
+   * intact: the deck does not come back, and the mount effect that redirects a
+   * returning user past the intro cannot fire, because there is no remount.
    */
   const leave = useCallback((to: Door) => {
     void AsyncStorage.setItem(SEEN_KEY, '1').catch(() => undefined);
-    router.replace(to);
+    router.push(to);
   }, []);
 
   /* ----------------------------------------------------------------- pager */

@@ -53,6 +53,7 @@ import {
   View,
 } from 'react-native';
 import Animated from 'react-native-reanimated';
+import { ArrowLeft } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
@@ -65,7 +66,7 @@ import { Wordmark } from '@/components/shell/wordmark';
 import { useToast } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { supabase } from '@/lib/supabase';
-import { Fonts, Radii, Rule, Space, Type, tracking } from '@/lib/theme';
+import { Fonts, Radii, Rule, Space, Type, raised, tracking } from '@/lib/theme';
 import { useColors } from '@/lib/theme-context';
 
 // Hands the redirect URL back to `openAuthSessionAsync` and closes the popup.
@@ -108,6 +109,11 @@ const TITLE = 26;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function SignInScreen() {
+  /*
+    Whether this screen was pushed (from the intro's fork) or replaced onto
+    (a returning launch). Decides whether a back control can exist at all.
+  */
+  const canLeave = router.canGoBack();
   const C = useColors();
   const toast = useToast();
   const enterStyle = useEnterStyle();
@@ -223,6 +229,37 @@ export default function SignInScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
           <Animated.View style={[styles.column, enterStyle]}>
+            {/*
+              ONLY WHEN THERE IS SOMEWHERE TO GO, which is why it is conditional
+              rather than always drawn.
+
+              This screen is reached two ways. From the intro's fork it is
+              PUSHED, so the fork is behind it and someone who picked "Already a
+              member" can change their mind — which they could not before, and
+              is the whole reason this exists. On a returning launch the intro
+              REPLACES itself with this screen, so there is nothing behind it and
+              a back control would either do nothing or drop the user out of the
+              app entirely.
+
+              `canGoBack()` is the honest test for which of the two happened.
+            */}
+            {canLeave ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Back"
+                onPress={() => router.back()}
+                // 40px tile, 44px target — hitSlop rather than a bigger box, so
+                // the chrome matches `create-account` exactly.
+                hitSlop={4}
+                style={({ pressed }) => [
+                  styles.back,
+                  { backgroundColor: pressed ? C.surface2 : C.surface, borderColor: C.rule },
+                  raised(C),
+                ]}>
+                <ArrowLeft size={17} strokeWidth={2.2} color={C.ink} />
+              </Pressable>
+            ) : null}
+
             <View style={styles.brand}>
               <Wordmark size={LOGO} />
 
@@ -522,6 +559,16 @@ const styles = StyleSheet.create({
   },
   content: {
     flexGrow: 1,
+  },
+  back: {
+    width: 40,
+    height: 40,
+    alignSelf: 'flex-start',
+    borderRadius: Radii.pill,
+    borderWidth: Rule.hair,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 18,
   },
   column: {
     flex: 1,

@@ -55,11 +55,21 @@
       "eas": {
         "projectId": "3c252219-3619-434b-9ab4-f0931d09722a"
       },
-      "patch": 12,
+      "patch": 13,
       "releaseNotes": [
-        "Pressing something now pushes it into the glass instead of just dimming it"
+        "Back from Create account returns to the New here / Already a member choice, instead of dropping you on the login form",
+        "Sign in has a back control when you got there from that choice",
+        "The Android back button steps from the choice back to the intro pages"
       ],
       "changelog": [
+        {
+          "patch": 13,
+          "notes": [
+            "Back from Create account returns to the New here / Already a member choice, instead of dropping you on the login form",
+            "Sign in has a back control when you got there from that choice",
+            "The Android back button steps from the choice back to the intro pages"
+          ]
+        },
         {
           "patch": 12,
           "notes": [
