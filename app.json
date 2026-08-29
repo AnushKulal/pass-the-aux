@@ -53,20 +53,26 @@
       },
       "patch": 23,
       "releaseNotes": [
-        "Speaker mode: turn off Audio on this phone and it becomes a remote - you can queue and chat, and the music comes from whoever has the speaker",
-        "With audio off nothing loads at all, so no adverts, no buffering and no battery spent on a phone that is not playing",
-        "It resets to on when you leave a Session, so nobody stays silent by accident"
+        "A track that would not play blamed itself. An uncomputable position was reaching the player as NaN, and YouTube answered with an error the app reported as an invalid video id",
+        "A bad clock and a bad track now say which one they are"
       ],
       "changelog": [
         {
           "patch": 23,
+          "notes": [
+            "A track that would not play blamed itself. An uncomputable position was reaching the player as NaN, and YouTube answered with an error the app reported as an invalid video id",
+            "A bad clock and a bad track now say which one they are"
+          ]
+        },
+        {
+          "patch": 22,
           "notes": [
             "Speaker mode: turn off Audio on this phone and it becomes a remote - you can queue and chat, and the music comes from whoever has the speaker",
             "With audio off nothing loads at all, so no adverts, no buffering and no battery spent on a phone that is not playing",
             "It resets to on when you leave a Session, so nobody stays silent by accident"
           ]
         },
-        {
+{
           "patch": 21,
           "notes": [
             "Pause works. Android was dropping every play/pause command the player was sent - they were delivered to the wrong place in the page and silently vanished",
