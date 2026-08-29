@@ -110,9 +110,19 @@ const MESSAGE_BRIDGE = `
   (function () {
     if (window.__auxMessageBridge) { return; }
     window.__auxMessageBridge = true;
+
     document.addEventListener('message', function (event) {
+      console.log('[aux] document-message ' + event.data);
       window.dispatchEvent(new MessageEvent('message', { data: event.data }));
     });
+
+    // Logged AFTER the forward above and after the page's own handler, so this
+    // reports what actually reached the place the player is driven from.
+    window.addEventListener('message', function (event) {
+      console.log('[aux] window-message ' + event.data);
+    });
+
+    console.log('[aux] bridge installed, player=' + (typeof window.player));
   })();
   true;
 `;
