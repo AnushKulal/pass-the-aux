@@ -133,6 +133,19 @@ it with `adb logcat`, not with the bundler. Fixed in patch 15 by giving the nav
 capsule the only target and letting the return bar fall back to a solid capsule
 on Android.
 
+**Android never blurs, whatever expo-blur is asked for.** Measured on the
+device: body text crossing the nav capsule's edge is equally sharp inside and
+outside it. The frost on Android is OPACITY — `C.dock`, painted on the view
+itself — and `C.nav` is only correct where a real blur sits under it (iOS, web).
+
+**`overflow: 'hidden'` turns `boxShadow` into a hard-edged rectangle** on
+Android. The clip cuts the outset shadow instead of letting it fade, which is
+why both bottom bars had a grey slab under them while the Feed's cards — same
+shadow numbers, no clip — were soft. `floating()` returns `elevation` there
+instead; it is drawn by the parent from the view's outline, so the child's clip
+cannot reach it. Elevation needs a non-transparent background on the same view
+or there is no outline and no shadow at all.
+
 **Reanimated layout animations render invisible on web.** `entering={FadeIn}`
 marks a view `visibility: hidden` until its animation runs, and on
 react-native-web it never runs — leaving content that reports correct colour,
