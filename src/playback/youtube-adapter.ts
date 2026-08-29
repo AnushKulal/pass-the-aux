@@ -201,7 +201,33 @@ const RATE_MAX = 2;
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 /** Rounded to ms precision: the native host interpolates this into injected JS. */
-const toSeconds = (ms: number) => Math.round(Math.max(0, ms)) / 1000;
+/**
+ * Milliseconds to the seconds the IFrame API wants, WITH A FINITE GUARD.
+ *
+ * `Math.max(0, NaN)` is `NaN` and `Math.round(NaN)` is `NaN`, so this used to
+ * pass a non-finite position straight through to `player.seekTo(NaN, true)` —
+ * and the API answers that with error 2, `invalid_parameter`, which this file
+ * maps to "That YouTube video id is not valid." A bad CLOCK therefore reported
+ * itself as a bad TRACK, which is about as misleading as an error message gets.
+ *
+ * Zero is the right fallback: a position nobody can compute is the start of the
+ * song, and the drift loop corrects from there within one tick. The upstream
+ * arithmetic producing a non-finite number is still a bug, but the player is
+ * not the place to discover it.
+ */
+const toSeconds = (ms: number) => (Number.isFinite(ms) ? Math.round(Math.max(0, ms)) / 1000 : 0);
+
+/**
+ * Does this look like a YouTube video id at all?
+ *
+ * Deliberately loose. Ids are conventionally 11 characters of
+ * `[A-Za-z0-9_-]`, but that is a convention rather than a guarantee, and
+ * rejecting a valid id would be worse than accepting a doubtful one. What this
+ * catches is the failure that actually happens: an empty string, or a full
+ * watch URL stored where an id belongs — both of which reach YouTube as error
+ * 2 and come back wearing the same message as a genuine bad id.
+ */
+const looksLikeVideoId = (id: string) => /^[A-Za-z0-9_-]{5,20}$/.test(id);
 
 export class YouTubeAdapter implements PlaybackAdapter {
   readonly provider: MusicProvider = 'youtube';
@@ -229,6 +255,20 @@ export class YouTubeAdapter implements PlaybackAdapter {
       throw new PlaybackError(
         'not_playable',
         `The YouTube adapter was handed a ${ref.provider} track.`,
+        false
+      );
+    }
+
+    /*
+      SAY WHICH THING IS WRONG. YouTube reports a malformed id and a malformed
+      position with the same error 2, so without this check the queue row and
+      the clock are indistinguishable from the Session screen — and the message
+      the user gets blames the track either way.
+    */
+    if (!looksLikeVideoId(ref.providerId)) {
+      throw new PlaybackError(
+        'not_playable',
+        `The stored YouTube id for this track is not usable: "${ref.providerId}".`,
         false
       );
     }

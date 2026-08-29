@@ -51,7 +51,7 @@
       "eas": {
         "projectId": "3c252219-3619-434b-9ab4-f0931d09722a"
       },
-      "patch": 22,
+      "patch": 23,
       "releaseNotes": [
         "Speaker mode: turn off Audio on this phone and it becomes a remote - you can queue and chat, and the music comes from whoever has the speaker",
         "With audio off nothing loads at all, so no adverts, no buffering and no battery spent on a phone that is not playing",
@@ -59,7 +59,7 @@
       ],
       "changelog": [
         {
-          "patch": 22,
+          "patch": 23,
           "notes": [
             "Speaker mode: turn off Audio on this phone and it becomes a remote - you can queue and chat, and the music comes from whoever has the speaker",
             "With audio off nothing loads at all, so no adverts, no buffering and no battery spent on a phone that is not playing",
