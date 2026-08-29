@@ -204,8 +204,10 @@ export function useRoom(roomId: string | null) {
   return useQuery({
     queryKey: roomKeys.detail(roomId ?? 'none'),
     enabled: Boolean(roomId),
-    // The realtime channel in use-room-sync is the only writer after the first
-    // fetch; refetching on top of it would just race the socket.
+    // The realtime channel in `SessionProvider` (@/lib/session) is the only
+    // writer after the first fetch; refetching on top of it would just race the
+    // socket. It outlives the Session screen, so a minimised Session's row keeps
+    // being written and this cache stays fresh with nothing rendering it.
     staleTime: Infinity,
     queryFn: async (): Promise<RoomRow> => {
       if (!roomId) throw new Error('No Session id.');

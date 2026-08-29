@@ -155,9 +155,18 @@
  *                           two dead `Soon` rows; they are now two of the
  *                           three modes on a real switch
  *   · Game table          — LOBBY GAMES, now an actual table
- *   · Leave               — unchanged, and finally drawn in `danger` rather
- *                           than coral. Leaving is destruction; coral is
- *                           state. The old row broke the accent rule.
+ *   · Leave               — drawn in `danger` rather than coral. Leaving is
+ *                           destruction; coral is state. The old row broke the
+ *                           accent rule.
+ *
+ * LEAVE IS NO LONGER THE SAME THING AS PRESSING BACK, which is the one part of
+ * this file's wiring that has changed since it was written. Both `onLeave`
+ * props here were handed the Session screen's back handler, and that was
+ * correct at the time: membership was a side effect of that screen being
+ * mounted, so navigating away ended the Session whatever the button was called.
+ * The lifecycle moved to `SessionProvider` (@/lib/session); back now minimises,
+ * and `onLeave` is the only thing left that ends anything. Neither control in
+ * here calls it directly — the screen puts a `ConfirmDialog` in front of both.
  * CAMERA and Voice settings are new, from the design. Camera has no transport,
  * so it says so instead of pretending.
  *
@@ -230,7 +239,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ChangeLobbyPanel,
   LobbyModeConfirm,
-  LobbyModePicker,
   lobbyModeLabel,
   lobbyModeName,
   type LobbyMode,
@@ -258,6 +266,7 @@ import {
   sheetShadow,
   tracking,
 } from '@/lib/theme';
+import { useActiveSource } from '@/features/tracks/active-source';
 import { useColors, useTheme } from '@/lib/theme-context';
 
 /**
@@ -279,7 +288,7 @@ type Panel = 'controls' | 'change' | 'games' | 'table';
  * them is edited.
  *
  * IT IS A BACKSTOP, NOT THE UI. None of the three should ever reach a refusal:
- * `ChangeLobbyPanel` disables a passenger's rows, `LobbyModePicker` draws a
+ * `ChangeLobbyPanel` disables a passenger's rows, and the picker that used to
  * passenger three pieces of text with no `Pressable` in them, and SHARE opens
  * the panel for a passenger instead of proposing anything. The toast is what
  * happens if a future control forgets — which is precisely the kind of thing
@@ -340,6 +349,16 @@ export type LobbySheetBodyProps = {
   /** Session chat. Not in the artboard's drawer, kept because nothing else reaches it. */
   onChat: () => void;
   onAddTrack: () => void;
+  /**
+   * Actually leave the Session — the only thing in the app that ends one.
+   *
+   * IT USED TO BE THE SCREEN'S BACK HANDLER, and that was honest at the time:
+   * membership was a side effect of the Session screen being mounted, so
+   * navigating away and leaving were the same operation. They are not any more
+   * (see @/lib/session), which turns this into a one-way door and makes it the
+   * caller's job to ASK before calling it. `src/app/room/[id].tsx` puts a
+   * `ConfirmDialog` in front of both this and the dock's LEAVE cell.
+   */
   onLeave: () => void;
   /** The roster, for game seats and viewers. */
   people: readonly GamePerson[];
@@ -506,6 +525,13 @@ export const LobbySheetBody = memo(function LobbySheetBody({
     forget one. The branch picks a BODY; the tail renders it with the dialog
     beside it, exactly once.
   */
+  /*
+    Uppercased to sit in the same tracked readout as the mode and the count.
+    `label` is a sentence ("Playing through Spotify"); this line is a row of
+    facts, so it takes the provider alone.
+  */
+  const sourceReadout = useActiveSource().provider === 'spotify' ? 'VIA SPOTIFY' : 'VIA YOUTUBE';
+
   let body: ReactNode;
 
   if (shown === 'change') {
@@ -543,24 +569,30 @@ export const LobbySheetBody = memo(function LobbySheetBody({
     body = (
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.body}>
         {/*
-          THE FIRST THING IN VIEW AFTER ONE SWIPE, and that placement is the
-          entire answer to "why is change lobby so hard". In a sheet the modes
-          are behind a tile; in the dock they are the headline. The tile below
-          survives because the picker is one word per option and the panel it
-          opens is three paragraphs — the picker is for someone who already
-          knows which mode they want.
+          A READOUT, NOT A PICKER, AND THE PICKER THAT WAS HERE IS DELETED.
 
-          IT IS A PICKER AND NO LONGER A SWITCH, which is the difference the
-          user asked for: choosing here proposes, and `LobbyModeConfirm` at the
-          bottom of this component is what actually moves the room.
+          `LobbyModePicker` drew the three modes as choices at the top of this
+          panel, directly above a CHANGE LOBBY tile that opens a panel offering
+          the same three. The comment that stood here defended keeping both — the
+          picker for someone who knows what they want, the panel for someone who
+          needs the explanation — and that reasoning is not unreasonable. It is
+          still two controls for one decision, sitting a thumb apart, and it was
+          reported as exactly that: "the change lobby does the same work then why
+          duplicate work".
+
+          So the mode is now a FACT on this line and CHANGE LOBBY is the only way
+          to alter it. That is also where the two-step confirm lives, which is
+          the behaviour that was asked for — a mode change should be deliberate,
+          and one of these two paths was a single tap.
+
+          The source rides on the same line. Which service the audio is coming
+          out of has never been visible anywhere in the app, which is most of why
+          the whole cross-provider design reads as unimplemented — see
+          `@/features/tracks/active-source`.
         */}
-        {docked ? (
-          <LobbyModePicker mode={activeMode} canChange={isHost} onRequest={requestMode} />
-        ) : (
-          <Text style={[readout(10), { color: C.ink3 }]}>
-            {lobbyModeLabel(activeMode)} · {people.length} LISTENING
-          </Text>
-        )}
+        <Text style={[readout(10), { color: C.ink3 }]}>
+          {lobbyModeLabel(activeMode)} · {people.length} LISTENING · {sourceReadout}
+        </Text>
 
         {/*
           The 2×2 grid. Two rows of two rather than a wrapping flex row, because
@@ -900,6 +932,11 @@ export type SessionDockProps = {
   onQueue: () => void;
   onChat: () => void;
   onAddTrack: () => void;
+  /**
+   * Actually leave the Session. The LEAVE cell is the ONE control in the dock
+   * that ends anything — back and the return bar keep the Session alive now —
+   * so the caller is expected to ask first. See the note on the cell itself.
+   */
   onLeave: () => void;
   /** The roster, for the game table's seats and viewers. */
   people: readonly GamePerson[];
@@ -1311,13 +1348,31 @@ export const SessionDock = memo(function SessionDock({
               }
               onPress={handleShare}
             />
+            {/*
+              THE ONLY WAY OUT OF A SESSION, AND THAT IS NEW.
+
+              This cell used to be wired to the screen's back handler, because
+              back and leave were the same operation — membership died with the
+              screen. Now back MINIMISES and this is the one control in the app
+              that ends a Session, which is exactly the change that earns it a
+              confirm. The dialog is the caller's (`src/app/room/[id].tsx`); the
+              hint says so, on the same rule the SHARE cell above already
+              follows — a control that is about to ask should say it is going
+              to, so nobody braces for an instant exit that does not come.
+
+              It deliberately does NOT collapse the dock first, where QUEUE,
+              CHAT and ADD A TRACK all do. Those open bottom sheets, and two
+              bottom sheets arguing is what that rule exists to prevent; a
+              centred dialog has no such quarrel, and cancelling it should put
+              the user back on the panel they were reading rather than shut it.
+            */}
             <DockCell
               icon={LogOut}
               label="LEAVE"
               // `danger`, never coral. Leaving is destruction, and the accent
               // rule reserves exactly one register for that.
               tone="danger"
-              hint="Leave the Session"
+              hint="Leave the Session. You will be asked to confirm"
               onPress={onLeave}
             />
           </View>

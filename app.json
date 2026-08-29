@@ -55,13 +55,25 @@
       "eas": {
         "projectId": "3c252219-3619-434b-9ab4-f0931d09722a"
       },
-      "patch": 13,
+      "patch": 14,
       "releaseNotes": [
-        "Back from Create account returns to the New here / Already a member choice, instead of dropping you on the login form",
-        "Sign in has a back control when you got there from that choice",
-        "The Android back button steps from the choice back to the intro pages"
+        "Back no longer leaves a Session - it minimises to a bar above the navigation, and only Leave ends it",
+        "The Session says which service your audio is coming from, and whether minimising will keep it playing",
+        "Changing the lobby mode lives in one place now, with a confirm, instead of two controls a thumb apart",
+        "Settings shows what is in a new Android build before you download it",
+        "Opening the app hands off from the splash instead of cutting to it"
       ],
       "changelog": [
+        {
+          "patch": 14,
+          "notes": [
+            "Back no longer leaves a Session - it minimises to a bar above the navigation, and only Leave ends it",
+            "The Session says which service your audio is coming from, and whether minimising will keep it playing",
+            "Changing the lobby mode lives in one place now, with a confirm, instead of two controls a thumb apart",
+            "Settings shows what is in a new Android build before you download it",
+            "Opening the app hands off from the splash instead of cutting to it"
+          ]
+        },
         {
           "patch": 13,
           "notes": [

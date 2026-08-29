@@ -27,6 +27,16 @@ import {
  */
 const AVAILABILITY_TTL_MS = 30_000;
 
+/**
+ * Why Spotify can or cannot drive playback right now.
+ *
+ *   not-linked   no Spotify account attached
+ *   not-premium  attached, but `/me/player/play` is Premium-only and 403s
+ *   no-device    Premium, but nothing is open for Aux to steer
+ *   ready        Spotify will play this
+ */
+export type SpotifyAvailability = 'not-linked' | 'not-premium' | 'no-device' | 'ready';
+
 /** Slow on purpose: this poll exists only to notice a track ending. */
 const END_POLL_INTERVAL_MS = 5_000;
 
@@ -133,6 +143,29 @@ export class SpotifyAdapter implements PlaybackAdapter {
   async isAvailable(): Promise<boolean> {
     const snapshot = await this.getSnapshot();
     return snapshot.linked && snapshot.premium && snapshot.devices.some((d) => d.is_active);
+  }
+
+  /**
+   * WHY `isAvailable()` answered the way it did.
+   *
+   * The routing decision is invisible in the running app: audio comes out of
+   * Spotify or it does not, and when it does not there is nothing saying
+   * whether the account is unlinked, not Premium, or simply has no Spotify open
+   * to steer. The whole cross-provider design ends up looking unimplemented
+   * because its most common outcome is a silent fallback.
+   *
+   * This exists so the UI can say which. It reads the SAME snapshot
+   * `isAvailable()` does rather than re-querying, because two functions
+   * computing "can Spotify play" from separate reads is how they come to
+   * disagree — and a source indicator that contradicts what is actually
+   * happening would be worse than no indicator.
+   */
+  async describeAvailability(): Promise<SpotifyAvailability> {
+    const snapshot = await this.getSnapshot();
+    if (!snapshot.linked) return 'not-linked';
+    if (!snapshot.premium) return 'not-premium';
+    if (!snapshot.devices.some((d) => d.is_active)) return 'no-device';
+    return 'ready';
   }
 
   /** The device commands should target, if we know of one. */

@@ -34,10 +34,14 @@
  *     case `listeners` alone would call dead — the timeline is still running
  *     and whoever walks in next lands mid-track.
  *
- *   `room_participants`  — who is in the room RIGHT NOW. `use-room-sync` upserts
- *     your row on entering the Session screen and deletes it on the way out, so
- *     the count is presence, not history. It is what makes a room where three
+ *   `room_participants`  — who is in the room RIGHT NOW. `SessionProvider`
+ *     (@/lib/session) upserts your row on `enter()` and deletes it on `leave()`,
+ *     so the count is presence, not history. It is what makes a room where three
  *     people are sitting between tracks read as live rather than as dead.
+ *
+ *     THAT USED TO SAY "on entering the Session screen ... on the way out", and
+ *     the change is the point: membership no longer ends when the screen
+ *     unmounts, so someone who minimised a Session still counts as present here.
  *
  * ------------------------------------------------- what the aggregate can prove
  *

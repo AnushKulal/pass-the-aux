@@ -314,22 +314,28 @@ export default function SettingsScreen() {
     action as well as the state. "Build 42 · 51 MB" told you a build existed and
     left you to guess that tapping downloads it.
   */
+  /*
+    The line under the version. It reports STATE only — what the build is doing
+    or has found — because the actions moved out of it and onto real buttons
+    below. It used to end in "tap to install", which was the whole control: the
+    row was the button, the size was in the subtitle, and what the update
+    actually contained was nowhere at all. You were asked to install something
+    sight unseen.
+  */
   const apkLine =
     apkBusy === 'downloading'
-      ? 'Downloading the build…'
+      ? 'Downloading…'
       : apkBusy === 'checking'
-        ? 'Checking for a newer build…'
+        ? 'Checking…'
         : apk?.kind === 'available'
-          ? `Build ${apk.latest.versionCode} · ${formatBytes(apk.latest.sizeBytes)} · tap to install`
+          ? `Build ${apk.latest.versionCode} is ready`
           : apk?.kind === 'current'
             ? 'Up to date'
             : apk?.kind === 'error'
-              ? 'Check failed — tap to try again'
+              ? 'Could not reach the update server'
               : apk?.kind === 'unsupported'
                 ? 'Android only'
-                : installedBuild > 0
-                  ? `Build ${installedBuild} · tap to check`
-                  : 'Tap to check for a new build';
+                : 'Not checked yet';
 
   /*
     The artboard's own three-part line — link, tier, and which source is
@@ -591,28 +597,84 @@ export default function SettingsScreen() {
             like one setting with two buttons.
           */}
           <Animated.View style={apkIn}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`Android build. ${apkLine}`}
-              accessibilityState={{ busy: apkBusy !== 'idle', disabled: apkBusy !== 'idle' }}
-              disabled={apkBusy !== 'idle'}
-              onPress={
-                apk?.kind === 'available' ? () => void runApkInstall() : () => void runApkCheck()
-              }
-              style={({ pressed }) => [
-                styles.loneRow,
-                { backgroundColor: pressed ? C.surface2 : C.surface, borderColor: C.rule },
-              ]}>
-              <View style={styles.rowBody}>
-                <Text numberOfLines={1} style={[styles.rowTitle, { color: C.ink }]}>
-                  Android build
-                </Text>
-                <Text numberOfLines={2} style={[styles.rowSub, { color: C.ink3 }]}>
-                  {apkLine}
-                </Text>
+            {/*
+              A CARD, NOT A ROW, AND THE REASON IS THE NOTES.
+
+              This was one pressable line whose subtitle ended "tap to install".
+              Tapping it downloaded 53MB and handed it to Android's installer,
+              and at no point did it say what was in the build. The over-the-air
+              sheet has always listed what changed before asking — this is the
+              same event, the same decision, and it was the one asked blind.
+
+              So: the installed version is always visible, the check is its own
+              control, and when a build is waiting its notes are listed above a
+              download button that names the size. Nothing installs from a tap
+              on the container any more.
+            */}
+            <GlassCard>
+              <View style={styles.apkHead}>
+                <View style={styles.rowBody}>
+                  <Text style={[styles.rowTitle, { color: C.ink }]}>
+                    {installedBuild > 0 ? `Build ${installedBuild}` : 'Android build'}
+                  </Text>
+                  <Text numberOfLines={2} style={[styles.rowSub, { color: C.ink3 }]}>
+                    {apkLine}
+                  </Text>
+                </View>
+
+                {apkBusy !== 'idle' ? (
+                  <ActivityIndicator size="small" color={C.ink2} />
+                ) : apk?.kind === 'available' ? null : (
+                  <AuxButton
+                    label="Check"
+                    variant="bordered"
+                    size="sm"
+                    onPress={() => void runApkCheck()}
+                    disabled={apk?.kind === 'unsupported'}
+                  />
+                )}
               </View>
-              {apkBusy !== 'idle' ? <ActivityIndicator size="small" color={C.ink2} /> : null}
-            </Pressable>
+
+              {apk?.kind === 'available' ? (
+                <View style={[styles.apkNotes, { borderTopColor: C.rule }]}>
+                  <Text style={[styles.apkNotesKicker, { color: C.ink3 }]}>WHAT IS IN IT</Text>
+
+                  {apk.latest.notes.length > 0 ? (
+                    apk.latest.notes.map((note) => (
+                      <View key={note} style={styles.apkNote}>
+                        {/* A rule, not a bullet glyph — the same mark the OTA
+                            sheet uses, so one event does not get two voices. */}
+                        <View style={[styles.apkNoteMark, { backgroundColor: C.ink3 }]} />
+                        <Text style={[styles.apkNoteText, { color: C.ink2 }]}>{note}</Text>
+                      </View>
+                    ))
+                  ) : (
+                    /* An older build published no notes. Saying so is better
+                       than an empty heading, which reads as a failed load. */
+                    <Text style={[styles.apkNoteText, { color: C.ink3 }]}>
+                      This build did not publish a list of changes.
+                    </Text>
+                  )}
+
+                  <Text style={[styles.apkMeta, { color: C.ink3 }]}>
+                    {`${formatBytes(apk.latest.sizeBytes)} · replaces build ${apk.installed}`}
+                  </Text>
+
+                  {/* Wrapped for the margin: AuxButton owns its own geometry
+                      and takes no style, which is what keeps every button in
+                      the app the same height. */}
+                  <View style={styles.apkCta}>
+                    <AuxButton
+                      label="Download and install"
+                      variant="pri"
+                      fullWidth
+                      loading={apkBusy === 'downloading'}
+                      onPress={() => void runApkInstall()}
+                    />
+                  </View>
+                </View>
+              ) : null}
+            </GlassCard>
           </Animated.View>
 
           {/* -------------------------------------------------------- account */}
@@ -1018,6 +1080,43 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   /** A row that stands alone on the ground rather than inside a group. */
+  apkHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Space.md,
+  },
+  apkNotes: {
+    borderTopWidth: Rule.hair,
+    marginTop: Space.md,
+    paddingTop: Space.md,
+    gap: Space.sm,
+  },
+  apkNotesKicker: {
+    ...Type.label(10),
+    marginBottom: 2,
+  },
+  apkNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Space.sm,
+  },
+  apkNoteMark: {
+    width: 8,
+    height: Rule.major,
+    // Sits on the text's first-line baseline rather than its box top.
+    marginTop: 8,
+  },
+  apkNoteText: {
+    ...Type.body(13),
+    flex: 1,
+  },
+  apkMeta: {
+    ...Type.label(10),
+    marginTop: 2,
+  },
+  apkCta: {
+    marginTop: Space.sm,
+  },
   loneRow: {
     flexDirection: 'row',
     alignItems: 'center',

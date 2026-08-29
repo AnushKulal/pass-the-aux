@@ -1,63 +1,43 @@
 /**
- * The wiring between one `rooms` row and this phone's speaker.
+ * The Session screen's view of the Session it is showing.
  *
- * Read this order — it is the whole design, and getting it wrong is the class
- * of bug the sync engine exists to prevent:
+ * THIS FILE USED TO BE THE SESSION ITSELF, AND THAT WAS THE PROBLEM. It owned
+ * the clock, the realtime subscription, the playback attachment and — the one
+ * that decided everything — a `room_participants` upsert in an effect with a
+ * DELETE in the cleanup. Membership was therefore a side effect of this hook
+ * being mounted: unmounting the screen left the Session, which is why the
+ * screen could only ever wire Back to Leave. All of that now lives in
+ * `SessionProvider` (@/lib/session), above the navigator, where it survives
+ * navigation and is torn down by `leave()` alone. Read that file's header for
+ * the argument about what has to outlive a screen and what does not.
  *
- *   1. Measure the clock offset. Applying a timeline before `syncClock()` has
- *      landed anchors playback to `Date.now()`, which on a real phone is
- *      routinely seconds wrong — i.e. seconds of audible desync, on every
- *      listener, silently.
- *   2. Fetch the room row and resolve its track's provider links.
- *   3. Apply. Every subsequent realtime UPDATE re-applies the same way.
- *   4. Re-anchor on foreground and on realtime reconnect. iOS throttles JS
- *      timers in the background, so a returning phone is reliably behind.
+ * What is left here is what genuinely belongs to a screen:
+ *
+ *   1. ENTERING. Opening a Session screen enters that Session. That was already
+ *      true — it was just spelled as a participant-row effect — and it is what
+ *      makes opening a *different* Session leave the first one, because the
+ *      provider keys its row on the entered id.
+ *   2. PRESENTING. Telling the provider something is rendering the Session, so
+ *      it is not minimised and so playback re-anchors onto the fresh player the
+ *      screen brings with it.
+ *   3. READING. The row, its resolved track and the derived flags the screen
+ *      draws. These are React Query reads on the same keys the provider uses,
+ *      so they are one fetch, not two.
+ *
+ * The order the provider runs in — measure the clock, fetch the row, apply,
+ * re-anchor on foreground and on reconnect — is unchanged and is still the
+ * whole design. Nothing in this hook may apply a timeline.
  */
 
-import { useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, Platform } from 'react-native';
+import { useCallback, useEffect } from 'react';
 
-import { ensureFreshClock, syncClock } from '@/lib/clock';
-import type { MusicProvider, RoomRow } from '@/lib/database.types';
-import { supabase } from '@/lib/supabase';
+import { syncClock } from '@/lib/clock';
+import type { RoomRow } from '@/lib/database.types';
+import { useSession, useSessionPresentation } from '@/lib/session';
 import { usePlayback } from '@/playback/store';
-import type { DriftAction } from '@/playback/sync-controller';
-import type { PlaybackError, ResolvedTrack } from '@/playback/types';
+import type { ResolvedTrack } from '@/playback/types';
 
-import {
-  normalizeRoomRow,
-  roomKeys,
-  useCurrentUserId,
-  useResolvedTrack,
-  useRoom,
-} from './queries';
-
-/**
- * Fraction of drift measurements written to `sync_metrics`. The controller
- * samples every 3s, so an unsampled two-hour Session would be ~2,400 rows per
- * listener — enough to matter on the free tier, and 1-in-10 is plenty to prove
- * the distribution.
- */
-const DRIFT_SAMPLE_RATE = 0.1;
-
-/**
- * The Spotify adapter can fire `onEnded` from more than one signal at once, and
- * a double `room_advance` would eat two tracks off the queue.
- */
-const ADVANCE_COOLDOWN_MS = 4_000;
-
-/** Minimum gap between `is_synced` writes, so a flapping connection is not a write storm. */
-const SYNC_FLAG_INTERVAL_MS = 15_000;
-
-/**
- * Sentinel for "the clock has never been synced".
- *
- * A room id is a uuid and the no-room case is the empty string, so no real key
- * can collide with this. It has to be distinct from both: `null` would read as
- * ready the moment the screen mounts with no room.
- */
-const CLOCK_NEVER_SYNCED = 'never-synced';
+import { useCurrentUserId, useResolvedTrack, useRoom } from './queries';
 
 export type RoomSyncState = {
   room: RoomRow | null;
@@ -73,22 +53,23 @@ export type RoomSyncState = {
 };
 
 export function useRoomSync(roomId: string | null): RoomSyncState {
-  const queryClient = useQueryClient();
   const userId = useCurrentUserId();
+  const { enter, roomId: activeRoomId, clockReady: sessionClockReady } = useSession();
 
-  /**
-   * WHICH room the clock has been synced for, not whether it has.
-   *
-   * Storing the key rather than a boolean is what lets `clockReady` be derived
-   * below. A plain flag has to be reset to `false` at the top of the effect
-   * when the room changes, and a synchronous setState in an effect body
-   * cascades renders. This is the same idiom `useLoungePresence` uses for its
-   * readiness grace period, and it carries the same second benefit: there is no
-   * render in which the flag still reads `true` for the room we just left.
-   */
-  const [clockFor, setClockFor] = useState<string>(CLOCK_NEVER_SYNCED);
-  const clockKey = roomId ?? '';
-  const clockReady = clockFor === clockKey;
+  /*
+    Entering is the screen's one act of authority over the lifecycle, and it is
+    deliberately not conditional on what is already active: `enter()` on the
+    room we are in returns the same state object, and `enter()` on a different
+    one runs the provider's teardown for the first. Two participant rows for one
+    person is a lie the roster would happily display, and this is where it is
+    prevented.
+  */
+  useEffect(() => {
+    if (!roomId) return;
+    enter({ roomId });
+  }, [roomId, enter]);
+
+  useSessionPresentation();
 
   const roomQuery = useRoom(roomId);
   const room = roomQuery.data ?? null;
@@ -98,230 +79,14 @@ export function useRoomSync(roomId: string | null): RoomSyncState {
 
   const isHost = Boolean(room && userId && room.host_id === userId);
 
-  // Latest-value refs: the store's callbacks are registered once per room, so
-  // they must not close over a stale `isHost` or a stale user id. Synced in an
-  // effect rather than during render — the React Compiler is enabled on this
-  // project and a render-phase ref write is not safe under it.
-  const isHostRef = useRef(isHost);
-  const userIdRef = useRef(userId);
-
-  useEffect(() => {
-    isHostRef.current = isHost;
-    userIdRef.current = userId;
-  }, [isHost, userId]);
-
-  const lastAdvanceRef = useRef(0);
-  const lastSyncFlagRef = useRef<{ value: boolean | null; at: number }>({ value: null, at: 0 });
-
-  // --------------------------------------------------------------- 1. clock
-
-  useEffect(() => {
-    let cancelled = false;
-
-    // Measuring runs in parallel with the row fetch; only *applying* waits.
-    // The only setState is in the callback — nothing is written synchronously
-    // here, because `clockReady` reads false for this room until it lands.
-    void syncClock().finally(() => {
-      if (!cancelled) setClockFor(clockKey);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [clockKey]);
-
-  // ------------------------------------------------- 2. attach + store hooks
-
-  const reportDrift = useCallback(
-    (driftMs: number, _action: DriftAction, provider: MusicProvider) => {
-      const uid = userIdRef.current;
-      if (!roomId || !uid) return;
-      if (Math.random() > DRIFT_SAMPLE_RATE) return;
-
-      void supabase
-        .from('sync_metrics')
-        .insert({
-          room_id: roomId,
-          user_id: uid,
-          provider,
-          // The column is a plain integer; a drift measurement in the minutes
-          // means the clock is broken, not that we should overflow the column.
-          drift_ms: Math.max(-2_000_000, Math.min(2_000_000, Math.round(driftMs))),
-          platform: Platform.OS,
-        })
-        .then(() => undefined);
-    },
-    [roomId]
-  );
-
-  /**
-   * Only the host advances. If every client called `room_advance` on its own
-   * `onEnded`, an eight-person Session would skip eight tracks the moment one
-   * song finished.
-   */
-  const handleEnded = useCallback(() => {
-    if (!roomId || !isHostRef.current) return;
-
-    const now = Date.now();
-    if (now - lastAdvanceRef.current < ADVANCE_COOLDOWN_MS) return;
-    lastAdvanceRef.current = now;
-
-    void supabase.rpc('room_advance', { p_room_id: roomId }).then(({ data }) => {
-      const next = normalizeRoomRow(data);
-      if (next) queryClient.setQueryData(roomKeys.detail(roomId), next);
-      void queryClient.invalidateQueries({ queryKey: roomKeys.queue(roomId) });
-    });
-  }, [roomId, queryClient]);
-
-  const handleError = useCallback((_error: PlaybackError) => {
-    // The store already holds the error for the UI; nothing extra to do here.
-    // Kept as an explicit no-op so the hook shape stays obvious to the next reader.
-  }, []);
-
-  useEffect(() => {
-    if (!roomId) return;
-
-    const { attachRoom, detach } = usePlayback.getState();
-    attachRoom(roomId, undefined, {
-      onEnded: handleEnded,
-      onDrift: reportDrift,
-      onError: handleError,
-    });
-
-    return () => {
-      detach();
-    };
-  }, [roomId, handleEnded, reportDrift, handleError]);
-
-  // ------------------------------------------------------- 3. apply timeline
-
-  useEffect(() => {
-    if (!clockReady || !room) return;
-
-    // The resolved track lags the row by one fetch whenever the Session moves to
-    // a new song. Applying the new timeline with the OLD track's provider ref
-    // would play the previous song at the new song's position, so hold the
-    // current audio for the extra tick instead.
-    const trackReady = room.track_id == null || track?.id === room.track_id;
-    if (!trackReady) return;
-
-    void usePlayback.getState().applyRoomRow(room, track);
-  }, [clockReady, room, track]);
-
-  // ------------------------------------------------ 4. realtime on the row
-
-  useEffect(() => {
-    if (!roomId) return;
-
-    // Set on any non-subscribed status so the *next* SUBSCRIBED is recognised as
-    // a reconnect rather than the first connect.
-    let wasDropped = false;
-
-    const channel = supabase
-      .channel(`room-row:${roomId}`)
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` },
-        (payload) => {
-          const next = normalizeRoomRow(payload.new);
-          if (next) queryClient.setQueryData(roomKeys.detail(roomId), next);
-        }
-      )
-      .subscribe((status) => {
-        // `status` is a string enum from realtime-js, and TypeScript refuses to
-        // compare a string enum against a bare literal. supabase-js does not
-        // re-export the enum, so widen to string rather than reach into a
-        // transitive package for it.
-        if (String(status) !== 'SUBSCRIBED') {
-          wasDropped = true;
-          return;
-        }
-        if (!wasDropped) return;
-
-        // We were deaf for a while: the row may have changed and our position
-        // has been free-running. Re-read, re-measure, re-anchor.
-        wasDropped = false;
-        void queryClient.invalidateQueries({ queryKey: roomKeys.detail(roomId) });
-        void ensureFreshClock().then(() => usePlayback.getState().resync());
-      });
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [roomId, queryClient]);
-
-  // ----------------------------------------------------- 5. participant row
-
-  useEffect(() => {
-    if (!roomId || !userId) return;
-
-    // Upsert, not insert: a previous Session that was killed rather than exited
-    // can leave the row behind, and a plain insert would 409 on rejoin.
-    void supabase
-      .from('room_participants')
-      .upsert({ room_id: roomId, user_id: userId, is_synced: true }, { onConflict: 'room_id,user_id' })
-      .then(() => {
-        void queryClient.invalidateQueries({ queryKey: roomKeys.participants(roomId) });
-      });
-
-    return () => {
-      void supabase
-        .from('room_participants')
-        .delete()
-        .eq('room_id', roomId)
-        .eq('user_id', userId)
-        .then(() => undefined);
-    };
-  }, [roomId, userId, queryClient]);
-
-  // --------------------------------------------------- 6. foreground resync
-
-  useEffect(() => {
-    const subscription = AppState.addEventListener('change', (state) => {
-      if (state !== 'active') return;
-
-      void (async () => {
-        await ensureFreshClock();
-        await usePlayback.getState().resync();
-      })();
-    });
-
-    return () => subscription.remove();
-  }, []);
-
-  // ------------------------------------------------- publish the sync flag
-
-  const isSynced = usePlayback((state) => state.isSynced);
-
-  useEffect(() => {
-    if (!roomId || !userId) return;
-
-    const last = lastSyncFlagRef.current;
-    if (last.value === isSynced) return;
-
-    const write = () => {
-      lastSyncFlagRef.current = { value: isSynced, at: Date.now() };
-
-      void supabase
-        .from('room_participants')
-        .update({ is_synced: isSynced })
-        .eq('room_id', roomId)
-        .eq('user_id', userId)
-        .then(() => undefined);
-    };
-
-    // Defer rather than drop: these deps only change on an actual flag flip, so
-    // a transition swallowed by the rate limit would never be retried and the
-    // room would keep showing a recovered listener as out of sync.
-    const waitMs = last.value === null ? 0 : SYNC_FLAG_INTERVAL_MS - (Date.now() - last.at);
-    if (waitMs <= 0) {
-      write();
-      return;
-    }
-
-    const timer = setTimeout(write, waitMs);
-    return () => clearTimeout(timer);
-  }, [isSynced, roomId, userId]);
+  /*
+    The provider measures the offset once per entered room, so readiness is its
+    answer rather than this hook's. Comparing the ids matters for the frame
+    between this screen mounting and its `enter()` landing: during it the
+    provider is still ready for the room we are LEAVING, and treating that as
+    ready here would anchor the new Session against the old measurement.
+  */
+  const clockReady = activeRoomId === roomId && sessionClockReady;
 
   const resync = useCallback(() => {
     void (async () => {

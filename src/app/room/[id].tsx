@@ -19,6 +19,43 @@
  *               people   the sync orbit and the roster. PEOPLE ONLY.
  *   lobby bar   the drawer handle · MIC · DEAFEN · QUEUE · CHAT · LEAVE
  *
+ * ---------------------------------------------- BACK MINIMISES; LEAVE LEAVES
+ *
+ * This file used to hand `onLeave={handleBack}` to the dock and to the drawer,
+ * and that was not laziness — it was the truth. `useRoomSync` upserted the
+ * `room_participants` row in an effect and DELETED IT IN THE CLEANUP, so
+ * unmounting this screen ended the Session. Back and Leave were one operation,
+ * and no amount of chrome could have separated them.
+ *
+ * The lifecycle now lives in `SessionProvider` (@/lib/session), above the
+ * navigator, and the two doors are finally different acts:
+ *
+ *   BACK    the header control and Android's hardware back. It NAVIGATES, and
+ *           does nothing else. Membership, the realtime subscription and the
+ *           playback attachment all outlive this screen, so the Session runs on
+ *           without anything rendering it and the return bar picks it up. It
+ *           must never call `leave()`.
+ *   LEAVE   the dock's `danger` cell and the drawer's `danger` button. It ASKS
+ *           first — `ConfirmDialog`, because `Alert.alert` does nothing at all
+ *           on react-native-web — then `leave()`, and only then navigates. That
+ *           order is the provider's contract: `leave()` never routes and
+ *           routing never leaves.
+ *
+ * THE BACK GLYPH IS A CHEVRON DOWN, NOT AN ARROW, and that is the one place
+ * this screen deviates from L900. An arrow means "out of here", which is what
+ * this control used to do and precisely what it must stop promising; the
+ * Session now goes DOWN to a bar above the navigation, and every player that
+ * minimises the same way draws the same glyph. The error face below still gets
+ * the arrow, because there back really is a way out.
+ *
+ * THE HARDWARE BACK BUTTON MEANS EXACTLY WHAT THE HEADER CONTROL MEANS. It is
+ * spelled out rather than left to the navigator's default pop: two different
+ * meanings for "back" on one screen is the bug this whole change exists to
+ * remove. It still closes an open LAYER first — a sheet, or the expanded dock —
+ * because a layer the user opened is what back should close before anything
+ * else. Collapsing the dock is new here, and the note beside `dockOpen` had
+ * been promising it since the dock landed.
+ *
  * ------------------------------------------- THE SWITCH MOVED TO THE TOP, AND
  * ------------------------------------------- THAT REVERSES THIS FILE'S OWN
  * ------------------------------------------- LOUDEST PREVIOUS RULING
@@ -150,6 +187,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import {
   ArrowLeft,
   ArrowRight,
+  ChevronDown,
   MessageCircle,
   Plus,
   Radio,
@@ -192,6 +230,7 @@ import { AmbientGround } from '@/components/shell/ambient-ground';
 import {
   AuxButton,
   CircleIconButton,
+  ConfirmDialog,
   EmptyState,
   GlassCard,
   SheetTabs,
@@ -207,8 +246,10 @@ import {
   useRoomParticipants,
   useTransport,
 } from '@/features/rooms/queries';
+import { useActiveSource } from '@/features/tracks/active-source';
 import { useRoomSync } from '@/features/rooms/use-room-sync';
 import { useEntrance } from '@/lib/entrance';
+import { useSession } from '@/lib/session';
 import {
   Fonts,
   PointerEvents,
@@ -258,6 +299,27 @@ export default function RoomScreen() {
   const toast = useToast();
   const { room, track, userId, isHost, isLoading, error, resync } = useRoomSync(roomId);
 
+  /*
+    Which service will actually play, and whether minimising keeps it audible.
+    Spotify drives a device elsewhere and survives; YouTube is a WebView owned
+    by this screen and stops when the screen goes. The copy below has to say
+    which, because promising audio that stops is worse than not promising it.
+  */
+  const source = useActiveSource();
+  const minimiseKeepsAudio = source.provider === 'spotify';
+
+  /*
+    The Session's lifecycle, and the only handle this screen keeps on it.
+
+    `useRoomSync` above has already ENTERED — opening a Session screen is what
+    entering means — so the one thing left for this screen to own is the door
+    out, and `leave()` is the only thing in the app that ends a Session. Reading
+    this context does not make anybody a participant, and nothing here calls
+    `enter()`: doing that from a second place would be two claims on one
+    membership row.
+  */
+  const { leave } = useSession();
+
   const lounge = useLounge(room?.lounge_id ?? null);
   const queue = useQueue(roomId);
   const participants = useRoomParticipants(roomId);
@@ -289,6 +351,14 @@ export default function RoomScreen() {
    * the note at the render site.
    */
   const [dockOpen, setDockOpen] = useState(false);
+  /**
+   * The leave confirm is up.
+   *
+   * Leaving is the one destructive act on this screen and it is now the ONLY
+   * thing that ends the Session, so it asks — see `askLeave` below for why the
+   * question has to be asked at all now that Back no longer implies it.
+   */
+  const [leaveAsking, setLeaveAsking] = useState(false);
   /** Muted for this listener only. Never published, never announced. */
   const [mutedIds, setMutedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [requestSent, setRequestSent] = useState(false);
@@ -302,25 +372,79 @@ export default function RoomScreen() {
   );
 
   /**
-   * Android hardware back. A sheet is a layer the user opened, so it is what
-   * back should close — falling straight out of the Session would be a
-   * surprise, and it would stop the music for them.
+   * The routing half of both doors, and the reason it is one function.
+   *
+   * Back and Leave are different acts now, but they end the same way: off this
+   * screen. What separates them is entirely what happens BEFORE this line, so
+   * the line itself lives once — two copies of the routing is exactly how the
+   * two of them drifted into being the same operation in the first place.
+   *
+   * `replace('/')` rather than nothing when there is no history: a Session
+   * reached by deep link has none, and a back button that does nothing is worse
+   * than one that lands you at home.
+   */
+  const navigateOut = useCallback(() => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/');
+  }, []);
+
+  /**
+   * LEAVE, once it has been agreed to. The order is the provider's contract:
+   * `leave()` tears down the membership row and never routes, `navigateOut()`
+   * routes and never leaves. Reversed, the screen would unmount with the
+   * Session still entered and the return bar would offer a way back into
+   * something the user had just ended.
+   */
+  const leaveAndGo = useCallback(() => {
+    leave();
+    navigateOut();
+  }, [leave, navigateOut]);
+
+  /**
+   * Android hardware back, and it MEANS WHAT THE HEADER CONTROL MEANS.
+   *
+   * A layer the user opened is what back should close first — a sheet, or the
+   * dock grown into its lobby panel. With nothing left to close it MINIMISES,
+   * which is the same act the header's chevron performs, and it is spelled out
+   * here rather than returned to the navigator: `return false` pops the route,
+   * which happens to be the same thing today and would silently become "exit
+   * the app" for anyone who deep-linked straight into a Session. Two different
+   * meanings for back on one screen is the whole bug this pass removes.
+   *
+   * THE OLD NOTE HERE READ "falling out of the Session would stop the music for
+   * them", and that was the true reason back could not be trusted with the
+   * bottom of this stack. It is no longer the reason: membership, the
+   * subscription and the playback attachment outlive this screen now
+   * (@/lib/session). A YouTube listener's audio still stops, because the player
+   * is a WebView this screen mounts — but the Session itself does not end, and
+   * it resumes on the way back in.
    */
   useEffect(() => {
     if (Platform.OS !== 'android') return;
 
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      // The add-track modal owns its own back handling via onRequestClose.
+      // Both of these are Modals and answer back through their own
+      // `onRequestClose`. Handling them here as well would dismiss them AND
+      // minimise the screen behind them in one press — the user asks a question
+      // to be closed and loses the whole screen with it.
       if (addVisible) return false;
+      if (leaveAsking) return false;
       if (sheet) {
         setSheet(null);
         return true;
       }
-      return false;
+      // The dock is a plain view in this screen, not a Modal, so nothing else
+      // can close it. `expanded` is lifted up here precisely for this.
+      if (dockOpen) {
+        setDockOpen(false);
+        return true;
+      }
+      navigateOut();
+      return true;
     });
 
     return () => subscription.remove();
-  }, [addVisible, sheet]);
+  }, [addVisible, dockOpen, leaveAsking, navigateOut, sheet]);
 
   const queueLength = queue.data?.length ?? 0;
   // Memoised because `toggleMemberMute` looks a name up in it, and because the
@@ -390,10 +514,36 @@ export default function RoomScreen() {
     });
   }, [requestAux, toast]);
 
-  const handleBack = useCallback(() => {
-    if (router.canGoBack()) router.back();
-    else router.replace('/');
+  /**
+   * LEAVE asks, and it asks for a reason that is new to this pass.
+   *
+   * Leaving used to be indistinguishable from backing out, so a confirm would
+   * have been ceremony over something the user did by accident forty times a
+   * session. Now it is the ONLY way out of a Session — everything else keeps
+   * them in it — which makes it a one-way door, and a one-way door with a
+   * dock-cell-sized target on it gets a question.
+   *
+   * `ConfirmDialog` and not `Alert.alert`: the platform alert is a foreign
+   * dialog on Android and react-native-web ships no implementation at all, so
+   * on web the guard would silently evaporate and LEAVE would be instant on the
+   * one platform where the pointer is least precise.
+   *
+   * The sheet is dismissed on the way in because the drawer is itself a Modal
+   * and stacking the question on it would be two scrims for one decision. Same
+   * hand-off `openAdd` directly below already makes. From the dock's own LEAVE
+   * cell there is no sheet and this is a no-op.
+   */
+  const askLeave = useCallback(() => {
+    setSheet(null);
+    setLeaveAsking(true);
   }, []);
+
+  const cancelLeave = useCallback(() => setLeaveAsking(false), []);
+
+  const confirmLeave = useCallback(() => {
+    setLeaveAsking(false);
+    leaveAndGo();
+  }, [leaveAndGo]);
 
   const openAdd = useCallback(() => {
     setSheet(null);
@@ -544,6 +694,17 @@ export default function RoomScreen() {
     [listenerCount]
   );
 
+  /*
+    THE ONE FACE WHERE BACK STILL LEAVES, and it is not an inconsistency.
+
+    Mounting this screen entered the Session, so a room that then refuses to
+    load has an entry behind it with nothing on the other side. Minimising from
+    here would park a return bar over the whole app advertising a Session the
+    user has just been told is not open to them, and tapping it would land back
+    on this same error. There is nothing here worth keeping, so both doors drop
+    the entry — no confirm, because a confirm asks what you would be giving up
+    and the answer is nothing.
+  */
   if (error && !room) {
     return (
       <Shell>
@@ -552,7 +713,8 @@ export default function RoomScreen() {
           meta={loungeName}
           locked={0}
           total={0}
-          onBack={handleBack}
+          minimises={false}
+          onBack={leaveAndGo}
           onSync={null}
         />
         <View style={styles.errorSlot}>
@@ -562,7 +724,7 @@ export default function RoomScreen() {
             title="This Session is not open to you"
             description="It may have ended, or it lives in a lounge you have not joined."
             primary={{ label: 'Try again', onPress: resync }}
-            secondary={{ label: 'Back', onPress: handleBack }}
+            secondary={{ label: 'Back', onPress: leaveAndGo }}
           />
         </View>
       </Shell>
@@ -571,12 +733,18 @@ export default function RoomScreen() {
 
   return (
     <Shell>
+      {/*
+        `navigateOut`, not a leave. This control MINIMISES: the Session keeps
+        its membership row, its subscription and its audio, and the return bar
+        is what advertises it afterwards. See the file header.
+      */}
       <Head
         name={sessionName}
         meta={`${loungeName} · ${modeLabel}`}
         locked={lockedCount}
         total={listenerCount}
-        onBack={handleBack}
+        minimises
+        onBack={navigateOut}
         onSync={openSync}
       />
 
@@ -758,7 +926,10 @@ export default function RoomScreen() {
         onQueue={openQueue}
         onChat={openChat}
         onAddTrack={openAdd}
-        onLeave={handleBack}
+        // `askLeave`, where this said `handleBack` — and that one word is the
+        // whole point of this pass. The dock's LEAVE cell is the only control
+        // in the Session that ends it, so it is the only one that asks.
+        onLeave={askLeave}
         people={roster}
         currentUserId={userId}
         onNotice={notice}
@@ -831,7 +1002,10 @@ export default function RoomScreen() {
           onDeafen={handleDeafen}
           onChat={openChat}
           onAddTrack={openAdd}
-          onLeave={handleBack}
+          // The drawer's `Leave {name}` button, and it goes through the same
+          // question the dock cell does. Two controls disagreeing about how
+          // serious the same act is teaches people to ignore the one that asks.
+          onLeave={askLeave}
           people={roster}
           currentUserId={userId}
           onNotice={notice}
@@ -859,6 +1033,47 @@ export default function RoomScreen() {
       </Sheet>
 
       <AddTrackSheet roomId={roomId} visible={addVisible} onClose={closeAdd} />
+
+      {/*
+        THE ONE-WAY DOOR, ASKED ABOUT BEFORE IT IS OPENED.
+
+        The body says what leaving COSTS, which is different for the two people
+        in the room and is the whole reason it is not one sentence:
+
+          on aux      the aux cannot be handed over in this build — there is no
+                      `rooms.host_id` transfer RPC, which is the same fact that
+                      draws `PassTheAux` inert for a host above — so a host who
+                      leaves takes the transport with them and the Session
+                      stops where they left it. That is a real consequence and
+                      it must not be discovered afterwards.
+          a passenger far cheaper, and the copy says so rather than dressing a
+                      small act up as a large one: you drop off the roster, the
+                      room carries on, and you can come back.
+
+        Both halves end on what Back does instead, because "you did not have to
+        do this" is the single most useful thing a leave confirm can say on a
+        screen that has only just stopped meaning it.
+
+        NO `loading`: `leave()` is synchronous state in the provider — the row
+        delete is queued behind it and nobody waits on the network to get out of
+        a room. A spinner here would be theatre.
+      */}
+      <ConfirmDialog
+        visible={leaveAsking}
+        title="Leave this Session?"
+        message={
+          isHost
+            ? `You are on aux, and it cannot be handed to anyone else yet — the Session stops where you leave it, and nobody left in it can play, pause or skip. Back minimises instead and keeps it running${minimiseKeepsAudio ? '' : ', though the music pauses until you come back'}.`
+            : `You drop off the roster and stop following the room. It carries on without you and you can rejoin from the lounge. Back minimises instead and keeps you in it${minimiseKeepsAudio ? '' : ', though the music pauses until you come back'}.`
+        }
+        confirmLabel="Leave the Session"
+        // Named, not a bare "Cancel". The cancel branch is the one where
+        // nothing happens, and this dialog can be reached by a thumb landing
+        // one cell to the right of CHAT.
+        cancelLabel="Stay in the Session"
+        onConfirm={confirmLeave}
+        onCancel={cancelLeave}
+      />
     </Shell>
   );
 }
@@ -973,6 +1188,12 @@ type HeadProps = {
   meta: string;
   locked: number;
   total: number;
+  /**
+   * The control MINIMISES rather than exits — a different act, so a different
+   * glyph and a different spoken name. False only on the error face, where
+   * there is no Session worth keeping and back really is a way out.
+   */
+  minimises: boolean;
   onBack: () => void;
   /** Null before there is a Session to measure. The slot keeps its width. */
   onSync: (() => void) | null;
@@ -985,16 +1206,50 @@ type HeadProps = {
  * prose. It carries `NIGHT SHIFT · MUSIC` — a lounge name and a mode, which are
  * labels and not a sentence — and at 9px the uppercase setting is what stops it
  * competing with the 16px session name directly above it.
+ *
+ * THE GLYPH IS A CHEVRON DOWN AND IT SAID "Leave the Session" UNTIL THIS PASS —
+ * accurately, because pressing it did leave. It no longer does, and an arrow
+ * pointing out of a screen is a promise to exit that this control must stop
+ * making: the Session goes DOWN to a bar above the navigation and comes back
+ * from there, which is the one thing a glyph here can say without a caption.
+ * The deviation from L900's arrow is deliberate and is argued in the file
+ * header. The label is the whole name of an icon-only button, so it carries the
+ * reassurance too — `CircleIconButton` has no hint of its own.
+ *
+ * NOT `danger`, EVER, on this control. Minimising costs nothing, and the accent
+ * rule spends pink on destruction — which on this screen is one dock cell away
+ * and must not have a twin in the header.
  */
-const Head = memo(function Head({ name, meta, locked, total, onBack, onSync }: HeadProps) {
+const Head = memo(function Head({
+  name,
+  meta,
+  locked,
+  total,
+  minimises,
+  onBack,
+  onSync,
+}: HeadProps) {
   const C = useColors();
+  /*
+    Read here rather than passed down. `Head` is the only thing that needs it,
+    and threading a boolean through props for one label is how a component ends
+    up with an argument list nobody can read. `useActiveSource` is a cached
+    query — asking twice on one screen costs nothing.
+  */
+  const minimiseKeepsAudio = useActiveSource().provider === 'spotify';
 
   return (
     <View style={styles.head}>
       <CircleIconButton
-        icon={ArrowLeft}
+        icon={minimises ? ChevronDown : ArrowLeft}
         onPress={onBack}
-        accessibilityLabel="Leave the Session"
+        accessibilityLabel={
+          minimises
+            ? minimiseKeepsAudio
+              ? 'Minimise the Session. You stay in it and it keeps playing.'
+              : 'Minimise the Session. You stay in it, but the music pauses until you come back.'
+            : 'Back'
+        }
         size={44}
       />
 

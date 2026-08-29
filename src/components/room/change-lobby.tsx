@@ -38,7 +38,7 @@
  * that moves everyone else in the room, because a segment's whole promise is
  * that tapping it is free and reversible, and this is neither.
  *
- * `LobbyModePicker` replaces it with three CHOICES rather than three segments,
+ * `ChangeLobbyPanel` replaces it with three CHOICES rather than three segments,
  * and picking one does not switch anything: it proposes. `LobbyModeConfirm`
  * asks, states what the switch costs the room, and only then does the owner
  * commit. Two deliberate acts, which is one more than a stray thumb produces.
@@ -100,7 +100,7 @@
  * TWO CONTROLS STILL, AND THEY DO DIFFERENT JOBS. `ChangeLobbyPanel` is the
  * FULL answer — three rows, each carrying the promise its mode makes, plus the
  * footnote about who may switch — and it is what the CHANGE LOBBY tile opens.
- * `LobbyModePicker` is the same three modes compressed to fit the top of the
+ * The dock's control panel used to compress the same three modes into the top of the
  * session dock's panel, one swipe from anywhere in the Session. Both propose;
  * neither commits. They hand the same `onRequest` to the same owner, so the
  * two can never come to disagree about what a pick means.
@@ -225,158 +225,24 @@ export const ChangeLobbyPanel = memo(function ChangeLobbyPanel({
 
 // -------------------------------------------------------------- the picker
 
-export type LobbyModePickerProps = {
-  mode: LobbyMode;
-  /** Only the person on aux may switch. See the header for why it is not a disabled control. */
-  canChange: boolean;
-  onRequest: (mode: LobbyMode) => void;
-};
+/*
+  `LobbyModePicker` and its private `ModeChoice` stood here, and they are
+  DELETED rather than left unexported.
 
-/**
- * The three modes as three choice cards, for the top of the session dock.
- *
- * NOT A SEGMENTED CONTROL, and that is the whole point of this component — see
- * the header. A segment says "I am one of a set, and moving between us is
- * free". A card that reads CURRENT standing next to two that read SWITCH says
- * the opposite: one of these is the state of the room and the other two are
- * proposals. Picking one opens the confirm; nothing moves until it is answered.
- *
- * The caption underneath changes with WHO IS READING IT rather than with the
- * mode, because the two sentences answer the two different questions a person
- * has in front of this control. A host is about to move everyone else in the
- * room and wants to know what that costs — nothing, the queue is kept, and
- * they are asked first. A passenger wants to know what the lobby is set to and
- * why none of it is theirs to touch.
- */
-export const LobbyModePicker = memo(function LobbyModePicker({
-  mode,
-  canChange,
-  onRequest,
-}: LobbyModePickerProps) {
-  const C = useColors();
+  The picker drew the three lobby modes as choices at the top of the dock's
+  control panel — a thumb above a CHANGE LOBBY tile that opens
+  `ChangeLobbyPanel`, which offers the same three modes with the explanation
+  and the confirm. Two controls for one decision, and it was reported as
+  exactly that.
 
-  return (
-    <View style={styles.picker}>
-      {/*
-        The `radiogroup` role belongs to the HOST's copy only. With no control
-        under it the passenger's version is three pieces of text, and
-        announcing text as a radio group promises an interaction that is not
-        there.
-      */}
-      <View accessibilityRole={canChange ? 'radiogroup' : undefined} style={styles.choices}>
-        {LOBBY_MODES.map((entry) => (
-          <ModeChoice
-            key={entry.id}
-            def={entry}
-            current={entry.id === mode}
-            canChange={canChange}
-            onRequest={onRequest}
-          />
-        ))}
-      </View>
+  Deleted and not merely unwired, because a component that still compiles
+  beside the thing that replaced it is how this codebase has already shipped
+  two docks, three lounge rows and two member rows: the wrong one stays on
+  screen and nobody can tell which they are looking at.
 
-      <Text numberOfLines={1} style={[styles.pickerNote, { color: C.ink3 }]}>
-        {canChange
-          ? 'EVERYONE COMES WITH YOU · YOU CONFIRM BEFORE ANYONE MOVES'
-          : 'ONLY THE PERSON ON AUX CAN CHANGE THE LOBBY'}
-      </Text>
-    </View>
-  );
-});
-
-type ModeChoiceProps = {
-  def: ModeDef;
-  current: boolean;
-  canChange: boolean;
-  onRequest: (mode: LobbyMode) => void;
-};
-
-const ModeChoice = memo(function ModeChoice({ def, current, canChange, onRequest }: ModeChoiceProps) {
-  const C = useColors();
-  const Icon = def.icon;
-
-  const fill = { backgroundColor: C.surfaceSolid };
-  const edge = { borderColor: current ? C.pill : C.rule };
-
-  const face = (
-    <>
-      <Icon size={18} strokeWidth={2} color={current ? C.pill : C.ink2} />
-      <Text numberOfLines={2} style={[styles.choiceName, { color: current ? C.pill : C.ink }]}>
-        {def.name}
-      </Text>
-      {/*
-        The one word that makes this a two-step rather than a toggle. CURRENT
-        is a readout; SWITCH is a promise about what the tap does, and it is
-        deliberately not "SWITCHED" and not a tick — the card does not do the
-        thing, it asks for it.
-
-        A passenger's non-current card carries neither, because "SWITCH" on a
-        card that cannot be pressed is a lie, and a struck-through label would
-        be a control drawn as a control anyway.
-      */}
-      {current ? (
-        <Text style={[styles.choiceState, { color: C.pill }]}>CURRENT</Text>
-      ) : canChange ? (
-        <Text style={[styles.choiceState, { color: C.ink3 }]}>SWITCH</Text>
-      ) : null}
-    </>
-  );
-
-  // Already the mode is not a thing you can pick again, so the current card is
-  // inert for the host too — but it reads as the ANSWER rather than as a
-  // refusal, which is why it keeps the blue and a passenger's others do not.
-  if (current || !canChange) {
-    return (
-      <View
-        /*
-          `accessible` is not optional on a plain View the way it is on a
-          Pressable, which gets it for free. Without it the icon and the two
-          labels are three separate nodes to a screen reader and the
-          `accessibilityLabel` above is attached to none of them — the card
-          would be swiped through in pieces.
-        */
-        accessible
-        accessibilityRole={canChange ? 'radio' : undefined}
-        accessibilityState={canChange ? { selected: current } : undefined}
-        accessibilityLabel={`${def.name}. ${def.blurb}${current ? ' This is the current lobby.' : ''}`}
-        style={[
-          styles.choice,
-          fill,
-          edge,
-          raised(C),
-          // Passengers get the modes they are not in at reduced weight rather
-          // than a lock icon: what the lobby can be is still information they
-          // want, it just is not their call.
-          current ? null : styles.inert,
-        ]}>
-        {face}
-      </View>
-    );
-  }
-
-  return (
-    <Pressable
-      accessibilityRole="radio"
-      accessibilityState={{ selected: false }}
-      accessibilityLabel={`${def.name}. ${def.blurb}`}
-      accessibilityHint="Asks you to confirm before the lobby changes for everyone"
-      onPress={() => onRequest(def.id)}
-      style={({ pressed }) => [
-        styles.choice,
-        // The pressed fill stays translucent on purpose: 9% white reads
-        // BRIGHTER than the resolved solid over the dock's glass, which is what
-        // a press wants to do.
-        pressed ? { backgroundColor: C.surface2 } : fill,
-        edge,
-        raised(C),
-      ]}>
-      {face}
-    </Pressable>
-  );
-});
-
-// ------------------------------------------------------------- the confirm
-
+  `ChangeLobbyPanel` is the survivor, and it is the one carrying the
+  two-step confirm that makes a mode change deliberate.
+*/
 export type LobbyModeConfirmProps = {
   /** The mode being proposed, or null when nothing has been asked for. */
   pending: LobbyMode | null;

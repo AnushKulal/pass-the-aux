@@ -5,8 +5,13 @@
  * the design does not have one, and Lounges — the only thing the rail carried —
  * is a navigation destination in its own right now.
  *
- * The bar occupies real layout space rather than floating over the content, so
- * no screen has to reserve room for it.
+ * THE BOTTOM CHROME FLOATS, AND THERE ARE TWO PIECES OF IT. This header used to
+ * read "the bar occupies real layout space rather than floating over the
+ * content, so no screen has to reserve room for it", which stopped being true
+ * the day the full-width bar became a floating capsule — `useDockReserve()` in
+ * '@/lib/dock' exists precisely because every screen DOES have to reserve room.
+ * The second piece is `MiniSession`, the return bar for a Session someone
+ * minimised; it takes no layout space either, and the same hook accounts for it.
  *
  * The profile gate is enforced by REDIRECTING to profile-setup, not by hiding
  * the chrome in place. Hiding it alone left a signed-in user on an empty Feed
@@ -21,6 +26,7 @@ import { Tabs } from 'expo-router/js-tabs';
 import { StyleSheet, View } from 'react-native';
 
 import { AmbientGround } from '@/components/shell/ambient-ground';
+import { MiniSession } from '@/components/shell/mini-session';
 import { NavBar } from '@/components/shell/nav-bar';
 import { UpdateBanner } from '@/components/shell/update-banner';
 import { useAuth } from '@/lib/auth';
@@ -43,6 +49,12 @@ export default function TabsLayout() {
    * The ref has to live HERE rather than in `nav-bar.tsx`, because the target
    * must WRAP the content being blurred — the ambient ground and the navigator
    * — and the capsule is a sibling of both, not their parent.
+   *
+   * ONE TARGET, TWO PIECES OF GLASS. `MiniSession` below takes the same ref.
+   * Without it Android would paint the return bar as a flat slab 10px above a
+   * genuinely blurred capsule — the two halves of one stack of chrome
+   * disagreeing about what material they are made of, which reads as broken far
+   * more obviously than either being flat on its own.
    */
   const blurTarget = useRef<View | null>(null);
   const { session, loading } = useAuth();
@@ -151,6 +163,27 @@ export default function TabsLayout() {
         <Tabs.Screen name="lounges" options={{ title: 'Lounges' }} />
         <Tabs.Screen name="profile" options={{ title: 'You' }} />
       </Tabs>
+
+      {/*
+        THE MINIMISED SESSION, and it is a sibling of the navigator rather than
+        a child of any screen — which is the whole point of it. Pressing Back
+        out of a Session no longer ends it (`@/lib/session` owns the membership
+        row now), so something has to say the room is still there and offer the
+        way in. A component living inside a screen could not: it would come and
+        go with the tab you happen to be on.
+
+        AFTER `<Tabs>` so it paints over the scenes, and carrying the nav's own
+        `ZIndex.tabBar` so the two sit on one plane. They cannot fight for it —
+        the bar rests `MiniDock.gap` clear of the capsule and never travels far
+        enough to touch it. Every overlay in this group that must cover the
+        chrome is a real `<Modal>` (the lounge menu, the join code,
+        `ConfirmDialog`), which renders in its own window above all of this.
+
+        It renders itself only when a Session is minimised; mounting it
+        unconditionally is what keeps the arrival animation and the reserve
+        arithmetic in one place instead of spread across a conditional here.
+      */}
+      <MiniSession blurTarget={blurTarget} />
     </BlurTargetView>
   );
 }

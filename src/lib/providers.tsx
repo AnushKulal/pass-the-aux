@@ -13,6 +13,14 @@
  *                           itself — which music service this account plays
  *                           from — is partly answered by the session's identity
  *                           provider, which only AuthProvider knows.
+ *   SessionProvider         WHICH Session this device is in. Below
+ *                           LocalProfileProvider so the account's music service
+ *                           has already been adopted into the playback store
+ *                           before any Session attaches to it, and above
+ *                           `children` — which is the whole navigator — because
+ *                           membership has to survive navigation. That is not a
+ *                           preference: it is the difference between minimising
+ *                           a Session and leaving it.
  *   ToastProvider           must be innermost so its overlay paints above the
  *                           navigator without needing a portal.
  *
@@ -42,6 +50,7 @@ import { AuthProvider, useAuth } from '@/lib/auth';
 import { queryClient } from '@/lib/query';
 import { useColors } from '@/lib/theme-context';
 import { MotionProvider } from '@/lib/motion';
+import { SessionProvider } from '@/lib/session';
 import { UpdateProvider } from '@/lib/updates';
 import { usePlayback, type MusicService } from '@/playback/store';
 
@@ -349,23 +358,31 @@ export function Providers({ children }: { children: ReactNode }) {
             <AuthProvider>
               <LocalProfileProvider>
                 {/*
-                  Above ToastProvider so that BOTH the sheet below and the
-                  Settings screen inside `children` read the same update state.
-                  That shared state is what lets Settings still offer an update
-                  the user has already waved away.
+                  Holds the Session across every navigation, which is the only
+                  reason Back can mean "minimise" and Leave can mean "leave".
+                  The membership row, the room subscription and the playback
+                  attachment all key off it — see @/lib/session.
                 */}
-                <UpdateProvider>
-                  <ToastProvider>
-                    {children}
-                    {/*
-                      Last sibling, so it paints above everything including the
-                      tab bar. Inside ToastProvider because it is chrome, not a
-                      screen — it has to survive navigation rather than unmount
-                      with it.
-                    */}
-                    <UpdatePrompt />
-                  </ToastProvider>
-                </UpdateProvider>
+                <SessionProvider>
+                  {/*
+                    Above ToastProvider so that BOTH the sheet below and the
+                    Settings screen inside `children` read the same update state.
+                    That shared state is what lets Settings still offer an update
+                    the user has already waved away.
+                  */}
+                  <UpdateProvider>
+                    <ToastProvider>
+                      {children}
+                      {/*
+                        Last sibling, so it paints above everything including the
+                        tab bar. Inside ToastProvider because it is chrome, not a
+                        screen — it has to survive navigation rather than unmount
+                        with it.
+                      */}
+                      <UpdatePrompt />
+                    </ToastProvider>
+                  </UpdateProvider>
+                </SessionProvider>
               </LocalProfileProvider>
             </AuthProvider>
           </QueryClientProvider>

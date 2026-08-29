@@ -15,6 +15,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo } from 'react';
 
 import { Providers } from '@/lib/providers';
+import { LaunchVeil } from '@/components/shell/launch-veil';
 import { Duration } from '@/lib/theme';
 import { ThemeProvider, useTheme } from '@/lib/theme-context';
 
@@ -32,7 +33,15 @@ import { ThemeProvider, useTheme } from '@/lib/theme-context';
  * noise, not a failure.
  */
 void SplashScreen.preventAutoHideAsync().catch(() => undefined);
-SplashScreen.setOptions({ duration: Duration.sheet, fade: true });
+/*
+  NO FADE, and the duration is as short as the API allows.
+
+  The hand-off is drawn in JS by `LaunchVeil`, which holds the same mark on the
+  same ground and then moves it toward the viewer. The OS only has to get out of
+  the way underneath it; anything it animates on its own is a second, unrelated
+  transition happening at the same moment.
+*/
+SplashScreen.setOptions({ duration: 0, fade: false });
 
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
@@ -75,6 +84,16 @@ function RootNavigator({ fontsSettled }: { fontsSettled: boolean }) {
       void SplashScreen.hideAsync().catch(() => undefined);
     }
   }, [ready]);
+
+  /*
+    THE NATIVE FADE IS OFF WHILE THE VEIL IS ON, and the two would otherwise
+    fight. `SplashScreen.setOptions` above asks Android to cross-fade the splash
+    out over `Duration.sheet`; the veil is already drawing that same mark on
+    that same ground and animating it itself. Running both means the OS fades
+    its copy while ours is still holding, which shows the app through a
+    half-transparent logo for a moment — a flicker exactly where this is meant
+    to be seamless.
+  */
 
   /**
    * React Navigation paints its own container, scene backgrounds and transition
@@ -187,6 +206,19 @@ function RootNavigator({ fontsSettled }: { fontsSettled: boolean }) {
         */}
         <Stack.Screen name="+not-found" />
       </Stack>
+
+      {/*
+        LAST SIBLING, so it paints over the navigator and everything the
+        navigator contains. It only exists for the first second of the app,
+        never hit-tests, and unmounts itself when it is done — see the
+        component for why all three of those matter.
+
+        Mounted only once `ready` is true. Before that the OS splash is
+        still up and this would be animating underneath it, so the hold
+        would be spent where nobody can see it and the app would appear
+        mid-departure.
+      */}
+      {ready ? <LaunchVeil /> : null}
     </NavigationThemeProvider>
   );
 }
