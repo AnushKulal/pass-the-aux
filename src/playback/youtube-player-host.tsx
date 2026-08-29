@@ -71,8 +71,15 @@ const PAUSE_WATCHDOG_MS = 2_000;
 const PAUSED_POSITION_TOLERANCE_S = 0.4;
 
 /**
- * THE REASON PAUSE NEVER WORKED ON ANDROID. Four lines, and everything above
- * this point was built to survive the damage they were doing.
+ * WHY THE LIBRARY'S OWN COMMAND CHANNEL CANNOT BE TRUSTED.
+ *
+ * TRANSPORT NO LONGER GOES THROUGH HERE — `controls.play/pause` call the
+ * patched imperative methods, which use `injectJavaScript`, the one channel
+ * measured to work. This bridge is kept for the commands that still have no
+ * other route: VOLUME and `setPlaybackRate`. IT IS UNVERIFIED. Forwarding the
+ * event to where the page listens is necessary, and it may not be sufficient;
+ * a bridge alone did not fix the pause, which is why transport was moved off
+ * this path entirely rather than left depending on it.
  *
  * react-native-youtube-iframe sends every transport command as a WebView
  * message: `playVideo`, `pauseVideo`, `muteVideo`, `setVolume`,
@@ -102,27 +109,19 @@ const PAUSED_POSITION_TOLERANCE_S = 0.4;
  * dispatched straight to `window` there is not seen by a `document` listener,
  * so nothing is delivered twice.
  *
- * It also repairs two things nobody had reported yet: VOLUME and
- * `setPlaybackRate` — which is how `SyncController` absorbs small drift without
- * an audible seek. That correction has never once been applied on Android.
+ * The two commands still riding this path are VOLUME and `setPlaybackRate` —
+ * the latter being how `SyncController` absorbs small drift without an audible
+ * seek. On the evidence above that correction has never once been applied on
+ * Android, and it is not claimed to be fixed: it is merely no longer blocked by
+ * a listener on the wrong object.
  */
 const MESSAGE_BRIDGE = `
   (function () {
     if (window.__auxMessageBridge) { return; }
     window.__auxMessageBridge = true;
-
     document.addEventListener('message', function (event) {
-      console.log('[aux] document-message ' + event.data);
       window.dispatchEvent(new MessageEvent('message', { data: event.data }));
     });
-
-    // Logged AFTER the forward above and after the page's own handler, so this
-    // reports what actually reached the place the player is driven from.
-    window.addEventListener('message', function (event) {
-      console.log('[aux] window-message ' + event.data);
-    });
-
-    console.log('[aux] bridge installed, player=' + (typeof window.player));
   })();
   true;
 `;
@@ -168,7 +167,8 @@ export function YouTubePlayerHost({ visible = true }: YouTubePlayerHostProps) {
    * THE LIBRARY TREATS TRANSPORT AS AN EDGE, NOT A COMMAND. It posts
    * `playVideo`/`pauseVideo` from an effect keyed on the `play` PROP CHANGING
    * (react-native-youtube-iframe/src/YoutubeIframe.js L128-134), and its ref
-   * exposes only getters and `seekTo` — there is no imperative pause to call.
+   * shipped with only getters and `seekTo` — no imperative pause to call, which
+   * is what `patches/react-native-youtube-iframe+2.4.1.patch` adds.
    * So `setPlaying(false)` when the state already reads false is a React
    * bail-out: no re-render, no prop change, no message, nothing reaches the
    * player. Pause becomes unrepeatable.
@@ -220,6 +220,20 @@ export function YouTubePlayerHost({ visible = true }: YouTubePlayerHostProps) {
   const applyPlaying = useCallback((next: boolean) => {
     playingRef.current = next;
     setPlaying(next);
+
+    /*
+      AND SAY IT TO THE PLAYER DIRECTLY, rather than hoping the prop change
+      turns into a message that arrives.
+
+      `playVideo`/`pauseVideo` are added to the library's ref by
+      `patches/react-native-youtube-iframe+2.4.1.patch`, using
+      `injectJavaScript` exactly as its own `seekTo` does — the only channel to
+      the page that has ever been measured working. The state above still moves
+      because the rest of this component reads it; it is no longer what carries
+      the command.
+    */
+    if (next) playerRef.current?.playVideo();
+    else playerRef.current?.pauseVideo();
   }, []);
 
   /**
@@ -244,9 +258,17 @@ export function YouTubePlayerHost({ visible = true }: YouTubePlayerHostProps) {
     if (now - lastForceRef.current < FORCE_COOLDOWN_MS) return;
     lastForceRef.current = now;
 
+    /*
+      A PLAIN RE-ASSERTION NOW, where this used to flip the `play` prop to the
+      opposite value and back to manufacture an edge the library would notice.
+      That trick existed because the prop was the only lever; the injected
+      commands below are idempotent, so saying it again is simply saying it
+      again — no audible round trip through the opposite state.
+    */
     playingRef.current = want;
-    setPlaying(!want);
-    setTimeout(() => setPlaying(want), 0);
+    setPlaying(want);
+    if (want) playerRef.current?.playVideo();
+    else playerRef.current?.pauseVideo();
   }, []);
 
   const controls = useMemo<YouTubeControls>(

@@ -51,7 +51,7 @@
       "eas": {
         "projectId": "3c252219-3619-434b-9ab4-f0931d09722a"
       },
-      "patch": 20,
+      "patch": 21,
       "releaseNotes": [
         "Pause works. Android was dropping every play/pause command the player was sent - they were delivered to the wrong place in the page and silently vanished",
         "Volume and the fine drift correction were dropped the same way and now work too",
@@ -60,7 +60,7 @@
       ],
       "changelog": [
         {
-          "patch": 20,
+          "patch": 21,
           "notes": [
             "Pause works. Android was dropping every play/pause command the player was sent - they were delivered to the wrong place in the page and silently vanished",
             "Volume and the fine drift correction were dropped the same way and now work too",

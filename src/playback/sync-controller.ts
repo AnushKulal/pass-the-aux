@@ -119,8 +119,23 @@ export class SyncController {
         if (this.destroyed) return;
         await this.adapter.play();
       } else {
-        await this.adapter.pause();
+        /*
+          SEEK FIRST, PAUSE LAST, and the order is the whole point.
+
+          This used to pause and then seek, which is the intuitive order and the
+          wrong one: `seekTo` puts a player into BUFFERING, and a pause issued
+          before that is either swallowed by the transition or undone when the
+          buffer fills — the YouTube IFrame API resumes playback on a seek from
+          any state that is not already PAUSED. So the last thing the player
+          heard was "go here", and it went there playing.
+
+          Reversed, the pause is the final word. Spotify is unaffected: its seek
+          endpoint does not start playback, so pausing after it costs nothing
+          there either.
+        */
         await this.adapter.seek(target);
+        if (this.destroyed) return;
+        await this.adapter.pause();
       }
 
       if (this.destroyed) return;
