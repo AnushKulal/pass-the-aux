@@ -70,6 +70,53 @@ const PAUSE_WATCHDOG_MS = 2_000;
  */
 const PAUSED_POSITION_TOLERANCE_S = 0.4;
 
+/**
+ * THE REASON PAUSE NEVER WORKED ON ANDROID. Four lines, and everything above
+ * this point was built to survive the damage they were doing.
+ *
+ * react-native-youtube-iframe sends every transport command as a WebView
+ * message: `playVideo`, `pauseVideo`, `muteVideo`, `setVolume`,
+ * `setPlaybackRate`. Its page listens for them on WINDOW
+ * (PlayerScripts.js — `window.addEventListener('message', …)`).
+ *
+ * react-native-webview's Android implementation delivers them like this
+ * (RNCWebViewManagerImpl.kt, the `postMessage` command):
+ *
+ *     event = new MessageEvent('message', data);
+ *     document.dispatchEvent(event);
+ *
+ * `new MessageEvent(...)` defaults `bubbles` to FALSE, and the event is
+ * dispatched on DOCUMENT. A non-bubbling event on `document` never reaches a
+ * listener on `window`. So every one of those commands has been silently
+ * dropped — not failing, not erroring, simply never arriving.
+ *
+ * Only two things ever reached the player: `seekTo` and video loading, because
+ * those go through `injectJavaScript` instead. That is also why PLAY looked
+ * fine while pause did nothing — `applyTimeline` seeks before it plays, and
+ * `seekTo(s, true)` starts playback from any state that is not paused. Playback
+ * was starting as a side effect of the seek, never because `playVideo` landed.
+ *
+ * This forwards the event the WebView really sends to the place the page really
+ * listens. It is idempotent, it runs after the page's own listener is installed
+ * (`injectedJavaScript` fires on load), and iOS is unaffected: an event
+ * dispatched straight to `window` there is not seen by a `document` listener,
+ * so nothing is delivered twice.
+ *
+ * It also repairs two things nobody had reported yet: VOLUME and
+ * `setPlaybackRate` — which is how `SyncController` absorbs small drift without
+ * an audible seek. That correction has never once been applied on Android.
+ */
+const MESSAGE_BRIDGE = `
+  (function () {
+    if (window.__auxMessageBridge) { return; }
+    window.__auxMessageBridge = true;
+    document.addEventListener('message', function (event) {
+      window.dispatchEvent(new MessageEvent('message', { data: event.data }));
+    });
+  })();
+  true;
+`;
+
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
   return new Promise<T>((resolve) => {
     const timer = setTimeout(() => resolve(fallback), ms);
@@ -432,6 +479,15 @@ export function YouTubePlayerHost({ visible = true }: YouTubePlayerHostProps) {
         // Playback is driven by the room, not by the individual listener, so
         // YouTube's own transport controls would let a guest desync themselves.
         initialPlayerParams={{ controls: false, rel: false, preventFullScreen: true }}
+        /*
+          `webViewProps` is spread onto the underlying WebView BEFORE the
+          library's own `source`/`ref`/`onMessage`, so this is a supported seam
+          rather than a way to break it — and the library sets no
+          `injectedJavaScript` of its own, so nothing is being overridden.
+          See MESSAGE_BRIDGE: it is what makes play, pause, volume and the
+          drift rate-nudge reach the player at all on Android.
+        */
+        webViewProps={{ injectedJavaScript: MESSAGE_BRIDGE }}
         webViewStyle={styles.webView}
       />
     </View>

@@ -7,7 +7,7 @@
     "icon": "./assets/images/icon.png",
     "scheme": "aux",
     "userInterfaceStyle": "automatic",
-    "backgroundColor": "#0a0d14",
+    "backgroundColor": "#eceef5",
     "ios": {
       "icon": "./assets/expo.icon",
       "supportsTablet": true
@@ -36,11 +36,7 @@
         {
           "image": "./assets/images/splash-icon-light.png",
           "imageWidth": 180,
-          "backgroundColor": "#eceef5",
-          "dark": {
-            "image": "./assets/images/splash-icon.png",
-            "backgroundColor": "#0a0d14"
-          }
+          "backgroundColor": "#eceef5"
         }
       ],
       "expo-secure-store",
@@ -55,13 +51,23 @@
       "eas": {
         "projectId": "3c252219-3619-434b-9ab4-f0931d09722a"
       },
-      "patch": 18,
+      "patch": 19,
       "releaseNotes": [
-        "Pause now holds. The app checks every couple of seconds that a paused track has really stopped, and re-issues the pause if the player ignored it",
+        "Pause works. Android was dropping every play/pause command the player was sent - they were delivered to the wrong place in the page and silently vanished",
+        "Volume and the fine drift correction were dropped the same way and now work too",
         "A track running out while the Session is paused no longer switches the room back on",
         "Track search asks YouTube for music specifically and prefers the label's own audio uploads, which carry far fewer adverts"
       ],
       "changelog": [
+        {
+          "patch": 19,
+          "notes": [
+            "Pause works. Android was dropping every play/pause command the player was sent - they were delivered to the wrong place in the page and silently vanished",
+            "Volume and the fine drift correction were dropped the same way and now work too",
+            "A track running out while the Session is paused no longer switches the room back on",
+            "Track search asks YouTube for music specifically and prefers the label's own audio uploads, which carry far fewer adverts"
+          ]
+        },
         {
           "patch": 18,
           "notes": [
