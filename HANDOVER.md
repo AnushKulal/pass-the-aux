@@ -121,6 +121,18 @@ nine of them forgot to add the inset.
 
 Every one of these compiles, lints, and looks fine in review.
 
+**The YouTube player's transport is an EDGE, not a command.**
+`react-native-youtube-iframe` posts `playVideo`/`pauseVideo` from an effect keyed
+on the `play` prop CHANGING, and its ref exposes only getters and `seekTo` —
+there is no imperative pause. So `setPlaying(false)` when the state already reads
+false is a React bail-out: nothing reaches the player, and pause becomes
+unpressable. The player can get out of step on its own (a `pauseVideo` posted
+during BUFFERING is dropped; `seekTo(s, true)` starts playback from any state
+that is not PAUSED), so this is reachable in normal use. `youtube-player-host.tsx`
+now holds the desired state in a ref, reconciles against what the player reports,
+and — because a swallowed pause emits no event at all — polls `getCurrentTime`
+every 2s while paused. Anything added there must keep BOTH halves.
+
 **One `BlurTargetView` may have exactly ONE `BlurView` pointing at it.** Two of
 them killed the process — a native `SIGSEGV` on the RenderThread, 512 frames of
 `android::uirenderer::computeTransformImpl`, "likely stack overflow". Both blur
@@ -231,6 +243,34 @@ the passenger can ask for the aux, the holder can never give it.
 **Mic, deafen and per-member mute are UI-only.** The controls are real and
 correctly related — deafen forces mic off and does not auto-restore it — but
 there is no voice transport, so nobody hears anything.
+
+**The transport swallows its own failures, and an audit found five ways.** All
+verified against the files, none fixed yet — they are the reason a pause can go
+missing for reasons that have nothing to do with the player:
+
+- **No `onError` on any transport mutation** (`queries.ts` play/pause/resume/
+  seek/advance). A `room_pause` that fails on network, an expired JWT, or the
+  `not_on_aux` raise produces no toast and no log. The glyph just stays wrong.
+  `requestAux` in `room/[id].tsx` does toast its error, so the pattern exists
+  and was simply not applied here.
+- **A passenger depends entirely on realtime.** `useRoom` is `staleTime:
+  Infinity` with `refetchOnWindowFocus: false`, so a dropped `UPDATE` leaves a
+  listener playing with no path back except a socket reconnect or a remount.
+- **Last-writer-wins on `roomKeys.detail`.** The realtime echo, every RPC's
+  `onSuccess`, and `handleEnded`'s advance all `setQueryData` unconditionally,
+  ordered by network completion rather than server commit. A late echo can
+  overwrite a newer pause. Needs a monotonic version on the row.
+- **The `trackReady` gate in `session.tsx` drops transport updates** whenever
+  the resolved-track query is failing — and it retries once, then holds the
+  error for the rest of the Session. A pause does not need the track.
+- **`resync()` replays the STORED timeline**, so a client that missed a pause
+  has playback actively restarted rather than merely not stopped.
+
+**A Session can park past the end of its own track.** Advancing with an empty
+queue leaves `track_id` set and the timeline running, so every resume lands
+after the end, the video ends instantly, `handleEnded` advances, and it loops.
+Seen live while testing patch 18; it makes the Session unusable until a new
+track is queued.
 
 **Apple Music is not wired, and the reason is not "iOS only".** MusicKit JS runs
 in an Android WebView, so sign-in is possible. What blocks it: minting a
