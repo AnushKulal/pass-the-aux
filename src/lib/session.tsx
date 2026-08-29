@@ -234,11 +234,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // project and a render-phase ref write is not safe under it.
   const isHostRef = useRef(isHost);
   const userIdRef = useRef(userId);
+  /**
+   * Whether the ROOM says it is playing, for `handleEnded` to check.
+   *
+   * An ENDED event on a paused room is a bug report, not a cue to advance —
+   * see the argument in `handleEnded`.
+   */
+  const isPlayingRef = useRef(false);
 
   useEffect(() => {
     isHostRef.current = isHost;
     userIdRef.current = userId;
-  }, [isHost, userId]);
+    isPlayingRef.current = room?.is_playing === true;
+  }, [isHost, userId, room?.is_playing]);
 
   const lastAdvanceRef = useRef(0);
   const lastSyncFlagRef = useRef<{ value: boolean | null; at: number }>({ value: null, at: 0 });
@@ -352,6 +360,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
    */
   const handleEnded = useCallback(() => {
     if (!roomId || !isHostRef.current) return;
+
+    /*
+      NOT WHILE THE ROOM IS PAUSED, and this guard is not theoretical.
+
+      `room_advance` sets `is_playing = true`. Ordinarily a paused track cannot
+      reach its end, so the check looks redundant — but a player that ignored a
+      pause carries on to the end of the song while the room row says paused,
+      and this handler would then turn the room back on underneath the person
+      who had just stopped it. Their pause would come undone by the very track
+      they paused, which reads as the button not working at all.
+
+      The host-side repair for that state is in `youtube-player-host.tsx`; this
+      is the half that stops the damage spreading to everyone else in the room.
+    */
+    if (!isPlayingRef.current) return;
 
     const now = Date.now();
     if (now - lastAdvanceRef.current < ADVANCE_COOLDOWN_MS) return;

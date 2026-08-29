@@ -392,7 +392,37 @@ export async function youtubeSearch(query: string, limit: number): Promise<Provi
       part: 'snippet',
       type: 'video',
       q: query,
-      maxResults: String(limit),
+      /*
+        OVER-FETCH, THEN LET THE CALLER PREFER.
+
+        `search-tracks` floats "Artist - Topic" uploads to the top of whatever
+        comes back, and a sort cannot promote a result that was never returned:
+        asking for exactly `limit` items means the page is usually full of
+        official music videos and the auto-generated audio never appears at all.
+        Fetching a wider page gives that preference something to work with.
+
+        It is close to free. `search.list` costs 100 quota units REGARDLESS of
+        `maxResults`, and the `videos.list` call below is 1 unit, so the whole
+        widening costs a single extra unit against a 10,000/day allowance. 50 is
+        the API's own ceiling.
+      */
+      maxResults: String(Math.min(50, Math.max(limit, limit * 2))),
+      /*
+        CATEGORY 10 IS MUSIC, and this is the honest half of the answer to
+        "why am I getting adverts".
+
+        Nothing here can remove an advert — YouTube serves those from inside its
+        own player and blocking them violates the terms this app has to keep.
+        What CAN be changed is WHICH video gets queued, and it matters a lot:
+        auto-generated "Artist - Topic" uploads are the label's own audio
+        delivered through YouTube's music catalogue and carry far less
+        advertising than an official music video on a monetised channel.
+
+        Without this filter the query is a general web-video search that happens
+        to contain a song title, so reaction videos, lyric re-uploads and
+        adverts-in-waiting all compete on equal terms.
+      */
+      videoCategoryId: '10',
       // Anything we cannot embed is unplayable in the app, so it is not a
       // candidate no matter how well it scores.
       videoEmbeddable: 'true',

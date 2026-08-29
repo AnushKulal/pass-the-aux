@@ -34,6 +34,16 @@ import { registerYouTubeControls, type YouTubeControls, type YouTubeHostBridge }
  */
 const POSITION_READ_TIMEOUT_MS = 1_200;
 
+/**
+ * How long to wait before forcing the transport again.
+ *
+ * `forceTransport` below fixes a disagreement between what the room wants and
+ * what the player is doing. If the forced command is ALSO ignored, retrying on
+ * every state event would be a loop against a player that is not listening, so
+ * each attempt is given time to land and be reported before another is made.
+ */
+const FORCE_COOLDOWN_MS = 1_500;
+
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
   return new Promise<T>((resolve) => {
     const timer = setTimeout(() => resolve(fallback), ms);
@@ -67,6 +77,41 @@ export function YouTubePlayerHost({ visible = true }: YouTubePlayerHostProps) {
 
   const [videoId, setVideoId] = useState<string | undefined>(undefined);
   const [playing, setPlaying] = useState(false);
+
+  /**
+   * WHAT THE ROOM WANTS, in a ref as well as in state — and the fix for a bug
+   * that made the pause button look broken.
+   *
+   * THE LIBRARY TREATS TRANSPORT AS AN EDGE, NOT A COMMAND. It posts
+   * `playVideo`/`pauseVideo` from an effect keyed on the `play` PROP CHANGING
+   * (react-native-youtube-iframe/src/YoutubeIframe.js L128-134), and its ref
+   * exposes only getters and `seekTo` — there is no imperative pause to call.
+   * So `setPlaying(false)` when the state already reads false is a React
+   * bail-out: no re-render, no prop change, no message, nothing reaches the
+   * player. Pause becomes unrepeatable.
+   *
+   * That matters because the player can start playing WITHOUT US ASKING, and
+   * then the two disagree forever. Two ways in, both real:
+   *
+   *   - `pauseVideo` arriving while the player is BUFFERING is dropped, and the
+   *     player resumes when the buffer fills. `applyTimeline` pauses and then
+   *     seeks (sync-controller.ts), and the seek re-buffers — so the pause is
+   *     issued into exactly the window that swallows it.
+   *   - `seekTo(s, true)` from any state that is not PAUSED starts playback,
+   *     which is what the pending-seek below does out of VIDEO_CUED.
+   *
+   * Measured on the device: room paused, transport showing the play glyph,
+   * `dumpsys audio` reporting the app's player `state:started` for as long as
+   * you care to watch, and pressing pause again doing nothing at all.
+   *
+   * `playing` alone cannot fix this — a callback closes over a stale copy and
+   * React collapses a no-change write. So the desired state lives here, is
+   * readable synchronously, and `handleChangeState` compares it against what
+   * the player REPORTS and corrects the difference.
+   */
+  const playingRef = useRef(false);
+  /** When the last correction was issued, so a deaf player is not hammered. */
+  const lastForceRef = useRef(0);
   const [volume, setVolume] = useState(100);
   const [rate, setRate] = useState(1);
   const [boxWidth, setBoxWidth] = useState(0);
@@ -81,11 +126,51 @@ export function YouTubePlayerHost({ visible = true }: YouTubePlayerHostProps) {
    */
   const pendingSeekRef = useRef<number | null>(null);
 
+  /**
+   * Set the transport we want, in both places, always together.
+   *
+   * Every write to `playing` goes through here. The ref is what callbacks read
+   * and what the reconciler compares against, so a `setPlaying` that skipped it
+   * would put the two out of step — which is the class of bug this exists to
+   * end, reintroduced one line lower down.
+   */
+  const applyPlaying = useCallback((next: boolean) => {
+    playingRef.current = next;
+    setPlaying(next);
+  }, []);
+
+  /**
+   * Make the player do `want` even though it has already been asked.
+   *
+   * The library only sends a transport command when the `play` prop CHANGES, so
+   * re-issuing the same value is a no-op and there is no imperative escape
+   * hatch on its ref. The only lever left is to produce an edge: flip the prop
+   * to the opposite value for one commit and back.
+   *
+   * The two writes must land in SEPARATE commits — batched into one, React sees
+   * `false -> false` and the effect never runs, which is the original bug with
+   * extra steps. Hence the timeout.
+   *
+   * It is inaudible in the case it exists for: correcting a player that is
+   * PLAYING when the room is paused sends `playVideo` (already playing, no
+   * effect) and then `pauseVideo` from a settled PLAYING state, which is
+   * precisely the state the API honours.
+   */
+  const forceTransport = useCallback((want: boolean) => {
+    const now = Date.now();
+    if (now - lastForceRef.current < FORCE_COOLDOWN_MS) return;
+    lastForceRef.current = now;
+
+    playingRef.current = want;
+    setPlaying(!want);
+    setTimeout(() => setPlaying(want), 0);
+  }, []);
+
   const controls = useMemo<YouTubeControls>(
     () => ({
       load(nextVideoId, startSeconds, autoplay) {
         lastSecondsRef.current = startSeconds;
-        setPlaying(autoplay);
+        applyPlaying(autoplay);
 
         if (loadedIdRef.current === nextVideoId) {
           // Same video re-cued (a replay, or a listener rejoining mid-track):
@@ -102,11 +187,11 @@ export function YouTubePlayerHost({ visible = true }: YouTubePlayerHostProps) {
       },
 
       play() {
-        setPlaying(true);
+        applyPlaying(true);
       },
 
       pause() {
-        setPlaying(false);
+        applyPlaying(false);
       },
 
       seek(seconds) {
@@ -138,13 +223,13 @@ export function YouTubePlayerHost({ visible = true }: YouTubePlayerHostProps) {
       },
 
       unload() {
-        setPlaying(false);
+        applyPlaying(false);
         loadedIdRef.current = null;
         pendingSeekRef.current = null;
         lastSecondsRef.current = 0;
       },
     }),
-    []
+    [applyPlaying]
   );
 
   // Registration is an effect rather than a call inside onReady so that a
@@ -183,8 +268,48 @@ export function YouTubePlayerHost({ visible = true }: YouTubePlayerHostProps) {
       pendingSeekRef.current = null;
       lastSecondsRef.current = pending;
       playerRef.current?.seekTo(pending, true);
+      // That seek can itself start playback — `seekTo(s, true)` only leaves the
+      // player alone when it was already PAUSED. Whatever it did will be
+      // reported as another state change, and the reconciler below will be
+      // looking. Return rather than judging mid-transition.
+      return;
     }
-  }, []);
+
+    /*
+      THE RECONCILER, AND THE REASON THE PAUSE BUTTON WORKS.
+
+      Everything above this line asks the player to do things. Nothing until now
+      ever checked whether it did them, and the player has its own opinions: a
+      `pauseVideo` posted while it is BUFFERING is dropped, and a `seekTo` can
+      start playback that nobody asked for. Once the two disagree, the app
+      cannot recover on its own — `setPlaying(false)` against a state that is
+      already false is a React no-op, so pause stops being pressable.
+
+      This is the only place the real state is read back, so it is the only
+      place the disagreement can be seen. `PLAYER_STATES` here is the player's
+      own report, `playingRef` is what the room asked for, and a difference
+      between them is corrected rather than logged.
+
+      BUFFERING and VIDEO_CUED are deliberately not judged: both are transitions
+      on the way to an answer, and correcting during one would fight a command
+      that has not finished arriving.
+    */
+    if (state === PLAYER_STATES.PLAYING && !playingRef.current) {
+      forceTransport(false);
+      return;
+    }
+
+    /*
+      The mirror case, and it is not symmetric in importance: a room that is
+      playing while this device sits paused is silent for one listener while
+      everyone else hears the track. The drift loop cannot fix it — it seeks and
+      nudges, but it never re-issues play — so without this the only cure is
+      leaving and rejoining.
+    */
+    if (state === PLAYER_STATES.PAUSED && playingRef.current) {
+      forceTransport(true);
+    }
+  }, [forceTransport]);
 
   // The library hands us a string ('embed_not_allowed', 'video_not_found', …);
   // the adapter maps both that and the web player's numeric codes.

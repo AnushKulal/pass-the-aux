@@ -161,7 +161,17 @@ async function search(
     if (token) return (await spotifySearch(token, query, limit)).map(toSearchResult);
   }
 
-  return (await youtubeSearch(query, limit)).sort(topicFirst).map(toSearchResult);
+  /*
+    SORT THEN CUT, in that order.
+
+    `youtubeSearch` now over-fetches so this preference has material to work
+    with — slicing before the sort would throw away the Topic uploads it exists
+    to promote, which is the same as not having it.
+  */
+  return (await youtubeSearch(query, limit))
+    .sort(topicFirst)
+    .slice(0, limit)
+    .map(toSearchResult);
 }
 
 /**
