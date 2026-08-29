@@ -55,13 +55,21 @@
       "eas": {
         "projectId": "3c252219-3619-434b-9ab4-f0931d09722a"
       },
-      "patch": 17,
+      "patch": 18,
       "releaseNotes": [
-        "Pause actually stops the music. The player could swallow a pause and nothing ever checked - the app now watches what the player is really doing and corrects it",
+        "Pause now holds. The app checks every couple of seconds that a paused track has really stopped, and re-issues the pause if the player ignored it",
         "A track running out while the Session is paused no longer switches the room back on",
         "Track search asks YouTube for music specifically and prefers the label's own audio uploads, which carry far fewer adverts"
       ],
       "changelog": [
+        {
+          "patch": 18,
+          "notes": [
+            "Pause now holds. The app checks every couple of seconds that a paused track has really stopped, and re-issues the pause if the player ignored it",
+            "A track running out while the Session is paused no longer switches the room back on",
+            "Track search asks YouTube for music specifically and prefers the label's own audio uploads, which carry far fewer adverts"
+          ]
+        },
         {
           "patch": 17,
           "notes": [

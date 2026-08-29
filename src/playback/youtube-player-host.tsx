@@ -44,6 +44,32 @@ const POSITION_READ_TIMEOUT_MS = 1_200;
  */
 const FORCE_COOLDOWN_MS = 1_500;
 
+/**
+ * How often to check that a paused player is actually silent.
+ *
+ * `handleChangeState` catches a player that CHANGES into playing, and it is not
+ * enough: the failure this exists for produces no event at all. A `pauseVideo`
+ * the player ignores leaves it in PLAYING, which it was already in, so nothing
+ * is reported and the listener never fires. Verified on the device — the room
+ * paused, `dumpsys audio` reporting `state:started` indefinitely, and not one
+ * state change to react to.
+ *
+ * So while the room wants silence, ASK. Two seconds is frequent enough that
+ * nobody sits through a chorus they stopped, and rare enough to be nothing next
+ * to the 3s drift loop that runs the whole time a Session is playing.
+ */
+const PAUSE_WATCHDOG_MS = 2_000;
+
+/**
+ * How far the position may move between two checks and still count as paused.
+ *
+ * `getCurrentTime` is answered from inside the WebView and the two samples are
+ * not exactly `PAUSE_WATCHDOG_MS` apart, so a paused player can report a few
+ * tens of milliseconds of movement. This is well under a real second of
+ * playback and well over that noise.
+ */
+const PAUSED_POSITION_TOLERANCE_S = 0.4;
+
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
   return new Promise<T>((resolve) => {
     const timer = setTimeout(() => resolve(fallback), ms);
@@ -246,6 +272,59 @@ export function YouTubePlayerHost({ visible = true }: YouTubePlayerHostProps) {
       bridgeRef.current = null;
     };
   }, [ready, controls]);
+
+  /**
+   * THE WATCHDOG, and it is the half that actually fixes the pause button.
+   *
+   * `handleChangeState` can only correct a disagreement the player ANNOUNCES.
+   * The failure mode here announces nothing: a `pauseVideo` that is ignored
+   * leaves the player in PLAYING, the state it was already in, so no event is
+   * emitted and no listener runs. Measured — room paused, transport showing the
+   * play glyph, `dumpsys audio` reporting `state:started` for as long as anyone
+   * watched, and total silence from `onChangeState`.
+   *
+   * The only way to know is to ask. While the room wants silence, sample the
+   * position: if it moved, the player is playing whatever it was told, and the
+   * pause is re-issued as a prop edge.
+   *
+   * It runs ONLY while paused, which is exactly when the drift loop in
+   * `SyncController` is stopped — so the two never overlap and the player is
+   * never being polled by both.
+   *
+   * An advert is deliberately invisible to this: `getCurrentTime` reports the
+   * VIDEO's position, which does not advance while a pre-roll plays, so the
+   * watchdog stays quiet rather than firing commands at a player that is not
+   * listening yet. When the advert ends and the track starts, the position
+   * moves and the pause lands.
+   */
+  useEffect(() => {
+    if (playing || !ready) return;
+
+    let cancelled = false;
+    let last: number | null = null;
+
+    const timer = setInterval(() => {
+      const player = playerRef.current;
+      if (!player) return;
+
+      void withTimeout(player.getCurrentTime(), POSITION_READ_TIMEOUT_MS, -1).then((seconds) => {
+        if (cancelled || !Number.isFinite(seconds) || seconds < 0) return;
+
+        // Only a FORWARD move counts. A seek can jump the position backwards
+        // while the player is genuinely paused, and treating that as playback
+        // would fire a correction at a player already doing what was asked.
+        if (last !== null && seconds > last + PAUSED_POSITION_TOLERANCE_S) {
+          forceTransport(false);
+        }
+        last = seconds;
+      });
+    }, PAUSE_WATCHDOG_MS);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [playing, ready, forceTransport]);
 
   const handleReady = useCallback(() => {
     readyRef.current = true;
