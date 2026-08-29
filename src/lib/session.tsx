@@ -125,6 +125,20 @@ const SYNC_FLAG_INTERVAL_MS = 15_000;
 const CLOCK_NEVER_SYNCED = 'never-synced';
 
 /**
+ * Sentinel for "this device is playing audio".
+ *
+ * `audioOffFor` holds the room this device has been SILENCED for, so the answer
+ * resets on its own the moment a different Session is entered — the same trick
+ * `clockFor` uses, and for the same reason: a boolean would need an effect to
+ * reset it, and a synchronous setState in an effect cascades renders.
+ *
+ * It is per-Session and deliberately NOT persisted. Someone who silenced their
+ * phone at a party and rejoined from home a week later would otherwise sit in
+ * silence wondering what was broken.
+ */
+const AUDIO_ON = 'audio-on';
+
+/**
  * Writes to this device's single `room_participants` row, serialized.
  *
  * Module-level because it is genuinely one row per device, not per component.
@@ -161,6 +175,22 @@ export type SessionValue = {
   minimized: boolean;
   /** True once the clock offset has been measured for the entered room. */
   clockReady: boolean;
+  /**
+   * Is THIS DEVICE meant to make sound?
+   *
+   * SPEAKER MODE lives here. In a room, one phone goes to the speaker and
+   * everyone else is a remote: they queue, chat and watch the roster, and their
+   * own phone plays nothing. That is the only arrangement in which a listener
+   * with no music account hears the party without adverts — they are not
+   * playing anything, they are in the room where it is playing.
+   *
+   * When false NOTHING is attached: no adapter, no player, no WebView, no drift
+   * loop. It is not a mute, which would leave a YouTube embed grinding through
+   * advert breaks in silence.
+   */
+  audioHere: boolean;
+  /** Turn this device's audio on or off for the Session it is currently in. */
+  setAudioHere: (next: boolean) => void;
   /**
    * Enter `target`, leaving whatever Session was active first. Navigates
    * nowhere — routing is the caller's business, and entering without navigating
@@ -219,6 +249,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
    */
   const [clockFor, setClockFor] = useState<string>(CLOCK_NEVER_SYNCED);
   const clockReady = roomId !== null && clockFor === roomId;
+
+  /**
+   * Which room this device has been SILENCED for. See `AUDIO_ON`.
+   *
+   * Derived rather than stored as a boolean so that entering a different
+   * Session restores sound without an effect having to remember to.
+   */
+  const [audioOffFor, setAudioOffFor] = useState<string>(AUDIO_ON);
+  const audioHere = audioOffFor !== roomId;
+
+  const setAudioHere = useCallback(
+    (next: boolean) => setAudioOffFor(next ? AUDIO_ON : (roomId ?? AUDIO_ON)),
+    [roomId]
+  );
 
   const roomQuery = useRoom(roomId);
   const room = roomQuery.data ?? null;
@@ -393,7 +437,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!roomId) return;
+    /*
+      NOTHING IS ATTACHED WHEN THIS DEVICE IS SILENT, and that is the point of
+      speaker mode rather than a detail of it. A mute would leave the adapter
+      loaded and, on the YouTube path, a WebView grinding through advert breaks
+      into a muted output. Not attaching means there is no player, no advert, no
+      drift loop and no battery cost — the phone is a remote control.
+
+      The cleanup below detaches when this flips, so turning audio off mid-song
+      stops it here and leaves the room playing for everyone else.
+    */
+    if (!roomId || !audioHere) return;
 
     const { attachRoom, detach } = usePlayback.getState();
     attachRoom(roomId, undefined, {
@@ -408,12 +462,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return () => {
       detach();
     };
-  }, [roomId, handleEnded, reportDrift, handleError]);
+  }, [roomId, audioHere, handleEnded, reportDrift, handleError]);
 
   // ------------------------------------------------------- 3. apply timeline
 
   useEffect(() => {
-    if (!clockReady || !room) return;
+    // `audioHere` guards this as well as the attachment: with nothing attached,
+    // applying a timeline would build a controller for a device that is
+    // deliberately silent and start it chasing a position nobody can hear.
+    if (!clockReady || !room || !audioHere) return;
 
     // The resolved track lags the row by one fetch whenever the Session moves to
     // a new song. Applying the new timeline with the OLD track's provider ref
@@ -423,7 +480,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     if (!trackReady) return;
 
     void usePlayback.getState().applyRoomRow(room, track);
-  }, [clockReady, room, track]);
+  }, [clockReady, room, track, audioHere]);
 
   // ------------------------------------------------- 4. realtime on the row
 
@@ -513,7 +570,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     // times out into an error nobody is looking at — cleared by the re-anchor
     // below when the user comes back. Hoisting the player host above the
     // navigator removes that too; see the header.
-    if (!roomId) return;
+    if (!roomId || !audioHere) return;
 
     const subscription = AppState.addEventListener('change', (state) => {
       if (state !== 'active') return;
@@ -525,12 +582,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     });
 
     return () => subscription.remove();
-  }, [roomId]);
+  }, [roomId, audioHere]);
 
   // ------------------------------------------- 7. re-anchor on gaining a view
 
   useEffect(() => {
-    if (!roomId || !presented) return;
+    if (!roomId || !presented || !audioHere) return;
 
     /*
       Something is rendering the Session again, which means a NEW audio surface
@@ -548,7 +605,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       await ensureFreshClock();
       await usePlayback.getState().resync();
     })();
-  }, [roomId, presented]);
+  }, [roomId, presented, audioHere]);
 
   // -------------------------------------------------- publish the sync flag
 
@@ -601,11 +658,24 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       active: roomId !== null,
       minimized: roomId !== null && !presented,
       clockReady,
+      audioHere,
+      setAudioHere,
       enter,
       leave,
       retainPresentation,
     }),
-    [roomId, loungeId, name, presented, clockReady, enter, leave, retainPresentation]
+    [
+      roomId,
+      loungeId,
+      name,
+      presented,
+      clockReady,
+      audioHere,
+      setAudioHere,
+      enter,
+      leave,
+      retainPresentation,
+    ]
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

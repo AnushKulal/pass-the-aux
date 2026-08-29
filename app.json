@@ -51,14 +51,21 @@
       "eas": {
         "projectId": "3c252219-3619-434b-9ab4-f0931d09722a"
       },
-      "patch": 21,
+      "patch": 22,
       "releaseNotes": [
-        "Pause works. Android was dropping every play/pause command the player was sent - they were delivered to the wrong place in the page and silently vanished",
-        "Volume and the fine drift correction were dropped the same way and now work too",
-        "A track running out while the Session is paused no longer switches the room back on",
-        "Track search asks YouTube for music specifically and prefers the label's own audio uploads, which carry far fewer adverts"
+        "Speaker mode: turn off Audio on this phone and it becomes a remote - you can queue and chat, and the music comes from whoever has the speaker",
+        "With audio off nothing loads at all, so no adverts, no buffering and no battery spent on a phone that is not playing",
+        "It resets to on when you leave a Session, so nobody stays silent by accident"
       ],
       "changelog": [
+        {
+          "patch": 22,
+          "notes": [
+            "Speaker mode: turn off Audio on this phone and it becomes a remote - you can queue and chat, and the music comes from whoever has the speaker",
+            "With audio off nothing loads at all, so no adverts, no buffering and no battery spent on a phone that is not playing",
+            "It resets to on when you leave a Session, so nobody stays silent by accident"
+          ]
+        },
         {
           "patch": 21,
           "notes": [

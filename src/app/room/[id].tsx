@@ -192,6 +192,8 @@ import {
   Plus,
   Radio,
   RotateCw,
+  Volume2,
+  VolumeX,
   X,
 } from 'lucide-react-native';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -318,7 +320,7 @@ export default function RoomScreen() {
     `enter()`: doing that from a second place would be two claims on one
     membership row.
   */
-  const { leave } = useSession();
+  const { leave, audioHere, setAudioHere } = useSession();
 
   const lounge = useLounge(room?.lounge_id ?? null);
   const queue = useQueue(roomId);
@@ -643,8 +645,20 @@ export default function RoomScreen() {
    * `visible` false does not unmount it: the host parks itself at 1×1 with zero
    * opacity and keeps playing.
    */
-  const videoOnStage = provider === 'youtube' && stage === 'now';
-  const media = useMemo(() => <YouTubePlayerHost visible={videoOnStage} />, [videoOnStage]);
+  /*
+    SPEAKER MODE UNMOUNTS THE PLAYER, it does not hide or mute it.
+
+    `visible={false}` parks the host at 1x1 and keeps it playing, which is right
+    when the artwork is off screen and wrong here: a silenced phone would still
+    be loading video, still sitting through advert breaks, still burning battery
+    and data to produce nothing. `audioHere` is the one condition under which no
+    host is rendered at all.
+  */
+  const videoOnStage = audioHere && provider === 'youtube' && stage === 'now';
+  const media = useMemo(
+    () => (audioHere ? <YouTubePlayerHost visible={videoOnStage} /> : null),
+    [audioHere, videoOnStage]
+  );
 
   const sessionName = room?.name ?? 'Session';
   const loungeName = lounge.data?.name ?? 'Lounge';
@@ -819,6 +833,8 @@ export default function RoomScreen() {
                 take it. Gating this on a track would have hidden the app's
                 namesake control at the only moment it is obviously useful.
               */}
+              <AudioHere on={audioHere} onChange={setAudioHere} />
+
               <PassTheAux
                 isHost={isHost}
                 isLoading={isLoading && !room}
@@ -1375,6 +1391,71 @@ type PassTheAuxProps = {
  * carried over unchanged. The moment a transfer RPC exists this becomes a live
  * control and nothing else about the row has to change.
  */
+/**
+ * SPEAKER MODE, from the point of view of the phone in your hand.
+ *
+ * The whole feature is one switch, and the reason it is worth a component is
+ * that the copy has to carry the idea: turning this off does not mute you out
+ * of the party, it makes your phone a remote for a party you are standing in.
+ *
+ * WHY IT EXISTS AT ALL. A listener with no music account is routed to the
+ * YouTube embed, and the free YouTube embed carries adverts — there is no
+ * setting anywhere that removes them, because ad-free is the thing a
+ * subscription buys. But a person in the same room as the speaker does not need
+ * a source at all. They are not playing anything; they can hear it. Off is
+ * therefore the only ad-free arrangement that costs a guest nothing.
+ *
+ * NOT `danger` AND NOT `live`. This is not destructive and it is not a state of
+ * the world — it is a plain preference about one device, so it takes the
+ * ordinary surface and lets the label do the work.
+ */
+const AudioHere = memo(function AudioHere({
+  on,
+  onChange,
+}: {
+  on: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  const C = useColors();
+
+  return (
+    <Pressable
+      accessibilityRole="switch"
+      accessibilityState={{ checked: on }}
+      accessibilityLabel="Play audio on this phone"
+      accessibilityHint={
+        on
+          ? 'Turn off to make this phone a remote. The music keeps playing in the room.'
+          : 'Turn on to play the Session through this phone as well.'
+      }
+      onPress={() => onChange(!on)}
+      style={({ pressed }) => [
+        styles.pass,
+        {
+          backgroundColor: pressed ? C.surface2 : C.surface,
+          borderColor: C.rule,
+        },
+      ]}>
+      <View style={styles.audioText}>
+        <Text numberOfLines={1} style={[styles.passLabel, { color: C.ink }]}>
+          {on ? 'AUDIO ON THIS PHONE' : 'REMOTE ONLY'}
+        </Text>
+        <Text numberOfLines={2} style={[styles.audioHint, { color: C.ink3 }]}>
+          {on
+            ? 'Playing here. Turn off if someone else has the speaker.'
+            : 'Silent. Queue and chat from here; the room has the sound.'}
+        </Text>
+      </View>
+
+      {on ? (
+        <Volume2 size={18} strokeWidth={2} color={C.ink2} />
+      ) : (
+        <VolumeX size={18} strokeWidth={2} color={C.ink3} />
+      )}
+    </Pressable>
+  );
+});
+
 const PassTheAux = memo(function PassTheAux({
   isHost,
   isLoading,
@@ -1835,6 +1916,21 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.extrabold,
     fontSize: 12,
     letterSpacing: tracking(12, 0.03),
+  },
+  /*
+    The speaker-mode row is taller than `pass` because it carries a second line.
+    It reuses `pass` for the shape so the two sit as siblings rather than as two
+    unrelated controls that happen to be stacked.
+  */
+  audioText: {
+    flex: 1,
+    minWidth: 0,
+    gap: 3,
+    paddingVertical: Space.sm,
+  },
+  audioHint: {
+    ...Type.body(11),
+    lineHeight: 15,
   },
 
   // ------------------------------------------------------------ lobby bar
