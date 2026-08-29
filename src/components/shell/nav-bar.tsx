@@ -34,37 +34,38 @@
  *     route stays registered for deep links
  *
  * ---------------------------------------------------------------------------
- * ANDROID BLURS NOTHING UNTIL SOMETHING PASSES `blurTarget`, AND THIS IS NOT A
- * TUNING PROBLEM.
+ * ANDROID DOES NOT BLUR, AND THE ATTEMPT TO MAKE IT WAS WORSE THAN THE GAP.
  *
- * expo-blur 57 rebuilt the Android path: `BlurView` no longer samples the window
- * on its own, it blurs a `BlurTargetView` that is handed to it by ref. Without
- * one the native side calls `blurView.setBlurEnabled(false)` and paints a flat
- * `setBackgroundColor(tint)` instead — no blur at any intensity — and the
- * library logs it on mount:
+ * This header used to end with three lines of wiring for `blurTarget` — the
+ * `BlurTargetView` ref expo-blur 57 needs before its Android path will blur
+ * anything. That wiring shipped, and two things came back from the device:
  *
- *   "You have selected the "dimezisBlurView" blur method, but the `blurTarget`
- *    prop has not been configured. The blur view will fallback to "none"…"
+ *   1. IT STILL DID NOT BLUR. Measured, not assumed: a screenshot with the
+ *      Feed's body text crossing the capsule's top edge shows the letterforms
+ *      EQUALLY SHARP inside and outside it. A 16px radius would have smeared
+ *      them. The reported symptom — "the nav bar is very clear leading to the
+ *      background to be more visible" — was accurate, and it was accurate
+ *      before and after the target was wired.
+ *   2. IT KILLED THE APP once the return bar asked for the same target. Native
+ *      SIGSEGV on the RenderThread, 512 frames of hwui's `computeTransformImpl`;
+ *      the two blur views pumped each other's damage until the recursive walk
+ *      ran out of stack. Full tombstone in '(tabs)/_layout.tsx'.
  *
- * That is the real answer to "the nav bar is clearly using glass ui right so i
- * want a little blurring effect on this": on the device there has been no blur
- * to see, only `C.nav` at 72% over sharp content.
+ * So the capsule stops asking. On Android the frost is built out of OPACITY,
+ * which is a thing the device actually renders: `C.dock` rather than `C.nav`,
+ * at full strength. iOS and web are untouched and still get a real blur — they
+ * never needed a target, which is also why neither could form the loop.
  *
- * The wiring cannot live in this file — the target has to WRAP the content being
- * blurred, which is the shell in `src/app/(tabs)/_layout.tsx`. This component
- * takes the ref as an optional prop and degrades honestly without it (see
- * `blurred` below), so lighting it up is three lines there:
- *
- *   const target = useRef<View | null>(null);
- *   <BlurTargetView ref={target} style={styles.shell}>  …AmbientGround + Tabs…
- *   tabBar={(props) => <NavBar {...props} blurTarget={target} />}
+ * IF ANDROID BLUR IS EVER REVIVED, the rule that has to survive is: EXACTLY ONE
+ * BlurView per BlurTargetView. The second one is not a degraded blur, it is a
+ * crash.
  */
 
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { Compass, House, MessageCircle, Plus, User, type LucideIcon } from 'lucide-react-native';
-import { memo, useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
@@ -157,25 +158,30 @@ const GLASS: GlassSpec = Platform.select({
 });
 
 /**
- * What to ask for when the blur is going to be refused (Android, no target).
+ * ANDROID: THE FROST IS OPACITY, BECAUSE OPACITY IS WHAT THIS PLATFORM DRAWS.
  *
- * There `intensity` only sets a flat overlay's alpha and `tint` has nothing to
- * be translucent ONTO, so the tuning above would paint a darker slab and thin
- * the one layer holding the icons up. These are the numbers the bar has always
- * shipped with: unchanged appearance, and no pretending.
+ * `tint: 1` is the load-bearing number and it is not a fallback's apology.
+ * `GLASS` above multiplies the fill DOWN so the blur underneath shows through;
+ * here there is no blur underneath, so multiplying down only lets the feed
+ * through and thins the one layer holding the icons up. That was the report:
+ * body text legible straight through the bar, icons competing with it.
+ *
+ * Paired with `C.dock` in the component — near-opaque by design, the token for
+ * chrome with nothing softening what is behind it — this reads as a frosted
+ * slab rather than as a window.
+ *
+ * The intensities are ZERO on purpose. On Android `intensity` here only sets a
+ * flat overlay the native side paints across the whole view, ON TOP of our
+ * fill, which would lighten the capsule by an amount no token accounts for.
+ * With nothing to blur it is not a material, it is an untracked second layer,
+ * so the fill is left as the only thing painting the surface and `C.dock` means
+ * exactly what the palette says it means.
  */
-const NO_BLUR: GlassSpec = { dark: 40, light: 60, tint: 1 };
+const NO_BLUR: GlassSpec = { dark: 0, light: 0, tint: 1 };
 
-export type NavBarProps = BottomTabBarProps & {
-  /**
-   * The `BlurTargetView` Android should blur as this capsule's backdrop —
-   * expo-blur 57 does nothing without it. Optional because only the tabs shell
-   * can supply it; see the header for the wiring.
-   */
-  blurTarget?: RefObject<View | null>;
-};
+export type NavBarProps = BottomTabBarProps;
 
-export function NavBar({ state, navigation, blurTarget }: NavBarProps) {
+export function NavBar({ state, navigation }: NavBarProps) {
   const C = useColors();
   const { scheme } = useTheme();
   const insets = useSafeAreaInsets();
@@ -185,13 +191,21 @@ export function NavBar({ state, navigation, blurTarget }: NavBarProps) {
 
   const dark = scheme === 'dark';
   /*
-    Is there going to be a real blur behind this glass? iOS and web always
-    blur; Android only with a target. When there is none, the capsule keeps the
-    FULL `C.nav` — a thin tint over sharp, unblurred content is not glass, it is
-    a bar you can read the feed through.
+    Is there a real blur behind this glass? On iOS and web, yes — the platform
+    blurs its own backdrop and there is nothing to wire up. On Android, NO, and
+    that is measured rather than assumed: see the header.
   */
-  const blurred = Platform.OS !== 'android' || blurTarget != null;
+  const blurred = Platform.OS !== 'android';
   const glass = blurred ? GLASS : NO_BLUR;
+  /*
+    `nav` WHEN THERE IS A BLUR, `dock` WHEN THERE IS NOT, and the palette says
+    why in its own docstrings: `nav` is translucent because it sits over a
+    blurred image, `dock` is near-opaque because it sits on artwork with nothing
+    softening what is underneath. Android is now the second case, so it takes
+    the second token — anything thinner and the feed reads straight through the
+    bar, which is exactly the report this changed for.
+  */
+  const fill = blurred ? C.nav : C.dock;
 
   const current = state.routes[state.index]?.name ?? '';
 
@@ -275,13 +289,28 @@ export function NavBar({ state, navigation, blurTarget }: NavBarProps) {
       <BlurView
         intensity={dark ? glass.dark : glass.light}
         tint={dark ? 'dark' : 'light'}
-        // `blurMethod`, not `experimentalBlurMethod` — the latter is deprecated
-        // in expo-blur 57 and console.warns on every mount. Asked for only when
-        // a target exists, because requesting it without one warns as well and
-        // then silently falls back to exactly what 'none' does anyway.
-        blurMethod={blurred && Platform.OS === 'android' ? 'dimezisBlurView' : 'none'}
-        blurTarget={blurTarget}
-        style={[styles.capsule, { borderColor: C.chromeBorder }, floating(C)]}>
+        /*
+          'none' UNCONDITIONALLY. It was 'dimezisBlurView' on Android with a
+          `blurTarget`, and that combination produced no blur AND crashed the
+          process once a second view asked for it. iOS and web ignore this prop
+          entirely — their blur comes from `intensity` and the platform's own
+          backdrop — so nothing is lost where something was actually happening.
+        */
+        blurMethod="none"
+        /*
+          THE FILL GOES ON THIS VIEW WHEN THERE IS NO BLUR, not on the child
+          layer below. Two reasons, and the second is not optional: Android's
+          `elevation` shadow — what `floating()` returns there — is taken from
+          this view's OUTLINE, and a transparent background yields no outline
+          and therefore no shadow at all. Painting it here is also one view
+          fewer, since the child only exists to sit ON TOP of a blur.
+        */
+        style={[
+          styles.capsule,
+          { borderColor: C.chromeBorder },
+          blurred ? null : { backgroundColor: fill },
+          floating(C),
+        ]}>
         {/*
           The tint rides ON TOP of the blur rather than being handed to BlurView
           as a background, because the blur is what the glass is and the colour
@@ -289,10 +318,15 @@ export function NavBar({ state, navigation, blurTarget }: NavBarProps) {
           and the whole capsule reads as fog.
 
           `opacity` rather than a second, paler colour: it multiplies the token
-          down without inventing one, so light mode still gets its own
-          `C.nav` — near-white at .78 — and the correction travels with it.
+          down without inventing one, so light mode still gets its own fill and
+          the correction travels with it. On Android `glass.tint` is 1 and the
+          fill is `C.dock`, so nothing is multiplied down at all — there is no
+          blur under it to reveal, and thinning the one layer holding the icons
+          up is the whole complaint.
         */}
-        <View style={[styles.tint, { backgroundColor: C.nav, opacity: glass.tint }]} />
+        {blurred ? (
+          <View style={[styles.tint, { backgroundColor: fill, opacity: glass.tint }]} />
+        ) : null}
 
         {/*
           Above the tint, below the cells: it is a mark ON the glass, and a cell

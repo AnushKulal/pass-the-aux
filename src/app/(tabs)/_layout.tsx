@@ -19,8 +19,6 @@
  * unrecoverable without reinstalling. A gate has to lead somewhere.
  */
 
-import { BlurTargetView } from 'expo-blur';
-import { useRef } from 'react';
 import { Redirect } from 'expo-router';
 import { Tabs } from 'expo-router/js-tabs';
 import { StyleSheet, View } from 'react-native';
@@ -35,53 +33,49 @@ import { useColors } from '@/lib/theme-context';
 
 
 
+/*
+ * ─── THERE IS NO `BlurTargetView` HERE ANY MORE, AND THAT IS THE FIX ────────
+ *
+ * This shell used to be one, with a ref handed to `NavBar` so expo-blur 57's
+ * Android path had something to blur, and later to `MiniSession` as well so the
+ * two pieces of bottom chrome would be one material. A comment stood here in
+ * capitals calling that "ONE TARGET, TWO PIECES OF GLASS". Both halves of that
+ * idea turned out to be wrong, and the device said so:
+ *
+ * 1. THE SECOND CONSUMER KILLED THE PROCESS. Minimising a Session crashed the
+ *    app every time — not a JavaScript error, a native fault:
+ *
+ *      pid …, tid …, name: RenderThread  >>> com.anushkulal.aux <<<
+ *      signal 11 (SIGSEGV), code 2 (SEGV_ACCERR)
+ *      Cause: stack pointer is close to top of stack; likely stack overflow.
+ *      512 total frames, every one of them:
+ *        libhwui.so  android::uirenderer::computeTransformImpl(DirtyStack*, Matrix4*)
+ *
+ *    `computeTransformImpl` walks hwui's damage stack by recursing on `prev`
+ *    until it reaches the sentinel, and it never got there because the stack
+ *    kept growing. Both BlurViews lived INSIDE the target and redrew FROM it,
+ *    so each one's repaint dirtied the target and the dirtied target repainted
+ *    the other, roughly 58 times a second, until the recursive walk ran out of
+ *    RenderThread stack. It took about six seconds, which is why it presented
+ *    as "it crashes when I minimise" and not as anything to do with drawing.
+ *
+ * 2. IT WAS NEVER BLURRING ANYWAY. Measured on the device after the crash was
+ *    fixed: a screenshot with the Feed's body text crossing the capsule's top
+ *    edge shows the letterforms equally sharp inside and outside it. A 16px
+ *    radius would have smeared them. So the target bought a crash and nothing
+ *    else, and "the nav bar is very clear, the background is visible through
+ *    it" was an accurate report of what the glass had always been.
+ *
+ * So the Android blur is gone on purpose and the frost is built out of opacity,
+ * which this platform does render — `C.dock` at full strength, see 'nav-bar.tsx'
+ * and 'mini-session.tsx'. iOS and web still blur for real; they never used a
+ * target, which is also why neither could form the loop.
+ *
+ * IF IT IS EVER REVIVED: exactly ONE BlurView may point at a BlurTargetView.
+ * The second one is not a degraded blur, it is a crash.
+ */
 export default function TabsLayout() {
   const C = useColors();
-  /**
-   * What Android blurs behind the navigation capsule.
-   *
-   * `expo-blur`'s Android path does not sample the window the way iOS does — it
-   * blurs a `BlurTargetView` handed to it by ref, and given none it silently
-   * renders a flat translucent slab over sharp content. That is not a subtle
-   * degradation: it is exactly the "the nav bar is clearly using glass ui, i
-   * want a little blurring effect" complaint, and the capsule was shipping it.
-   *
-   * The ref has to live HERE rather than in `nav-bar.tsx`, because the target
-   * must WRAP the content being blurred — the ambient ground and the navigator
-   * — and the capsule is a sibling of both, not their parent.
-   *
-   * ─── EXACTLY ONE BLURVIEW MAY POINT AT THIS TARGET. IT IS NOT A STYLE RULE ──
-   *
-   * This comment used to read "ONE TARGET, TWO PIECES OF GLASS", because
-   * `MiniSession` was handed the same ref so the return bar would be made of the
-   * same material as the capsule under it. That shipped, and it CRASHED THE
-   * PROCESS every time a Session was minimised — not a JavaScript error, a
-   * native SIGSEGV on the RenderThread:
-   *
-   *   signal 11 (SIGSEGV), code 2 (SEGV_ACCERR)
-   *   Cause: stack pointer is close to top of stack; likely stack overflow.
-   *   512 total frames, every one of them:
-   *     libhwui.so  android::uirenderer::computeTransformImpl(DirtyStack*, Matrix4*)
-   *
-   * `computeTransformImpl` walks hwui's damage stack by recursing on `prev`
-   * until it reaches the sentinel. It never got there because the stack kept
-   * growing: BOTH BlurViews live inside the target AND redraw from it, so each
-   * one's repaint dirties the target and the dirtied target repaints the other.
-   * The two of them pump the damage chain roughly 58 times a second until the
-   * recursive walk runs out of RenderThread stack — about six seconds after the
-   * bar appears, which is why it read as "it crashes when I minimise" rather
-   * than as anything to do with drawing.
-   *
-   * One consumer cannot do this: the library skips the blur view it is drawing
-   * for, so a lone BlurView inside its own target is a closed, terminating loop.
-   * That is why the capsule has been solid since build 33 and why the second
-   * piece of glass was the whole bug.
-   *
-   * So the ref goes to `NavBar` and to NOTHING ELSE, and `MiniSession` no longer
-   * accepts one. The bar falls back to a solid capsule on Android — a real cost,
-   * argued in 'mini-session.tsx' — and the alternative was an app that dies.
-   */
-  const blurTarget = useRef<View | null>(null);
   const { session, loading } = useAuth();
   const { profileDone, hydrating: gateHydrating } = useLocalProfile();
 
@@ -96,7 +90,7 @@ export default function TabsLayout() {
   if (!profileDone) return <Redirect href="/(auth)/profile-setup" />;
 
   return (
-    <BlurTargetView ref={blurTarget} style={[styles.shell, { backgroundColor: C.bg }]}>
+    <View style={[styles.shell, { backgroundColor: C.bg }]}>
       {/*
         Behind everything, drawn once for the whole shell rather than per
         screen, so the blobs stay put across navigation instead of restarting
@@ -107,7 +101,7 @@ export default function TabsLayout() {
           re-entering on each screen. */}
       <UpdateBanner />
       <Tabs
-        tabBar={(props) => <NavBar {...props} blurTarget={blurTarget} />}
+        tabBar={(props) => <NavBar {...props} />}
         screenOptions={{
           // Each screen renders its own header.
           headerShown: false,
@@ -214,7 +208,7 @@ export default function TabsLayout() {
         re-introduced by someone tidying up.
       */}
       <MiniSession />
-    </BlurTargetView>
+    </View>
   );
 }
 

@@ -55,12 +55,21 @@
       "eas": {
         "projectId": "3c252219-3619-434b-9ab4-f0931d09722a"
       },
-      "patch": 15,
+      "patch": 16,
       "releaseNotes": [
-        "Fixes the crash when you minimise a Session - the return bar and the navigation bar were both asking Android to blur the same thing, which killed the app a few seconds later",
-        "On Android the return bar is a solid capsule instead of glass. That is what stops the crash"
+        "The navigation bar and the return bar are frosted now instead of see-through - the feed no longer reads straight through them",
+        "The hard grey rectangle under both bars is gone; the shadow follows their rounded edge",
+        "Android never actually blurred, so the glass is built out of opacity, which the phone really draws"
       ],
       "changelog": [
+        {
+          "patch": 16,
+          "notes": [
+            "The navigation bar and the return bar are frosted now instead of see-through - the feed no longer reads straight through them",
+            "The hard grey rectangle under both bars is gone; the shadow follows their rounded edge",
+            "Android never actually blurred, so the glass is built out of opacity, which the phone really draws"
+          ]
+        },
         {
           "patch": 15,
           "notes": [

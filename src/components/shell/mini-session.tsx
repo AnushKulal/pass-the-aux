@@ -150,15 +150,17 @@ const GLASS: GlassSpec = Platform.select({
 });
 
 /**
- * What to ask for on the platform that is not allowed to blur.
+ * What to ask for on the platform that does not blur.
  *
- * `tint: 1` is the load-bearing number. A thin tint over UNBLURRED content is
- * not degraded glass, it is a strip you can read the feed through — so the
- * fallback commits and paints the full `C.nav`. With the hairline border and
- * `floating()` shadow it keeps, that reads as a solid capsule, which is a
- * material, rather than as a blur that failed.
+ * `tint: 1` is the load-bearing number, and it is paired with `C.dock` in the
+ * component rather than `C.nav`. A thin tint over UNBLURRED content is not
+ * degraded glass, it is a strip you can read the feed through — and worse, the
+ * thing behind it becomes unreadable too, so the transparency costs legibility
+ * twice and buys nothing. With the hairline border and `floating()` shadow it
+ * keeps, the near-opaque fill reads as a frosted capsule: a material, rather
+ * than a blur that failed.
  */
-const NO_BLUR: GlassSpec = { dark: 40, light: 60, tint: 1 };
+const NO_BLUR: GlassSpec = { dark: 0, light: 0, tint: 1 };
 
 /**
  * The gate, and it is a separate component on purpose.
@@ -227,6 +229,15 @@ const MiniSessionBar = memo(function MiniSessionBar({ roomId, name }: BarProps) 
   */
   const blurred = Platform.OS !== 'android';
   const glass = blurred ? GLASS : NO_BLUR;
+  /*
+    `nav` over a blur, `dock` over nothing — the palette's own distinction, and
+    the return bar is the second case on Android. It was reported as "the
+    nothing playing on the session is also very clear leading to not being able
+    to read a content on the card": a translucent bar does not just fail to hide
+    what is behind it, it makes BOTH illegible, because the card's heading and
+    the bar's own title end up at similar weight on top of each other.
+  */
+  const fill = blurred ? C.nav : C.dock;
 
   /*
     PLAYING, not merely entered. The pulse is the only accent on this bar and it
@@ -329,7 +340,19 @@ const MiniSessionBar = memo(function MiniSessionBar({ roomId, name }: BarProps) 
             */
             blurMethod="none"
             tint={dark ? 'dark' : 'light'}
-            style={[styles.bar, { borderColor: C.chromeBorder }, floating(C)]}>
+            /*
+              The fill rides on THIS view when there is no blur, not on the
+              layer below — `floating()` returns an Android `elevation`, whose
+              shadow is taken from this view's outline, and a transparent
+              background has no outline and casts nothing. It is also what
+              removed the hard grey rectangle that was showing under the bar.
+            */
+            style={[
+              styles.bar,
+              { borderColor: C.chromeBorder },
+              blurred ? null : { backgroundColor: fill },
+              floating(C),
+            ]}>
             {/*
               The tint rides ON TOP of the blur rather than being handed to
               BlurView as a background — underneath, the tint becomes the thing
@@ -337,13 +360,15 @@ const MiniSessionBar = memo(function MiniSessionBar({ roomId, name }: BarProps) 
               multiplies `C.nav` down without inventing a second token, so light
               mode still resolves its own near-white.
             */}
-            <View
-              style={[
-                styles.tint,
-                PointerEvents.none,
-                { backgroundColor: C.nav, opacity: glass.tint },
-              ]}
-            />
+            {blurred ? (
+              <View
+                style={[
+                  styles.tint,
+                  PointerEvents.none,
+                  { backgroundColor: fill, opacity: glass.tint },
+                ]}
+              />
+            ) : null}
 
             <View style={[styles.tile, { backgroundColor: C.artwork, borderColor: C.rule }]}>
               {track?.artwork_url ? (

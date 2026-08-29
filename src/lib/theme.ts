@@ -723,6 +723,33 @@ export function pressedSoft(c: Palette): object {
  * side is a bar again.
  */
 export function floating(c: Palette): object {
+  /*
+    ANDROID GETS `elevation`, AND THIS IS THE ONE HELPER THAT SPLITS.
+
+    Reported as "a grey border at the bottom … grey sharp edges to the bottom
+    end" on both pieces of bottom chrome, and a screenshot at 4x confirms it: a
+    hard-edged grey band starting exactly at the capsule's bottom edge and
+    running straight past where the corner curves away. The Feed's cards, which
+    use `raised()` with almost identical numbers, are soft and correct — so it
+    is not that Android cannot draw this shadow.
+
+    The difference is `overflow: 'hidden'`, which BOTH bars need and no card
+    has: the outset shadow gets cut by the view's own rectangular clip instead
+    of fading out, which is what turns a 40px blur into a hard edge.
+
+    `elevation` is drawn by the PARENT from the view's outline, so the child's
+    clip cannot touch it, and the outline follows the border radius — a soft,
+    properly rounded shadow. It costs the tint: Android's elevation shadow is
+    the platform's own grey and ignores `shadowDrop`. That is a smaller loss
+    than a rectangle under a capsule.
+
+    IT NEEDS A NON-TRANSPARENT BACKGROUND ON THE SAME VIEW. Android takes the
+    outline from the background drawable, and a fully transparent one yields no
+    shadow at all. Both callers paint their fill on the view carrying this, for
+    exactly that reason.
+  */
+  if (Platform.OS === 'android') return { elevation: 14 };
+
   return {
     boxShadow: [
       { offsetX: 0, offsetY: 18, blurRadius: 40, spreadDistance: -12, color: c.shadowDrop },
