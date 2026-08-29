@@ -56,12 +56,35 @@
  * The pulse answers the only question the bar is being asked, which is whether
  * the room is still alive.
  *
- * ─── It is glass, like the nav ──────────────────────────────────────────────
+ * ─── It is glass everywhere except Android, and that is a bug's headstone ────
  *
- * Same material, same per-platform tuning, and the same Android caveat:
- * expo-blur 57 blurs a `BlurTargetView` handed to it by ref and paints a flat
- * tint given none. The target belongs to the tabs shell — it has to WRAP the
- * content being blurred — so it arrives as a prop exactly as `NavBar` takes it.
+ * IT USED TO TAKE THE NAV'S `blurTarget`, AND THAT CRASHED THE PROCESS.
+ *
+ * expo-blur 57's Android path blurs a `BlurTargetView` handed to it by ref, and
+ * this bar was given the same one the capsule uses so the two would be made of
+ * one material. Both BlurViews live inside that target and both redraw from it,
+ * so each one's repaint dirtied the target and the dirtied target repainted the
+ * other — 58 times a second, lengthening hwui's damage chain until the
+ * RenderThread's recursive walk of it ran out of stack:
+ *
+ *   signal 11 (SIGSEGV) · Cause: likely stack overflow
+ *   512 frames of android::uirenderer::computeTransformImpl
+ *
+ * It took about six seconds from the bar appearing, so it presented as "the app
+ * crashes when I minimise" with nothing in the JavaScript log at all. A single
+ * BlurView on a target is safe — the library skips the view it is drawing for,
+ * which closes the loop — so the capsule keeps the real blur and this bar does
+ * not ask for one. See '(tabs)/_layout.tsx' for the full tombstone.
+ *
+ * THE COST IS REAL AND IS NOT BEING HIDDEN: on Android this is a solid capsule
+ * sitting 10px above a genuinely blurred one, and two pieces of one stack of
+ * chrome disagreeing about their material is exactly what the old comment here
+ * warned would read as broken. It is still the right trade, because the other
+ * side of it is an app that dies. `NO_BLUR` below is what makes the fallback a
+ * deliberate object — full `C.nav`, its own border and its own shadow — rather
+ * than a thin tint over sharp content, which is what actually looks like a
+ * mistake. iOS and web are untouched: neither uses a target, so neither can
+ * form the loop.
  *
  * THE GLASS NUMBERS ARE DUPLICATED FROM 'nav-bar.tsx' RATHER THAN IMPORTED, and
  * that is a deliberate cost rather than an oversight: they are private to that
@@ -77,7 +100,7 @@ import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { ChevronUp } from 'lucide-react-native';
-import { memo, type RefObject } from 'react';
+import { memo } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -126,16 +149,16 @@ const GLASS: GlassSpec = Platform.select({
   default: { dark: 70, light: 70, tint: 0.35 },
 });
 
-/** What to ask for when the blur is going to be refused (Android, no target). */
+/**
+ * What to ask for on the platform that is not allowed to blur.
+ *
+ * `tint: 1` is the load-bearing number. A thin tint over UNBLURRED content is
+ * not degraded glass, it is a strip you can read the feed through — so the
+ * fallback commits and paints the full `C.nav`. With the hairline border and
+ * `floating()` shadow it keeps, that reads as a solid capsule, which is a
+ * material, rather than as a blur that failed.
+ */
 const NO_BLUR: GlassSpec = { dark: 40, light: 60, tint: 1 };
-
-export type MiniSessionProps = {
-  /**
-   * The `BlurTargetView` Android should blur as this bar's backdrop. Optional
-   * for the same reason `NavBar`'s is: only the tabs shell can supply one.
-   */
-  blurTarget?: RefObject<View | null>;
-};
 
 /**
  * The gate, and it is a separate component on purpose.
@@ -145,23 +168,22 @@ export type MiniSessionProps = {
  * nothing is minimised — which is most of the time — rather than mounting a
  * bar's worth of selectors above every screen in the app and hiding the output.
  */
-export function MiniSession({ blurTarget }: MiniSessionProps) {
+export function MiniSession() {
   const { minimized, roomId, name } = useSession();
 
   // `roomId` is non-null whenever `minimized` is true — the provider defines it
   // that way — but the type does not say so and the tap needs a real id.
   if (!minimized || roomId === null) return null;
 
-  return <MiniSessionBar roomId={roomId} name={name} blurTarget={blurTarget} />;
+  return <MiniSessionBar roomId={roomId} name={name} />;
 }
 
 type BarProps = {
   roomId: string;
   name: string | null;
-  blurTarget?: RefObject<View | null>;
 };
 
-const MiniSessionBar = memo(function MiniSessionBar({ roomId, name, blurTarget }: BarProps) {
+const MiniSessionBar = memo(function MiniSessionBar({ roomId, name }: BarProps) {
   const C = useColors();
   const { scheme } = useTheme();
   const insets = useSafeAreaInsets();
@@ -197,12 +219,13 @@ const MiniSessionBar = memo(function MiniSessionBar({ roomId, name, blurTarget }
 
   const dark = scheme === 'dark';
   /*
-    Is there going to be a real blur behind this glass? iOS and web always blur;
-    Android only with a target. When there is none the bar keeps the FULL
-    `C.nav` — a thin tint over sharp, unblurred content is not glass, it is a
-    strip you can read the feed through.
+    NEVER ON ANDROID, and the header carries the tombstone. iOS and web blur the
+    window itself with no target involved, so neither can join the capsule in
+    the redraw loop that killed the RenderThread; Android's only route to a real
+    blur is the shared `BlurTargetView`, which is precisely the thing that must
+    have exactly one consumer.
   */
-  const blurred = Platform.OS !== 'android' || blurTarget != null;
+  const blurred = Platform.OS !== 'android';
   const glass = blurred ? GLASS : NO_BLUR;
 
   /*
@@ -297,12 +320,14 @@ const MiniSessionBar = memo(function MiniSessionBar({ roomId, name, blurTarget }
           style={({ pressed }) => (classic && pressed ? styles.held : null)}>
           <BlurView
             intensity={dark ? glass.dark : glass.light}
-            // `blurMethod`, not `experimentalBlurMethod`: the latter is
-            // deprecated in expo-blur 57 and warns on every mount. Asked for
-            // only when a target exists, because requesting it without one
-            // warns as well and then falls back to what 'none' already does.
-            blurMethod={blurred && Platform.OS === 'android' ? 'dimezisBlurView' : 'none'}
-            blurTarget={blurTarget}
+            /*
+              'none' UNCONDITIONALLY, and there is no `blurTarget` to go with it.
+              Asking for 'dimezisBlurView' without a target only warns on every
+              mount and then falls back to this anyway, and asking for it WITH
+              one is the crash. On iOS and web this prop is ignored — the blur
+              there comes from `intensity` and the platform's own backdrop.
+            */
+            blurMethod="none"
             tint={dark ? 'dark' : 'light'}
             style={[styles.bar, { borderColor: C.chromeBorder }, floating(C)]}>
             {/*

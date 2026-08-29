@@ -121,6 +121,18 @@ nine of them forgot to add the inset.
 
 Every one of these compiles, lints, and looks fine in review.
 
+**One `BlurTargetView` may have exactly ONE `BlurView` pointing at it.** Two of
+them killed the process — a native `SIGSEGV` on the RenderThread, 512 frames of
+`android::uirenderer::computeTransformImpl`, "likely stack overflow". Both blur
+views sat inside the target and redrew from it, so each repaint dirtied the
+target and the dirtied target repainted the other, growing hwui's damage chain
+~58 times a second until its recursive walk ran out of stack. It took about six
+seconds, and there is **nothing in the JavaScript log** — `tsc`, `eslint`, the
+web export and a web render of the component were all clean. Reproduce and read
+it with `adb logcat`, not with the bundler. Fixed in patch 15 by giving the nav
+capsule the only target and letting the return bar fall back to a solid capsule
+on Android.
+
 **Reanimated layout animations render invisible on web.** `entering={FadeIn}`
 marks a view `visibility: hidden` until its animation runs, and on
 react-native-web it never runs — leaving content that reports correct colour,

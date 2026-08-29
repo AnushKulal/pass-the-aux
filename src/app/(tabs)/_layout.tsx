@@ -50,11 +50,36 @@ export default function TabsLayout() {
    * must WRAP the content being blurred — the ambient ground and the navigator
    * — and the capsule is a sibling of both, not their parent.
    *
-   * ONE TARGET, TWO PIECES OF GLASS. `MiniSession` below takes the same ref.
-   * Without it Android would paint the return bar as a flat slab 10px above a
-   * genuinely blurred capsule — the two halves of one stack of chrome
-   * disagreeing about what material they are made of, which reads as broken far
-   * more obviously than either being flat on its own.
+   * ─── EXACTLY ONE BLURVIEW MAY POINT AT THIS TARGET. IT IS NOT A STYLE RULE ──
+   *
+   * This comment used to read "ONE TARGET, TWO PIECES OF GLASS", because
+   * `MiniSession` was handed the same ref so the return bar would be made of the
+   * same material as the capsule under it. That shipped, and it CRASHED THE
+   * PROCESS every time a Session was minimised — not a JavaScript error, a
+   * native SIGSEGV on the RenderThread:
+   *
+   *   signal 11 (SIGSEGV), code 2 (SEGV_ACCERR)
+   *   Cause: stack pointer is close to top of stack; likely stack overflow.
+   *   512 total frames, every one of them:
+   *     libhwui.so  android::uirenderer::computeTransformImpl(DirtyStack*, Matrix4*)
+   *
+   * `computeTransformImpl` walks hwui's damage stack by recursing on `prev`
+   * until it reaches the sentinel. It never got there because the stack kept
+   * growing: BOTH BlurViews live inside the target AND redraw from it, so each
+   * one's repaint dirties the target and the dirtied target repaints the other.
+   * The two of them pump the damage chain roughly 58 times a second until the
+   * recursive walk runs out of RenderThread stack — about six seconds after the
+   * bar appears, which is why it read as "it crashes when I minimise" rather
+   * than as anything to do with drawing.
+   *
+   * One consumer cannot do this: the library skips the blur view it is drawing
+   * for, so a lone BlurView inside its own target is a closed, terminating loop.
+   * That is why the capsule has been solid since build 33 and why the second
+   * piece of glass was the whole bug.
+   *
+   * So the ref goes to `NavBar` and to NOTHING ELSE, and `MiniSession` no longer
+   * accepts one. The bar falls back to a solid capsule on Android — a real cost,
+   * argued in 'mini-session.tsx' — and the alternative was an app that dies.
    */
   const blurTarget = useRef<View | null>(null);
   const { session, loading } = useAuth();
@@ -182,8 +207,13 @@ export default function TabsLayout() {
         It renders itself only when a Session is minimised; mounting it
         unconditionally is what keeps the arrival animation and the reserve
         arithmetic in one place instead of spread across a conditional here.
+
+        NO `blurTarget`, AND THAT IS LOAD-BEARING RATHER THAN AN OMISSION. It
+        took one, it crashed the process, and the argument is at the top of this
+        file. `MiniSession` does not accept the prop any more, so this cannot be
+        re-introduced by someone tidying up.
       */}
-      <MiniSession blurTarget={blurTarget} />
+      <MiniSession />
     </BlurTargetView>
   );
 }
